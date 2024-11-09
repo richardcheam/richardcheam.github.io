@@ -8,9 +8,9 @@
 
 # Basic Site Settings
 locale                   : "en-US"
-title                    : "Richard's"
+title                    : "Home"
 title_separator          : "-"
-name                     : &name "Richard's"
+name                     : &name "Home"
 description              : &description "personal description"
 url                      : https://richardcheam.github.io # the base hostname & protocol for your site e.g. "https://mmistakes.github.io"
 baseurl                  : "" # the subpath of your site, e.g. "/blog"
@@ -25,7 +25,7 @@ author:
   name             : "Richard CHEAM"
   pronouns         : # example: "she/her"  
   bio              : "Engineering/Master's student in Data Science"
-  location         : "France:fr:"
+  location         : "France"
   employer         : "ENSIIE x Université Paris-Saclay"
   uri              : # URL
   email            : "" 
@@ -57,7 +57,7 @@ author:
   keybase          : # Username
   instagram        : # Username
   lastfm           : # Username
-  linkedin         : "Richard CHEAM"
+  linkedin         : "https://www.linkedin.com/in/richard-cheam/"
   mastodon         : # URL
   medium           : # URL
   pinterest        : # Username
