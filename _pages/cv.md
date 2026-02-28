@@ -1,64 +1,35 @@
 ---
-layout: archive
+layout: single
 title: "CV"
 permalink: /cv/
-author_profile: true
+author_profile: false
 redirect_from:
   - /resume
 ---
 
-{% include base_path %}
+## Profile
 
-Education
-======
-* Ph.D in Version Control Theory, GitHub University, 2018 (expected)
-* M.S. in Jekyll, GitHub University, 2014
-* B.S. in GitHub, GitHub University, 2012
+Engineering master's student focused on data science and machine learning systems.
+Interested in bridging research ideas with reliable production delivery.
 
-Work experience
-======
-* Spring 2024: Academic Pages Collaborator
-  * Github University
-  * Duties includes: Updates and improvements to template
-  * Supervisor: The Users
+## Education
 
-* Fall 2015: Research Assistant
-  * Github University
-  * Duties included: Merging pull requests
-  * Supervisor: Professor Hub
+- **ENSIIE x Universite Paris-Saclay** - Engineering master's track in Data Science (ongoing)
 
-* Summer 2015: Research Assistant
-  * Github University
-  * Duties included: Tagging issues
-  * Supervisor: Professor Git
-  
-Skills
-======
-* Skill 1
-* Skill 2
-  * Sub-skill 2.1
-  * Sub-skill 2.2
-  * Sub-skill 2.3
-* Skill 3
+## Experience
 
-Publications
-======
-  <ul>{% for post in site.publications reversed %}
-    {% include archive-single-cv.html %}
-  {% endfor %}</ul>
-  
-Talks
-======
-  <ul>{% for post in site.talks reversed %}
-    {% include archive-single-talk-cv.html  %}
-  {% endfor %}</ul>
-  
-Teaching
-======
-  <ul>{% for post in site.teaching reversed %}
-    {% include archive-single-cv.html %}
-  {% endfor %}</ul>
-  
-Service and leadership
-======
-* Currently signed in to 43 different slack teams
+- **Data Science Projects (Academic and Personal)**
+  Built end-to-end ML workflows: data collection, modeling, evaluation, and deployment-oriented reporting.
+- **Software Engineering Practice**
+  Developed full-stack project components with focus on maintainability, API design, and automation.
+
+## Skills
+
+- **Languages:** Python, SQL, JavaScript
+- **Data & ML:** pandas, scikit-learn, model evaluation, feature engineering
+- **Engineering:** Git, Linux, REST APIs, reproducible project structure
+
+## Links
+
+- GitHub: [github.com/richardcheam](https://github.com/richardcheam)
+- LinkedIn: [linkedin.com/in/richard-cheam](https://www.linkedin.com/in/richard-cheam)
