@@ -9,7 +9,7 @@ A minimal Jekyll website for GitHub Pages.
 - `_data/navigation.yml`: top navigation links
 - `_pages/`: page content (`about`, `projects`, `cv`, `contact`, `404`)
 - `assets/css/main.scss`: all styling (including light/dark mode)
-- `images/`: static images (`favicon.ico`, `profile.png`)
+- `images/`: static images (`profile.png`)
 
 ## How pages work
 
