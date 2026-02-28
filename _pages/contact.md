@@ -4,9 +4,10 @@ title: "Contact"
 permalink: /contact/
 ---
 
-If you want to collaborate on data science, machine learning, or product-focused engineering work, reach out.
+If you would like to discuss Data Science, ML/AI engineering, research collaborations, or job opportunities, feel free to contact me.
 
-- LinkedIn: [linkedin.com/in/richard-cheam](https://www.linkedin.com/in/richard-cheam)
+- Email: [richard.cheam@etu.u-paris.fr](mailto:richard.cheam@etu.u-paris.fr)
+- Phone: +33 7 85 89 86 17
 - GitHub: [github.com/richardcheam](https://github.com/richardcheam)
-
-I usually reply within a few days.
+- LinkedIn: [Richard Cheam](https://www.linkedin.com/in/richard-cheam)
+- Location: Paris, France
