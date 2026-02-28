@@ -1,8 +1,7 @@
 ---
-layout: single
+layout: default
 title: "Projects"
 permalink: /projects/
-author_profile: false
 ---
 
 <p class="minimal-intro">A selected set of projects across machine learning, NLP, and data engineering.</p>

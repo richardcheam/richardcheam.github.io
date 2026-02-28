@@ -1,31 +1,99 @@
----
-layout: compress
----
-
-{% include base_path %}
-
 <!doctype html>
-<html lang="{{ site.locale | slice: 0,2 }}" class="no-js">
+<html lang="{{ site.locale | default: 'en' }}">
   <head>
-    {% include head.html %}
-    {% include head/custom.html %}
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% if page.url == '/' %}{{ site.title }}{% else %}{{ page.title }} | {{ site.title }}{% endif %}</title>
+    <meta name="description" content="{{ page.excerpt | default: site.description | strip_html | strip_newlines | escape }}">
+    <link rel="icon" href="{{ '/images/favicon.ico' | relative_url }}">
+    <meta name="theme-color" content="#ffffff">
+    <link rel="stylesheet" href="{{ '/assets/css/main.css' | relative_url }}">
+    <script>
+      (function () {
+        var root = document.documentElement;
+        var key = "theme";
+        var saved = null;
+
+        try {
+          saved = localStorage.getItem(key);
+        } catch (e) {
+          saved = null;
+        }
+
+        if (saved === "light" || saved === "dark") {
+          root.setAttribute("data-theme", saved);
+        }
+
+        function isDarkNow() {
+          var explicit = root.getAttribute("data-theme");
+          if (explicit === "light") return false;
+          if (explicit === "dark") return true;
+          return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+        }
+
+        function updateThemeColor() {
+          var meta = document.querySelector('meta[name="theme-color"]');
+          if (!meta) return;
+          meta.setAttribute("content", isDarkNow() ? "#000000" : "#ffffff");
+        }
+
+        document.addEventListener("DOMContentLoaded", function () {
+          var toggle = document.getElementById("theme-toggle");
+          if (!toggle) return;
+
+          function updateToggleText() {
+            toggle.textContent = isDarkNow() ? "Light" : "Dark";
+          }
+
+          updateToggleText();
+          updateThemeColor();
+
+          toggle.addEventListener("click", function () {
+            var next = isDarkNow() ? "light" : "dark";
+            root.setAttribute("data-theme", next);
+            try {
+              localStorage.setItem(key, next);
+            } catch (e) {}
+            updateToggleText();
+            updateThemeColor();
+          });
+
+          var media = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)");
+          if (media && media.addEventListener) {
+            media.addEventListener("change", function () {
+              var explicit = root.getAttribute("data-theme");
+              if (!explicit) {
+                updateToggleText();
+                updateThemeColor();
+              }
+            });
+          }
+        });
+      })();
+    </script>
   </head>
-
   <body>
+    <header class="site-header">
+      <div class="site-header__inner">
+        <a class="site-title" href="{{ '/' | relative_url }}">{{ site.title }}</a>
+        <nav class="site-nav" aria-label="Primary">
+          {% for link in site.data.navigation.main %}
+            <a href="{{ link.url | relative_url }}">{{ link.title }}</a>
+          {% endfor %}
+        </nav>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle color theme">Dark</button>
+      </div>
+    </header>
 
-    {% include browser-upgrade.html %}
-    {% include masthead.html %}
+    <main class="site-main">
+      {% if page.url != '/' and page.title %}
+        <h1>{{ page.title }}</h1>
+      {% endif %}
+      {{ content }}
+    </main>
 
-    {{ content }}
-
-    <div class="page__footer">
-      <footer>
-        {% include footer/custom.html %}
-        {% include footer.html %}
-      </footer>
-    </div>
-
-    {% include scripts.html %}
-
+    <footer class="site-footer">
+      <p>&copy; {{ site.time | date: '%Y' }} {{ site.title }}.</p>
+    </footer>
   </body>
 </html>

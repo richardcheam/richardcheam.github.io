@@ -1,10 +1,7 @@
 ---
+layout: default
 permalink: /
 title: "Richard Cheam"
-author_profile: false
-redirect_from:
-  - /about/
-  - /about.html
 ---
 
 <div class="minimal-hero">

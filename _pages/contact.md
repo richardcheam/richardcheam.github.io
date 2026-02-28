@@ -1,8 +1,7 @@
 ---
-layout: single
+layout: default
 title: "Contact"
 permalink: /contact/
-author_profile: false
 ---
 
 If you want to collaborate on data science, machine learning, or product-focused engineering work, reach out.

@@ -1,10 +1,7 @@
 ---
-layout: single
+layout: default
 title: "CV"
 permalink: /cv/
-author_profile: false
-redirect_from:
-  - /resume
 ---
 
 ## Profile

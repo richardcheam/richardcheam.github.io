@@ -3,56 +3,16 @@
 
 @import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;700&display=swap");
 
-/*
- *    Minimal Mistakes Jekyll Theme
- *
- *  - Michael Rose
- *  - mademistakes.com
- *  - https://twitter.com/mmistakes
- *
-*/
-
-@import "vendor/breakpoint/breakpoint"; // media query mixins
-@import "variables";
-@import "mixins";
-@import "vendor/susy/susy";
-
-@import "reset";
-@import "base";
-
-@import "utilities";
-@import "animations";
-@import "tables";
-@import "buttons";
-@import "notices";
-@import "masthead";
-@import "navigation";
-@import "footer";
-@import "syntax";
-
-@import "forms";
-
-@import "page";
-@import "archive";
-@import "sidebar";
-
-@import "vendor/font-awesome/fontawesome";
-@import "vendor/font-awesome/solid";
-@import "vendor/font-awesome/brands";
-@import "vendor/magnific-popup/magnific-popup";
-@import "print";
-
 :root {
   color-scheme: light dark;
   --bg: #ffffff;
   --surface: #ffffff;
   --ink: #000000;
-  --ink-soft: #141414;
+  --ink-soft: #161616;
   --muted: #5f5f5f;
   --stroke: #d8d8d8;
   --accent: #000000;
   --accent-contrast: #ffffff;
-  --masthead-bg: rgba(255, 255, 255, 0.92);
   --wash: rgba(0, 0, 0, 0.04);
   --shadow: rgba(0, 0, 0, 0.1);
   --radius: 14px;
@@ -68,7 +28,6 @@
     --stroke: #2d2d2d;
     --accent: #ffffff;
     --accent-contrast: #000000;
-    --masthead-bg: rgba(0, 0, 0, 0.92);
     --wash: rgba(255, 255, 255, 0.05);
     --shadow: rgba(255, 255, 255, 0.08);
   }
@@ -83,7 +42,6 @@ html[data-theme="dark"] {
   --stroke: #2d2d2d;
   --accent: #ffffff;
   --accent-contrast: #000000;
-  --masthead-bg: rgba(0, 0, 0, 0.92);
   --wash: rgba(255, 255, 255, 0.05);
   --shadow: rgba(255, 255, 255, 0.08);
 }
@@ -92,26 +50,42 @@ html[data-theme="light"] {
   --bg: #ffffff;
   --surface: #ffffff;
   --ink: #000000;
-  --ink-soft: #141414;
+  --ink-soft: #161616;
   --muted: #5f5f5f;
   --stroke: #d8d8d8;
   --accent: #000000;
   --accent-contrast: #ffffff;
-  --masthead-bg: rgba(255, 255, 255, 0.92);
   --wash: rgba(0, 0, 0, 0.04);
   --shadow: rgba(0, 0, 0, 0.1);
 }
 
+* {
+  box-sizing: border-box;
+}
+
 html,
 body {
+  margin: 0;
+  padding: 0;
   background: var(--bg);
 }
 
 body {
   color: var(--ink);
   font-family: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
+  line-height: 1.6;
   background-image: linear-gradient(180deg, var(--wash), transparent 35%);
   transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+a {
+  color: var(--ink);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+a:hover {
+  opacity: 0.78;
 }
 
 h1,
@@ -119,8 +93,8 @@ h2,
 h3,
 h4 {
   color: var(--ink);
-  font-weight: 700;
   letter-spacing: -0.02em;
+  line-height: 1.2;
 }
 
 p,
@@ -128,36 +102,45 @@ li {
   color: var(--ink-soft);
 }
 
-.masthead {
-  border-bottom: 1px solid var(--stroke);
-  background: var(--masthead-bg);
-  backdrop-filter: blur(8px);
+.site-header {
   position: sticky;
   top: 0;
-  z-index: 20;
+  z-index: 10;
+  border-bottom: 1px solid var(--stroke);
+  background: var(--surface);
 }
 
-.masthead__inner-wrap {
+.site-header__inner,
+.site-main,
+.site-footer {
+  max-width: 980px;
+  margin: 0 auto;
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
+.site-header__inner {
+  min-height: 64px;
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 1rem;
 }
 
-.masthead__menu {
-  flex: 1 1 auto;
+.site-title {
+  font-weight: 700;
+  text-decoration: none;
 }
 
-.greedy-nav {
-  background: transparent;
+.site-nav {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
 }
 
-.greedy-nav a {
-  color: var(--ink);
+.site-nav a {
+  text-decoration: none;
   font-weight: 500;
-}
-
-.greedy-nav a:hover {
-  color: var(--accent);
 }
 
 .theme-toggle {
@@ -171,37 +154,50 @@ li {
   text-transform: uppercase;
   padding: 0.42rem 0.75rem;
   line-height: 1;
-  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 .theme-toggle:hover {
   background: var(--ink);
   color: var(--bg);
+  cursor: pointer;
 }
 
-.page {
-  max-width: 1080px;
+.site-main {
+  padding-top: 2rem;
+  padding-bottom: 2rem;
 }
 
-.page__content {
-  font-size: 1.05rem;
+.site-main > h1 {
+  margin-top: 0;
+  margin-bottom: 1rem;
+}
+
+.site-footer {
+  border-top: 1px solid var(--stroke);
+  padding-top: 1.2rem;
+  padding-bottom: 2rem;
+  color: var(--muted);
+  font-size: 0.95rem;
 }
 
 .btn {
+  display: inline-block;
   border-radius: 999px;
   font-weight: 600;
-  border: 1px solid var(--stroke) !important;
+  border: 1px solid var(--stroke);
+  padding: 0.5rem 0.95rem;
+  text-decoration: none;
 }
 
 .btn--primary {
-  background: var(--accent) !important;
-  border-color: var(--accent) !important;
-  color: var(--accent-contrast) !important;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast);
 }
 
 .btn--inverse {
-  background: transparent !important;
-  color: var(--ink) !important;
+  background: transparent;
+  color: var(--ink);
 }
 
 .minimal-hero {
@@ -226,7 +222,6 @@ li {
   margin-top: 0;
   margin-bottom: 0.75rem;
   font-size: clamp(1.9rem, 5vw, 2.9rem);
-  line-height: 1.1;
 }
 
 .minimal-actions {
@@ -263,8 +258,8 @@ li {
   border-radius: var(--radius);
   background: var(--surface);
   padding: 1.15rem;
-  text-decoration: none !important;
-  color: inherit !important;
+  text-decoration: none;
+  color: inherit;
   transition: transform 0.22s ease, border-color 0.22s ease, box-shadow 0.22s ease;
 }
 
@@ -302,15 +297,6 @@ li {
   margin-bottom: 0.55rem;
 }
 
-.page__footer-follow {
-  display: none;
-}
-
-.page__footer-copyright {
-  color: var(--muted);
-  text-align: center;
-}
-
 .minimal-hero,
 .minimal-project,
 .minimal-card,
@@ -336,9 +322,23 @@ li {
   }
 }
 
-@media (max-width: 640px) {
+@media (max-width: 700px) {
+  .site-header__inner {
+    flex-wrap: wrap;
+    padding-top: 0.75rem;
+    padding-bottom: 0.75rem;
+  }
+
+  .site-nav {
+    order: 3;
+    width: 100%;
+    margin-left: 0;
+    flex-wrap: wrap;
+    gap: 0.6rem 0.9rem;
+  }
+
   .theme-toggle {
-    padding: 0.38rem 0.62rem;
+    margin-left: auto;
   }
 
   .minimal-hero {
