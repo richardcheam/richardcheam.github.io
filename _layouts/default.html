@@ -38,24 +38,29 @@
 
         document.addEventListener("DOMContentLoaded", function () {
           var toggle = document.getElementById("theme-toggle");
-          if (!toggle) return;
+          var body = document.body;
+          var intro = document.getElementById("intro-screen");
+          var reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
           function updateToggleText() {
+            if (!toggle) return;
             toggle.textContent = isDarkNow() ? "Light" : "Dark";
           }
 
           updateToggleText();
           updateThemeColor();
 
-          toggle.addEventListener("click", function () {
-            var next = isDarkNow() ? "light" : "dark";
-            root.setAttribute("data-theme", next);
-            try {
-              localStorage.setItem(key, next);
-            } catch (e) {}
-            updateToggleText();
-            updateThemeColor();
-          });
+          if (toggle) {
+            toggle.addEventListener("click", function () {
+              var next = isDarkNow() ? "light" : "dark";
+              root.setAttribute("data-theme", next);
+              try {
+                localStorage.setItem(key, next);
+              } catch (e) {}
+              updateToggleText();
+              updateThemeColor();
+            });
+          }
 
           var media = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)");
           if (media && media.addEventListener) {
@@ -67,11 +72,25 @@
               }
             });
           }
+
+          window.setTimeout(function () {
+            body.classList.remove("intro-pending");
+            body.classList.add("intro-complete");
+            if (intro) {
+              window.setTimeout(function () {
+                intro.remove();
+              }, reduceMotion ? 120 : 1600);
+            }
+          }, reduceMotion ? 80 : 1900);
         });
       })();
     </script>
   </head>
-  <body>
+  <body class="intro-pending">
+    <div id="intro-screen" class="intro-screen" aria-hidden="true">
+      <p class="intro-screen__name">{{ site.title }}</p>
+    </div>
+
     <header class="site-header">
       <div class="site-header__inner">
         <a class="site-title" href="{{ '/' | relative_url }}">{{ site.title }}</a>
