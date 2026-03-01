@@ -138,7 +138,7 @@ body {
   color: var(--ink);
   font-family: "Sora", "Avenir Next", "Segoe UI", sans-serif;
   font-weight: 300;
-  font-size: 0.95rem;
+  font-size: 0.92rem;
   line-height: 1.6;
   background-image: linear-gradient(180deg, var(--wash), transparent 35%);
   background-size: 100% 220%;
@@ -316,10 +316,10 @@ li {
 .site-header__inner,
 .site-main,
 .site-footer {
-  max-width: 980px;
+  max-width: 1220px;
   margin: 0 auto;
-  padding-left: 1rem;
-  padding-right: 1rem;
+  padding-left: clamp(1rem, 2.2vw, 2rem);
+  padding-right: clamp(1rem, 2.2vw, 2rem);
 }
 
 .site-header__inner {
@@ -409,7 +409,7 @@ li {
   padding-top: 1.2rem;
   padding-bottom: 2rem;
   color: var(--muted);
-  font-size: 0.95rem;
+  font-size: 0.88rem;
 }
 
 .btn {
@@ -644,9 +644,9 @@ strong {
 }
 
 .note-article {
-  max-width: 700px;
+  max-width: 880px;
   margin: 0 auto;
-  font-size: 0.98rem;
+  font-size: 0.93rem;
   line-height: 1.76;
 }
 
@@ -716,10 +716,49 @@ strong {
   margin-top: 0.35rem;
 }
 
+.blog-feed {
+  border-top: 1px solid var(--stroke);
+  margin-top: 0.35rem;
+}
+
+.blog-entry {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+  border-bottom: 1px solid var(--stroke);
+  padding: 1rem 0.2rem 1rem 0;
+  transition: background-color 0.24s var(--ease-fade), transform 0.24s var(--ease-cinematic);
+}
+
+.blog-entry:hover {
+  background: var(--hover-wash);
+  transform: translateX(1.5px);
+}
+
+.blog-entry__meta {
+  margin: 0 0 0.4rem;
+  color: var(--muted);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.blog-entry h2 {
+  margin: 0;
+  font-size: clamp(1rem, 2.6vw, 1.24rem);
+  font-weight: 300;
+}
+
+.blog-entry p:last-child {
+  margin: 0.4rem 0 0;
+  max-width: 80ch;
+}
+
 .detail-shell {
-  max-width: 760px;
+  max-width: 980px;
   margin: 0 auto;
-  font-size: 0.94rem;
+  font-size: 0.9rem;
 }
 
 .detail-chips {
@@ -900,8 +939,8 @@ strong {
   text-transform: uppercase;
 }
 
-.notes-backlink,
-.project-backlink {
+a.notes-backlink,
+a.project-backlink {
   display: inline-block;
   border: 1px solid var(--signal);
   border-radius: 999px;
@@ -916,8 +955,17 @@ strong {
   transition: background-color 0.2s var(--ease-fade), color 0.2s var(--ease-fade), border-color 0.2s var(--ease-fade);
 }
 
-.notes-backlink:hover,
-.project-backlink:hover {
+a.notes-backlink:link,
+a.notes-backlink:visited,
+a.project-backlink:link,
+a.project-backlink:visited {
+  color: var(--signal);
+}
+
+a.notes-backlink:hover,
+a.notes-backlink:focus-visible,
+a.project-backlink:hover,
+a.project-backlink:focus-visible {
   background: var(--signal);
   color: #ffffff;
   border-color: var(--signal);
