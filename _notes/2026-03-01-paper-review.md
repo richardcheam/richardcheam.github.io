@@ -1,8 +1,8 @@
 ---
-title: "Rapid Paper Review Template"
+title: "Paper Review"
 date: 2025-11-30
-category: "Learning"
-excerpt: "A repeatable template to extract useful ideas from research papers quickly."
+category: "fundamentals"
+excerpt: "Useful ideas from research papers."
 ---
 
 ## 10-Minute Pass
