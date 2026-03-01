@@ -112,9 +112,6 @@
     <header class="site-header">
       <div class="site-header__inner">
         <a class="site-title" href="{{ '/' | relative_url }}">{{ site.title }}</a>
-        {% if site.availability_badge %}
-          <span class="availability-badge">{{ site.availability_badge }}</span>
-        {% endif %}
         <nav class="site-nav" aria-label="Primary">
           {% for link in site.data.navigation.main %}
             <a href="{{ link.url | relative_url }}">{{ link.title }}</a>
@@ -134,9 +131,5 @@
     <footer class="site-footer">
       <p>&copy; {{ site.time | date: '%Y' }} {{ site.title }}.</p>
     </footer>
-
-    {% if site.email %}
-      <a class="mobile-cta" href="mailto:{{ site.email }}">Email me</a>
-    {% endif %}
   </body>
 </html>

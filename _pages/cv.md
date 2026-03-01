@@ -8,7 +8,7 @@ permalink: /cv/
 
 AI Engineer apprentice with experience in research and applied machine learning,
 including speech, NLP/LLMs, and computer vision.
-Open to Data Scientist or ML/AI Engineer roles from **October 2026**.
+Open to Data Scientist or ML/AI Engineer roles.
 
 ## Professional Experience
 

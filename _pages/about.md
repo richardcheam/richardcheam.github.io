@@ -8,8 +8,7 @@ title: "Richard Cheam"
   <p class="minimal-kicker">AI Engineer Apprentice · Paris</p>
   <h1>I build production-minded AI systems in speech and NLP.</h1>
   <p class="minimal-lead">
-    Currently at Renault. Open to <strong>CDI/CDD Data Scientist or ML/AI Engineer roles</strong>,
-    available from <strong>October 2026</strong>.
+    Currently at Renault. Open to <strong>CDI/CDD Data Scientist or ML/AI Engineer roles</strong>.
   </p>
   <div class="minimal-actions">
     <a class="btn btn--primary" href="/contact/">Contact me</a>
@@ -32,7 +31,7 @@ title: "Richard Cheam"
   <div class="project-points">
     <p><strong>Focus:</strong> real-time streaming speech model deployment in low-latency speech-to-speech pipelines.</p>
     <p><strong>Also:</strong> podcast generation/recommendation development and ongoing TTS fine-tuning.</p>
-    <p><strong>Target:</strong> transition to full-time ML/AI engineering from October 2026.</p>
+    <p><strong>Target:</strong> transition to full-time ML/AI engineering.</p>
   </div>
 </section>
 
