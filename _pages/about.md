@@ -1,14 +1,14 @@
 ---
 layout: default
 permalink: /
-title: "Home"
+title: "Richard Cheam"
 ---
 
 <div class="minimal-hero">
   <p class="minimal-kicker">AI Engineer Apprentice · Paris</p>
   <h1>Engineer's and Master's degree in Data Science & AI</h1>
   <p class="minimal-lead">
-    Currently at Renault. Open to <strong>CDI/CDD Data Scientist or ML/AI Engineer roles</strong>.
+    Currently at Renault. Open to <strong>CDI/CDD Data Scientist or ML/AI Engineer roles</strong> <strong>from Oct 2026.</strong>.
   </p>
   <div class="minimal-actions">
     <a class="btn btn--primary" href="/contact/">Contact me</a>
@@ -16,21 +16,21 @@ title: "Home"
   </div>
 </div>
 
-<div class="proof-strip" aria-label="Experience">
+<!-- <div class="proof-strip" aria-label="Experience">
   <span>ensIIE</span>
   <span>Universite Paris-Saclay</span>
   <span>Université Paris Cité</span>
-</div>
+</div> -->
 
-## Currently
+<!-- ## Currently
 
 <section class="minimal-project currently-block">
   <p class="minimal-kicker">Now</p>
   <h2>AI Engineer Apprentice at Renault</h2>
   <div class="project-points">
-    <p><strong>Focus:</strong>speech model</p>
+    <p><strong>Focus:</strong> Speech model</p>
   </div>
-</section>
+</section> -->
 
 <!-- ## Selected Outcomes -->
 
