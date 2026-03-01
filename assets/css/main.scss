@@ -575,11 +575,6 @@ strong {
   color: var(--ink);
 }
 
-.notes-backlink {
-  color: var(--muted);
-  text-decoration: none;
-}
-
 .concept-list {
   margin-top: 1rem;
 }
@@ -646,6 +641,79 @@ strong {
   flex-wrap: wrap;
   gap: 0.55rem;
   align-items: center;
+}
+
+.note-article {
+  max-width: 700px;
+  margin: 0 auto;
+  font-size: 0.98rem;
+  line-height: 1.76;
+}
+
+.note-article h2 {
+  margin-top: 1.6rem;
+  margin-bottom: 0.55rem;
+  font-size: clamp(1.12rem, 2.5vw, 1.42rem);
+  font-weight: 300;
+}
+
+.note-article p,
+.note-article li {
+  color: var(--ink-soft);
+}
+
+.note-article ul,
+.note-article ol {
+  margin-top: 0.35rem;
+  padding-left: 1.25rem;
+}
+
+.note-article li + li {
+  margin-top: 0.34rem;
+}
+
+.note-meta {
+  margin: 0.1rem 0 1rem;
+  color: var(--muted);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.66rem;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.note-callout {
+  border-left: 2px solid var(--stroke);
+  background: var(--hover-wash);
+  padding: 0.5rem 0.72rem;
+  margin: 0.9rem 0 0.7rem;
+}
+
+.note-callout p {
+  margin: 0;
+}
+
+.note-callout--definition {
+  border-color: var(--chip-impact);
+}
+
+.note-callout--pitfall {
+  border-color: var(--chip-constraint);
+}
+
+.note-summary {
+  border-top: 1px solid var(--stroke);
+  border-bottom: 1px solid var(--stroke);
+  padding: 0.7rem 0;
+  margin: 0.45rem 0 0.2rem;
+}
+
+.note-summary ul,
+.note-related ul {
+  margin: 0;
+}
+
+.note-related {
+  margin-top: 0.35rem;
 }
 
 .detail-shell {
@@ -832,6 +900,7 @@ strong {
   text-transform: uppercase;
 }
 
+.notes-backlink,
 .project-backlink {
   display: inline-block;
   border: 1px solid var(--signal);
@@ -847,6 +916,7 @@ strong {
   transition: background-color 0.2s var(--ease-fade), color 0.2s var(--ease-fade), border-color 0.2s var(--ease-fade);
 }
 
+.notes-backlink:hover,
 .project-backlink:hover {
   background: var(--signal);
   color: #ffffff;

@@ -5,57 +5,50 @@ category: "fundamentals"
 excerpt: "Useful ideas from research papers."
 ---
 
-<div class="detail-shell note-detail">
-  <p><a class="notes-backlink" href="{{ '/notes/fundamentals/' | relative_url }}">Back to Fundamentals</a></p>
-  <p class="minimal-kicker">Fundamentals • {{ page.date | date: "%d %b %Y" }}</p>
-  <p class="minimal-intro">A compact template to extract reusable value from any new paper quickly.</p>
+<article class="note-article">
+<p><a class="notes-backlink" href="{{ '/notes/fundamentals/' | relative_url }}">Back to Fundamentals</a></p>
+<p class="note-meta">Fundamentals • {{ page.date | date: "%d %b %Y" }} • ~4 min read</p>
 
-  <div class="detail-chips" aria-label="Note highlights">
-    <span class="detail-chip detail-chip--role"><span class="detail-chip__label">Use case:</span> <span class="detail-chip__value">paper digestion</span></span>
-    <span class="detail-chip detail-chip--constraint"><span class="detail-chip__label">Format:</span> <span class="detail-chip__value">10-minute pass + deep pass</span></span>
-    <span class="detail-chip detail-chip--impact"><span class="detail-chip__label">Output:</span> <span class="detail-chip__value">action block</span></span>
-  </div>
+A compact personal template to extract reusable value from any paper without over-reading.
 
-  <nav class="detail-nav" aria-label="Section navigation">
-    <a href="#tldr">TL;DR</a>
-    <a href="#pass10">10-min pass</a>
-    <a href="#deep">Deep pass</a>
-    <a href="#action">Action</a>
-  </nav>
+## 10-Minute Pass
 
-  <section id="tldr" class="detail-block detail-block--tldr">
-    <h2>TL;DR</h2>
-    <ul class="detail-list">
-      <li><strong>Goal:</strong> Understand the core claim without over-reading.</li>
-      <li><strong>Method:</strong> Run a short pass first, then a focused deep pass.</li>
-      <li><strong>Result:</strong> End with one experiment, one metric, and one risk.</li>
-    </ul>
-  </section>
+1. Write the **problem** in one sentence.
+2. Write the **core method** in one sentence.
+3. Write the **main result** in one sentence.
 
-  <section id="pass10" class="detail-block detail-block--alt">
-    <h2>10-Minute Pass</h2>
-    <ul class="detail-list">
-      <li>Problem statement in one sentence.</li>
-      <li>Core method in one sentence.</li>
-      <li>Key result in one sentence.</li>
-    </ul>
-  </section>
-
-  <section id="deep" class="detail-block">
-    <h2>Deep Pass</h2>
-    <ul class="detail-list">
-      <li>What assumptions are hidden?</li>
-      <li>What data or constraints limit transferability?</li>
-      <li>What part is reusable in my projects?</li>
-    </ul>
-  </section>
-
-  <section id="action" class="detail-block detail-block--alt">
-    <h2>Action Block</h2>
-    <ul class="detail-list">
-      <li>One experiment to reproduce.</li>
-      <li>One metric to validate.</li>
-      <li>One risk if this is applied in production.</li>
-    </ul>
-  </section>
+<div class="note-callout note-callout--definition">
+<p><strong>Why this works:</strong> forcing one-line summaries exposes whether you truly understood the paper.</p>
 </div>
+
+## Deep Pass
+
+- What assumptions are hidden?
+- What data constraints limit transferability?
+- Which component is reusable in my own projects?
+
+## Action Block
+
+- One experiment to reproduce this week.
+- One metric to validate first.
+- One production risk to watch.
+
+## Review Summary
+
+<div class="note-summary">
+<ul>
+  <li>First pass for speed, second pass for transferability.</li>
+  <li>Always leave with one concrete experiment.</li>
+  <li>Track one risk before implementation.</li>
+</ul>
+</div>
+
+## Related Notes
+
+<div class="note-related">
+<ul>
+  <li><a href="{{ '/notes/2026-03-01-world-model/' | relative_url }}">World Model</a></li>
+  <li><a href="{{ '/notes/2026-03-01-speech-ai/' | relative_url }}">Speech AI</a></li>
+</ul>
+</div>
+</article>
