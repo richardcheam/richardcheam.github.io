@@ -4,34 +4,37 @@ title: "Projects"
 permalink: /projects/
 ---
 
-<p class="minimal-intro">Selected projects from machine learning, NLP, and self-supervised learning.</p>
+<p class="minimal-intro">Problem → Build → Result summaries recruiters can scan quickly.</p>
 
 <section id="imdb-moe" class="minimal-project">
   <p class="minimal-kicker">NLP • March 2025</p>
-  <h2>IMDb Sentiment Analysis with Mixture of Experts</h2>
-  <p>
-    Built a complete NLP training pipeline on IMDb and evaluated DistilBERT, RoBERTa, and DeBERTa.
-    Implemented a custom Mixture of Experts architecture with dynamic expert routing.
-  </p>
+  <h2>IMDb Sentiment with Mixture of Experts</h2>
+  <div class="project-points">
+    <p><strong>Problem:</strong> Compare strong transformer baselines while testing a more specialized routing architecture.</p>
+    <p><strong>Build:</strong> End-to-end IMDb pipeline with DistilBERT, RoBERTa, DeBERTa, and custom MoE dynamic expert routing.</p>
+    <p><strong>Result:</strong> Reproducible experimentation framework for scalable model comparison and selective expert activation.</p>
+  </div>
   <p><strong>Stack:</strong> Hugging Face, PyTorch, MoE</p>
 </section>
 
 <section id="mnist-ssl" class="minimal-project">
-  <p class="minimal-kicker">Vision • December 2024</p>
-  <h2>Semi-Supervised and Self-Supervised Learning on MNIST</h2>
-  <p>
-    Trained with only 100 labels out of 60,000 using pseudo-labeling to reach 97.18% accuracy.
-    Implemented SimCLR representation learning and reached 98.55% (linear probe).
-  </p>
+  <p class="minimal-kicker">Computer Vision • December 2024</p>
+  <h2>SSL and Semi-Supervised Learning on MNIST</h2>
+  <div class="project-points">
+    <p><strong>Problem:</strong> Train high-quality models with extremely limited labels (100 labels over 60,000 images).</p>
+    <p><strong>Build:</strong> CNN with pseudo-labeling and data augmentation, plus SimCLR representation learning pipeline.</p>
+    <p><strong>Result:</strong> 97.18% (semi-supervised), 98.55% linear-probe with SimCLR, 98.44% with MLP head.</p>
+  </div>
   <p><strong>Stack:</strong> PyTorch, CNN, SimCLR</p>
 </section>
 
 <section id="elsa-frailty" class="minimal-project">
   <p class="minimal-kicker">Research Data Science • 2024</p>
-  <h2>ELSA Longitudinal Data Structuring and Frailty Index Pipeline</h2>
-  <p>
-    Structured 18 years of longitudinal survey data, unified heterogeneous waves,
-    and built a frailty scoring pipeline with trajectory analysis for 8,000+ participants.
-  </p>
-  <p><strong>Stack:</strong> Python, pandas, statistical analysis, reproducible data pipeline</p>
+  <h2>ELSA Structuring and Frailty Index Pipeline</h2>
+  <div class="project-points">
+    <p><strong>Problem:</strong> Longitudinal survey data across 18 years was heterogeneous and difficult to analyze consistently.</p>
+    <p><strong>Build:</strong> Unified waves into modular domains and created a 57-variable frailty scoring workflow.</p>
+    <p><strong>Result:</strong> Reproducible dataset and aging trajectory analysis for 8,000+ participants.</p>
+  </div>
+  <p><strong>Stack:</strong> Python, pandas, statistics, reproducible data pipeline</p>
 </section>

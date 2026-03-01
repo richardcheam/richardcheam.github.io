@@ -7,7 +7,8 @@ A minimal Jekyll website for GitHub Pages.
 - `_config.yml`: site-level settings (title, URL, timezone, plugins)
 - `_layouts/default.html`: the only layout (HTML structure + nav + theme toggle)
 - `_data/navigation.yml`: top navigation links
-- `_pages/`: page content (`about`, `projects`, `cv`, `contact`, `404`)
+- `_pages/`: page content (`about`, `projects`, `notes`, `cv`, `contact`, `404`)
+- `_notes/`: knowledge notes (public learning entries)
 - `assets/css/main.scss`: all styling (including light/dark mode)
 - `images/`: static images (`profile.png`)
 
@@ -31,10 +32,11 @@ Your content here.
 
 1. Update text in `_pages/about.md`
 2. Replace project descriptions in `_pages/projects.md`
-3. Update experience/skills in `_pages/cv.md`
-4. Update links in `_pages/contact.md`
-5. Adjust menu links in `_data/navigation.yml`
-6. Tweak styles/colors in `assets/css/main.scss`
+3. Add/edit notes in `_notes/`
+4. Update experience/skills in `_pages/cv.md`
+5. Update links in `_pages/contact.md`
+6. Adjust menu links in `_data/navigation.yml`
+7. Tweak styles/colors in `assets/css/main.scss`
 
 ## Light and dark mode
 

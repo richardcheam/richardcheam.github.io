@@ -1,12 +1,19 @@
 locale: en-US
 title: Richard Cheam
 description: Minimal personal website for Richard Cheam.
+email: richard.cheam@etu.u-paris.fr
+availability_badge: Open from Oct 2026
 url: https://richardcheam.github.io
 baseurl: ""
 timezone: Europe/Paris
 
 markdown: kramdown
 permalink: pretty
+
+collections:
+  notes:
+    output: true
+    permalink: /notes/:path/
 
 plugins:
   - jekyll-feed
@@ -27,5 +34,10 @@ defaults:
   - scope:
       path: "_pages"
       type: pages
+    values:
+      layout: default
+  - scope:
+      path: "_notes"
+      type: notes
     values:
       layout: default

@@ -5,52 +5,53 @@ title: "Richard Cheam"
 ---
 
 <div class="minimal-hero">
-  <p class="minimal-kicker">AI Engineer Apprentice</p>
-  <h1>Building practical AI systems across speech, NLP/LLMs, and applied machine learning.</h1>
-  <p>
-    I am currently an AI Engineer apprentice at Renault in Paris.
-    I am looking for a CDI/CDD role as a Data Scientist or ML/AI Engineer,
+  <p class="minimal-kicker">AI Engineer Apprentice · Paris</p>
+  <h1>I build production-minded AI systems in speech and NLP.</h1>
+  <p class="minimal-lead">
+    Currently at Renault. Open to <strong>CDI/CDD Data Scientist or ML/AI Engineer roles</strong>,
     available from <strong>October 2026</strong>.
   </p>
   <div class="minimal-actions">
-    <a class="btn btn--primary" href="/projects/">View projects</a>
-    <a class="btn btn--inverse" href="/cv/">Read CV</a>
+    <a class="btn btn--primary" href="/contact/">Contact me</a>
+    <a class="btn btn--inverse" href="/projects/">Projects</a>
   </div>
 </div>
 
-## Current Focus
-
-<div class="minimal-grid minimal-grid--tight">
-  <div class="minimal-note">
-    <h3>Speech AI</h3>
-    <p>Real-time streaming speech models for low-latency inference and speech-to-speech pipelines.</p>
-  </div>
-  <div class="minimal-note">
-    <h3>NLP and LLMs</h3>
-    <p>Model training and fine-tuning for language understanding and generation use cases.</p>
-  </div>
-  <div class="minimal-note">
-    <h3>Applied ML</h3>
-    <p>From benchmark research to deployment-focused development with clear product impact.</p>
-  </div>
+<div class="proof-strip" aria-label="Experience">
+  <span>Renault</span>
+  <span>Laboratoire IBISC</span>
+  <span>ENSIIE</span>
+  <span>Universite Paris-Saclay</span>
 </div>
 
-## Highlights
+## Currently
+
+<section class="minimal-project currently-block">
+  <p class="minimal-kicker">Now</p>
+  <h2>AI Engineer Apprentice at Renault</h2>
+  <div class="project-points">
+    <p><strong>Focus:</strong> real-time streaming speech model deployment in low-latency speech-to-speech pipelines.</p>
+    <p><strong>Also:</strong> podcast generation/recommendation development and ongoing TTS fine-tuning.</p>
+    <p><strong>Target:</strong> transition to full-time ML/AI engineering from October 2026.</p>
+  </div>
+</section>
+
+## Selected Outcomes
 
 <div class="minimal-grid">
   <div class="minimal-card">
-    <p class="minimal-card__meta">Renault</p>
-    <h3>AI Engineer (2025-now)</h3>
-    <p>Developed and deployed real-time speech models, contributed to podcast generation/recommendation, and ongoing TTS fine-tuning.</p>
+    <p class="minimal-card__meta">Research Data Science</p>
+    <h3>8,000+ participant frailty analysis</h3>
+    <p>Structured 18 years of ELSA survey waves into a reproducible analysis-ready pipeline.</p>
   </div>
   <div class="minimal-card">
-    <p class="minimal-card__meta">IBISC Lab</p>
-    <h3>AI Research Intern (2025)</h3>
-    <p>Benchmarked Google VeLO in multi-objective optimization and integrated it into Pareto HyperNetwork workflows.</p>
+    <p class="minimal-card__meta">NLP Engineering</p>
+    <h3>Custom MoE sentiment pipeline</h3>
+    <p>Built an IMDb workflow comparing BERT-family models and a custom Mixture-of-Experts design.</p>
   </div>
   <div class="minimal-card">
-    <p class="minimal-card__meta">ENSIIE</p>
-    <h3>Data Science Research Intern (2024)</h3>
-    <p>Built a reproducible longitudinal data pipeline and frailty analysis workflow on 8,000+ participants.</p>
+    <p class="minimal-card__meta">Representation Learning</p>
+    <h3>98.55% on MNIST (SimCLR probe)</h3>
+    <p>Implemented SSL and semi-supervised training with only 100 labeled samples.</p>
   </div>
 </div>
