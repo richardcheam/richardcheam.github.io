@@ -132,6 +132,55 @@
             });
           }
 
+          function initDetailTabs() {
+            var groups = Array.prototype.slice.call(document.querySelectorAll("[data-detail-tabs]"));
+            if (groups.length === 0) return;
+
+            groups.forEach(function (group) {
+              var triggers = Array.prototype.slice.call(group.querySelectorAll("[data-detail-trigger]"));
+              var panels = Array.prototype.slice.call(group.querySelectorAll("[data-detail-panel]"));
+              if (triggers.length === 0 || panels.length === 0) return;
+
+              function activate(panelId) {
+                var hasActive = false;
+
+                panels.forEach(function (panel) {
+                  var isActive = panel.id === panelId;
+                  panel.hidden = !isActive;
+                  panel.classList.toggle("is-active", isActive);
+                  if (isActive) hasActive = true;
+                });
+
+                triggers.forEach(function (trigger) {
+                  var targetId = (trigger.getAttribute("href") || "").replace(/^#/, "");
+                  var isActive = targetId === panelId;
+                  trigger.classList.toggle("is-active", isActive);
+                  trigger.setAttribute("aria-current", isActive ? "true" : "false");
+                });
+
+                return hasActive;
+              }
+
+              triggers.forEach(function (trigger) {
+                trigger.addEventListener("click", function (event) {
+                  var targetId = (trigger.getAttribute("href") || "").replace(/^#/, "");
+                  if (!targetId) return;
+                  event.preventDefault();
+                  if (!activate(targetId)) return;
+                  if (window.history && window.history.replaceState) {
+                    window.history.replaceState(null, "", "#" + targetId);
+                  }
+                });
+              });
+
+              var initialHash = (window.location.hash || "").replace(/^#/, "");
+              var firstId = (triggers[0].getAttribute("href") || "").replace(/^#/, "");
+              if (!activate(initialHash)) {
+                activate(firstId);
+              }
+            });
+          }
+
           function updateScrollProgress() {
             if (!progressBar) return;
             var doc = document.documentElement;
@@ -166,6 +215,7 @@
             render();
           }
 
+          initDetailTabs();
           initCinematicMotion();
           updateScrollProgress();
           window.addEventListener("scroll", updateScrollProgress, { passive: true });

@@ -657,6 +657,12 @@ strong {
   background: var(--hover-wash);
 }
 
+.detail-nav a.is-active {
+  border-color: var(--ink);
+  color: var(--ink);
+  background: var(--hover-wash);
+}
+
 .detail-block {
   border: 1px solid var(--stroke);
   border-radius: var(--radius);

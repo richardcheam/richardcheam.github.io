@@ -24,26 +24,12 @@ permalink: /projects/
   <p class="minimal-kicker">Computer Vision • December 2024</p>
   <h2>SSL and Semi-Supervised Learning on MNIST</h2>
   <div class="project-points">
-    <p><strong>Problem:</strong> Train high-quality models with extremely limited labels (100 labels over 60,000 images).</p>
+    <p><strong>Problem:</strong> Train high-quality models with extremely limited labels (only 100 labels over 60,000 images).</p>
     <p><strong>Build:</strong> CNN with pseudo-labeling and data augmentation, plus SimCLR representation learning pipeline.</p>
     <p><strong>Result:</strong> 97.18% (semi-supervised), 98.55% linear-probe with SimCLR, 98.44% with MLP head.</p>
   </div>
   <p><strong>Stack:</strong> PyTorch, CNN, SimCLR</p>
   <p class="project-links">
     <a class="btn btn--inverse" href="{{ '/projects/mnist-ssl/' | relative_url }}">More info</a>
-  </p>
-</section>
-
-<section id="elsa-frailty" class="minimal-project">
-  <p class="minimal-kicker">Research Data Science • 2024</p>
-  <h2>ELSA Structuring and Frailty Index Pipeline</h2>
-  <div class="project-points">
-    <p><strong>Problem:</strong> Longitudinal survey data across 18 years was heterogeneous and difficult to analyze consistently.</p>
-    <p><strong>Build:</strong> Unified waves into modular domains and created a 57-variable frailty scoring workflow.</p>
-    <p><strong>Result:</strong> Reproducible dataset and aging trajectory analysis for 8,000+ participants.</p>
-  </div>
-  <p><strong>Stack:</strong> Python, pandas, statistics, reproducible data pipeline</p>
-  <p class="project-links">
-    <a class="btn btn--inverse" href="{{ '/projects/elsa-frailty/' | relative_url }}">More info</a>
   </p>
 </section>

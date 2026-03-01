@@ -7,7 +7,7 @@ permalink: /notes/
 {% assign sorted_notes = site.notes | sort: 'date' | reverse %}
 <section class="notes-hub">
   <p class="minimal-kicker">Knowledge Base</p>
-  <p class="minimal-intro notes-intro">A minimal personal library of AI concepts, paper notes, and practical reminders.</p>
+  <p class="minimal-intro notes-intro">A personal library of AI concepts, paper notes, and practical reminders for myself. Of course everyone is welcomed to read and share.</p>
   <a class="notes-route" href="{{ '/notes/fundamentals/' | relative_url }}">
     <p class="notes-route__meta">Start here</p>
     <h2>Fundamentals</h2>

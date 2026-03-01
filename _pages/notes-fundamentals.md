@@ -7,7 +7,7 @@ permalink: /notes/fundamentals/
 {% assign sorted_notes = site.notes | sort: 'date' | reverse %}
 
 <p><a class="notes-backlink" href="{{ '/notes/' | relative_url }}">Back to Notes</a></p>
-<p class="minimal-intro notes-intro">Core concepts and reusable thinking frameworks.</p>
+<p class="minimal-intro notes-intro">Core concepts.</p>
 
 <section class="concept-list" aria-label="Fundamentals concept blocks">
   {% assign has_fundamentals = false %}
