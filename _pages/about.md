@@ -11,9 +11,9 @@ title: "Richard Cheam"
     Currently at Renault. Open to <strong>CDI/CDD Data Scientist or ML/AI Engineer roles</strong> <strong>from Oct 2026</strong>.
   </p>
   <div class="minimal-actions">
-    <a class="btn btn--primary" href="/contact/">Contact me</a>
     <a class="btn btn--inverse" href="/projects/">Projects</a>
     <a class="btn btn--inverse" href="/cv/">CV</a>
+    <a class="btn btn--primary" href="/contact/">Contact me</a>
   </div>
 </div>
 

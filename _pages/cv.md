@@ -6,9 +6,19 @@ permalink: /cv/
 
 ## Profile
 
-AI Engineer apprentice with experience in research and applied machine learning,
+AI Engineer apprentice with experience in research and applied machine learning, 
 including speech, NLP/LLMs, and computer vision.
 Open to Data Scientist or ML/AI Engineer roles.
+
+
+## Technical Skills
+
+- **Languages:** Python, R, SQL, Cypher (Neo4j)
+- **ML/DL:** scikit-learn, PyTorch, JAX/Flax, Hugging Face, LangChain, PyMC
+- **Data:** NumPy, pandas, matplotlib, PySpark, ggplot
+- **MLOps/Cloud:** GCP, Docker, CI/CD, Weights & Biases, TensorBoard
+- **Tools:** Git, Bash, Linux/UNIX, FastAPI, Streamlit, LaTeX
+
 
 ## Professional Experience
 
@@ -34,14 +44,6 @@ Open to Data Scientist or ML/AI Engineer roles.
 - **M2 MIADS & Master MVA** - Universite Paris Cite & ENS Paris-Saclay (2025 - 2026)
 - **Enginee's Degree & M2 Data Science (Double Degree)** - ensIIE & Universite Paris-Saclay (2022 - 2025)
 - **Preparatory Classes (Math & Physics)** - Institute of Technology of Cambodia (2019 - 2022)
-
-## Technical Skills
-
-- **Languages:** Python, R, SQL, Cypher (Neo4j)
-- **ML/DL:** scikit-learn, PyTorch, JAX/Flax, Hugging Face, LangChain, PyMC
-- **Data:** NumPy, pandas, matplotlib, PySpark, ggplot
-- **MLOps/Cloud:** GCP, Docker, CI/CD, Weights & Biases, TensorBoard
-- **Tools:** Git, Bash, Linux/UNIX, FastAPI, Streamlit, LaTeX
 
 ## Languages
 
