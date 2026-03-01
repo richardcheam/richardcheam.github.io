@@ -42,7 +42,7 @@ Open to Data Scientist or ML/AI Engineer roles.
 ## Education
 
 - **M2 MIADS & Master MVA** - Universite Paris Cite & ENS Paris-Saclay (2025 - 2026)
-- **Enginee's Degree & M2 Data Science (Double Degree)** - ensIIE & Universite Paris-Saclay (2022 - 2025)
+- **Engineer's Degree & M2 Data Science (Double Degree)** - ensIIE & Universite Paris-Saclay (2022 - 2025)
 - **Preparatory Classes (Math & Physics)** - Institute of Technology of Cambodia (2019 - 2022)
 
 ## Languages

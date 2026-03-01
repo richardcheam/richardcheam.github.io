@@ -11,9 +11,9 @@ excerpt: "Useful ideas from research papers."
   <p class="minimal-intro">A compact template to extract reusable value from any new paper quickly.</p>
 
   <div class="detail-chips" aria-label="Note highlights">
-    <span class="detail-chip">Use case: paper digestion</span>
-    <span class="detail-chip">Format: 10-minute pass + deep pass</span>
-    <span class="detail-chip">Output: action block</span>
+    <span class="detail-chip detail-chip--role"><span class="detail-chip__label">Use case:</span> <span class="detail-chip__value">paper digestion</span></span>
+    <span class="detail-chip detail-chip--constraint"><span class="detail-chip__label">Format:</span> <span class="detail-chip__value">10-minute pass + deep pass</span></span>
+    <span class="detail-chip detail-chip--impact"><span class="detail-chip__label">Output:</span> <span class="detail-chip__value">action block</span></span>
   </div>
 
   <nav class="detail-nav" aria-label="Section navigation">

@@ -11,9 +11,9 @@ excerpt: "Working notes on latent dynamics, planning, and model-based control."
   <p class="minimal-intro">Practical checklist for comparing latent dynamics models under planning constraints.</p>
 
   <div class="detail-chips" aria-label="Note highlights">
-    <span class="detail-chip">Focus: model + planner separation</span>
-    <span class="detail-chip">Risk: compounding error</span>
-    <span class="detail-chip">Validation: shift robustness</span>
+    <span class="detail-chip detail-chip--impact"><span class="detail-chip__label">Focus:</span> <span class="detail-chip__value">model + planner separation</span></span>
+    <span class="detail-chip detail-chip--constraint"><span class="detail-chip__label">Risk:</span> <span class="detail-chip__value">compounding error</span></span>
+    <span class="detail-chip detail-chip--stack"><span class="detail-chip__label">Validation:</span> <span class="detail-chip__value">shift robustness</span></span>
   </div>
 
   <nav class="detail-nav" aria-label="Section navigation">
