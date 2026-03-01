@@ -1,12 +1,12 @@
 ---
 layout: default
 permalink: /
-title: "Richard Cheam"
+title: "Home"
 ---
 
 <div class="minimal-hero">
   <p class="minimal-kicker">AI Engineer Apprentice · Paris</p>
-  <h1>I build production-minded AI systems in speech and NLP.</h1>
+  <h1>Engineer's and Master's degree in Data Science & AI</h1>
   <p class="minimal-lead">
     Currently at Renault. Open to <strong>CDI/CDD Data Scientist or ML/AI Engineer roles</strong>.
   </p>
@@ -17,10 +17,9 @@ title: "Richard Cheam"
 </div>
 
 <div class="proof-strip" aria-label="Experience">
-  <span>Renault</span>
-  <span>Laboratoire IBISC</span>
-  <span>ENSIIE</span>
+  <span>ensIIE</span>
   <span>Universite Paris-Saclay</span>
+  <span>Université Paris Cité</span>
 </div>
 
 ## Currently
@@ -29,15 +28,13 @@ title: "Richard Cheam"
   <p class="minimal-kicker">Now</p>
   <h2>AI Engineer Apprentice at Renault</h2>
   <div class="project-points">
-    <p><strong>Focus:</strong> real-time streaming speech model deployment in low-latency speech-to-speech pipelines.</p>
-    <p><strong>Also:</strong> podcast generation/recommendation development and ongoing TTS fine-tuning.</p>
-    <p><strong>Target:</strong> transition to full-time ML/AI engineering.</p>
+    <p><strong>Focus:</strong>speech model</p>
   </div>
 </section>
 
-## Selected Outcomes
+<!-- ## Selected Outcomes -->
 
-<div class="minimal-grid">
+<!-- <div class="minimal-grid">
   <div class="minimal-card">
     <p class="minimal-card__meta">Research Data Science</p>
     <h3>8,000+ participant frailty analysis</h3>
@@ -53,4 +50,4 @@ title: "Richard Cheam"
     <h3>98.55% on MNIST (SimCLR probe)</h3>
     <p>Implemented SSL and semi-supervised training with only 100 labeled samples.</p>
   </div>
-</div>
+</div> -->
