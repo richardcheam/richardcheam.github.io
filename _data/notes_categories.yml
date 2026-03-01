@@ -41,6 +41,10 @@
   label: Bayesian & Probabilistic
   summary: Uncertainty, priors, posterior inference, and probabilistic modeling.
 
+- key: causal-ml
+  label: Causal ML
+  summary: Structural counterfactuals, treatment effects, and causal discovery.
+
 - key: reinforcement-learning
   label: Reinforcement Learning
   summary: Policy learning, value methods, exploration, and decision-making.

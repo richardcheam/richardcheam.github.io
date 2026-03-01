@@ -33,7 +33,7 @@ github_url: "https://github.com/richardcheam"
     </ul>
   </section>
 
-  <section id="build" class="minimal-project detail-block detail-block--alt" data-detail-panel>
+  <section id="build" class="minimal-project detail-block detail-block--alt" data-detail-panel hidden>
     <h2>What I Built</h2>
     <div class="project-points">
       <p><strong>Semi-supervised track:</strong> CNN backbone with pseudo-label refresh and targeted augmentations.</p>
@@ -43,7 +43,7 @@ github_url: "https://github.com/richardcheam"
     </div>
   </section>
 
-  <section id="results" class="minimal-project detail-block" data-detail-panel>
+  <section id="results" class="minimal-project detail-block" data-detail-panel hidden>
     <h2>Results</h2>
     <div class="detail-metric-grid">
       <div class="detail-metric"><p class="detail-metric__label">Semi-supervised</p><h3>97.18%</h3><p>CNN with pseudo-labeling under strict low-label constraints.</p></div>
@@ -52,7 +52,7 @@ github_url: "https://github.com/richardcheam"
     </div>
   </section>
 
-  <section id="links" class="minimal-project detail-block detail-block--alt" data-detail-panel>
+  <section id="links" class="minimal-project detail-block detail-block--alt" data-detail-panel hidden>
     <h2>Links</h2>
     <p class="project-links">
       {% if page.demo_url and page.demo_url != "" %}

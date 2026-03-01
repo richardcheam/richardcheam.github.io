@@ -33,7 +33,7 @@ github_url: "https://github.com/richardcheam"
     </ul>
   </section>
 
-  <section id="build" class="minimal-project detail-block detail-block--alt" data-detail-panel>
+  <section id="build" class="minimal-project detail-block detail-block--alt" data-detail-panel hidden>
     <h2>What I Built</h2>
     <div class="project-points">
       <p><strong>Data pipeline:</strong> Consistent preprocessing, tokenization strategy, and train/validation/test split controls.</p>
@@ -43,7 +43,7 @@ github_url: "https://github.com/richardcheam"
     </div>
   </section>
 
-  <section id="results" class="minimal-project detail-block" data-detail-panel>
+  <section id="results" class="minimal-project detail-block" data-detail-panel hidden>
     <h2>Results</h2>
     <div class="detail-metric-grid">
       <div class="detail-metric"><p class="detail-metric__label">Evidence</p><h3>Structured Ablations</h3><p>Each model was evaluated under aligned settings for direct comparison.</p></div>
@@ -51,7 +51,7 @@ github_url: "https://github.com/richardcheam"
     </div>
   </section>
 
-  <section id="links" class="minimal-project detail-block detail-block--alt" data-detail-panel>
+  <section id="links" class="minimal-project detail-block detail-block--alt" data-detail-panel hidden>
     <h2>Links</h2>
     <p class="project-links">
       {% if page.demo_url and page.demo_url != "" %}
