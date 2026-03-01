@@ -6,42 +6,65 @@ demo_url: ""
 github_url: "https://github.com/richardcheam"
 ---
 
-<p><a class="project-backlink" href="{{ '/projects/' | relative_url }}">Back to Projects</a></p>
-<p class="minimal-kicker">NLP • March 2025</p>
-<p class="minimal-intro">Case study focused on benchmarking transformer baselines and testing dynamic expert routing.</p>
+<div class="detail-shell">
+  <p><a class="project-backlink" href="{{ '/projects/' | relative_url }}">Back to Projects</a></p>
+  <p class="minimal-kicker">NLP • March 2025</p>
+  <p class="minimal-intro">Case study focused on benchmarking transformer baselines and testing dynamic expert routing.</p>
 
-<section class="minimal-project project-detail-block">
-  <h2>Project Snapshot</h2>
-  <div class="project-points">
-    <p><strong>Scope:</strong> Binary sentiment classification on IMDb reviews.</p>
-    <p><strong>Goal:</strong> Compare strong baseline models while validating whether MoE routing can improve specialization.</p>
-    <p><strong>Outcome:</strong> A reproducible evaluation setup for controlled model comparisons and ablation runs.</p>
+  <div class="detail-chips" aria-label="Project highlights">
+    <span class="detail-chip">Role: ML Engineer</span>
+    <span class="detail-chip">Impact: Reproducible benchmark framework</span>
+    <span class="detail-chip">Stack: PyTorch • Hugging Face • MoE</span>
   </div>
-</section>
 
-<section class="minimal-project project-detail-block">
-  <h2>Build Details</h2>
-  <div class="project-points">
-    <p><strong>Data pipeline:</strong> Consistent preprocessing, tokenization strategy, and train/validation/test split controls.</p>
-    <p><strong>Baselines:</strong> DistilBERT, RoBERTa, and DeBERTa under aligned training settings.</p>
-    <p><strong>MoE design:</strong> Router-guided expert selection with tracked expert usage distribution and confidence behavior.</p>
-    <p><strong>Evaluation:</strong> Accuracy/F1 comparison, compute tracking, and error analysis by review length and sentiment polarity.</p>
-  </div>
-</section>
+  <nav class="detail-nav" aria-label="Section navigation">
+    <a href="#tldr">TL;DR</a>
+    <a href="#build">Build</a>
+    <a href="#results">Results</a>
+    <a href="#links">Links</a>
+  </nav>
 
-<section class="minimal-project project-detail-block">
-  <h2>Links</h2>
-  <p class="project-links">
-    {% if page.demo_url and page.demo_url != "" %}
-      <a class="btn btn--primary" href="{{ page.demo_url }}" target="_blank" rel="noopener noreferrer">Live Demo</a>
-    {% else %}
-      <span class="project-link-muted">Demo link coming soon</span>
-    {% endif %}
+  <section id="tldr" class="minimal-project detail-block detail-block--tldr">
+    <h2>TL;DR</h2>
+    <ul class="detail-list">
+      <li><strong>Problem:</strong> Compare strong transformer baselines and test whether routing experts can specialize better.</li>
+      <li><strong>Impact:</strong> Built a controlled framework for fair architecture comparisons and ablation runs.</li>
+      <li><strong>Stack:</strong> DistilBERT, RoBERTa, DeBERTa, custom MoE in PyTorch.</li>
+    </ul>
+  </section>
 
-    {% if page.github_url and page.github_url != "" %}
-      <a class="btn btn--inverse" href="{{ page.github_url }}" target="_blank" rel="noopener noreferrer">GitHub</a>
-    {% else %}
-      <span class="project-link-muted">GitHub link coming soon</span>
-    {% endif %}
-  </p>
-</section>
+  <section id="build" class="minimal-project detail-block detail-block--alt">
+    <h2>What I Built</h2>
+    <div class="project-points">
+      <p><strong>Data pipeline:</strong> Consistent preprocessing, tokenization strategy, and train/validation/test split controls.</p>
+      <p><strong>Baselines:</strong> DistilBERT, RoBERTa, and DeBERTa under aligned training settings.</p>
+      <p><strong>MoE design:</strong> Router-guided expert selection with tracked expert usage distribution and confidence behavior.</p>
+      <p><strong>Evaluation:</strong> Accuracy/F1 comparison, compute tracking, and error analysis by review length and sentiment polarity.</p>
+    </div>
+  </section>
+
+  <section id="results" class="minimal-project detail-block">
+    <h2>Results</h2>
+    <div class="detail-metric-grid">
+      <div class="detail-metric"><p class="detail-metric__label">Evidence</p><h3>Structured Ablations</h3><p>Each model was evaluated under aligned settings for direct comparison.</p></div>
+      <div class="detail-metric"><p class="detail-metric__label">Engineering</p><h3>Reusable Pipeline</h3><p>Experiment config can be reused for new models and datasets quickly.</p></div>
+    </div>
+  </section>
+
+  <section id="links" class="minimal-project detail-block detail-block--alt">
+    <h2>Links</h2>
+    <p class="project-links">
+      {% if page.demo_url and page.demo_url != "" %}
+        <a class="btn btn--primary" href="{{ page.demo_url }}" target="_blank" rel="noopener noreferrer">Live Demo</a>
+      {% else %}
+        <span class="project-link-muted">Demo link coming soon</span>
+      {% endif %}
+
+      {% if page.github_url and page.github_url != "" %}
+        <a class="btn btn--inverse" href="{{ page.github_url }}" target="_blank" rel="noopener noreferrer">GitHub</a>
+      {% else %}
+        <span class="project-link-muted">GitHub link coming soon</span>
+      {% endif %}
+    </p>
+  </section>
+</div>

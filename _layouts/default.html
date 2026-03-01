@@ -43,7 +43,7 @@
           var intro = document.getElementById("intro-screen");
           var progressBar = document.getElementById("scroll-progress-bar");
           var reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-          var introSeenKey = "intro_seen_v1";
+          var introSeenKey = "intro_seen_v2";
           var introSeen = false;
 
           try {
@@ -86,7 +86,7 @@
           function initCinematicMotion() {
             var revealTargets = Array.prototype.slice.call(
               document.querySelectorAll(
-                ".site-main > *:not(script), .minimal-hero, .minimal-project, .minimal-card, .minimal-note, .concept-card, .notes-route"
+                ".site-main > *:not(script), .minimal-hero, .minimal-project, .minimal-card, .minimal-note, .concept-card, .notes-route, .detail-nav, .detail-block, .detail-metric"
               )
             );
             var uniqueTargets = [];
@@ -186,9 +186,9 @@
               if (intro) {
                 window.setTimeout(function () {
                   intro.remove();
-                }, 920);
+                }, 1220);
               }
-            }, 1050);
+            }, 1650);
           }
         });
       })();
