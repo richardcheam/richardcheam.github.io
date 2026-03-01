@@ -14,10 +14,10 @@
   --accent: #000000;
   --accent-contrast: #ffffff;
   --wash: rgba(0, 0, 0, 0.04);
-  --hover-wash: rgba(0, 0, 0, 0.085);
-  --sheen: rgba(0, 0, 0, 0.08);
+  --hover-wash: rgba(0, 0, 0, 0.055);
+  --sheen: rgba(0, 0, 0, 0.06);
   --shadow: rgba(0, 0, 0, 0.1);
-  --shadow-strong: rgba(0, 0, 0, 0.2);
+  --shadow-strong: rgba(0, 0, 0, 0.14);
   --radius: 14px;
   --ease-cinematic: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-fade: cubic-bezier(0.22, 0.61, 0.36, 1);
@@ -36,10 +36,10 @@
     --accent: #ffffff;
     --accent-contrast: #000000;
     --wash: rgba(255, 255, 255, 0.05);
-    --hover-wash: rgba(255, 255, 255, 0.08);
-    --sheen: rgba(255, 255, 255, 0.11);
+    --hover-wash: rgba(255, 255, 255, 0.065);
+    --sheen: rgba(255, 255, 255, 0.09);
     --shadow: rgba(255, 255, 255, 0.08);
-    --shadow-strong: rgba(255, 255, 255, 0.12);
+    --shadow-strong: rgba(255, 255, 255, 0.1);
   }
 }
 
@@ -53,10 +53,10 @@ html[data-theme="dark"] {
   --accent: #ffffff;
   --accent-contrast: #000000;
   --wash: rgba(255, 255, 255, 0.05);
-  --hover-wash: rgba(255, 255, 255, 0.08);
-  --sheen: rgba(255, 255, 255, 0.11);
+  --hover-wash: rgba(255, 255, 255, 0.065);
+  --sheen: rgba(255, 255, 255, 0.09);
   --shadow: rgba(255, 255, 255, 0.08);
-  --shadow-strong: rgba(255, 255, 255, 0.12);
+  --shadow-strong: rgba(255, 255, 255, 0.1);
 }
 
 html[data-theme="light"] {
@@ -69,10 +69,10 @@ html[data-theme="light"] {
   --accent: #000000;
   --accent-contrast: #ffffff;
   --wash: rgba(0, 0, 0, 0.04);
-  --hover-wash: rgba(0, 0, 0, 0.085);
-  --sheen: rgba(0, 0, 0, 0.08);
+  --hover-wash: rgba(0, 0, 0, 0.055);
+  --sheen: rgba(0, 0, 0, 0.06);
   --shadow: rgba(0, 0, 0, 0.1);
-  --shadow-strong: rgba(0, 0, 0, 0.2);
+  --shadow-strong: rgba(0, 0, 0, 0.14);
 }
 
 * {
@@ -330,14 +330,14 @@ li {
   text-transform: uppercase;
   padding: 0.42rem 0.75rem;
   line-height: 1;
-  transition: background-color 0.42s var(--ease-fade), color 0.42s var(--ease-fade), transform 0.42s var(--ease-cinematic), box-shadow 0.42s var(--ease-cinematic);
+  transition: background-color 0.3s var(--ease-fade), color 0.3s var(--ease-fade), transform 0.3s var(--ease-cinematic), box-shadow 0.3s var(--ease-cinematic);
 }
 
 .theme-toggle:hover {
   background: var(--ink);
   color: var(--bg);
-  transform: translateY(-2px);
-  box-shadow: 0 10px 24px var(--shadow);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px var(--shadow);
   cursor: pointer;
 }
 
@@ -370,7 +370,7 @@ li {
   border: 1px solid var(--stroke);
   padding: 0.5rem 0.95rem;
   text-decoration: none;
-  transition: transform 0.45s var(--ease-cinematic), box-shadow 0.45s var(--ease-cinematic), opacity 0.45s var(--ease-fade);
+  transition: transform 0.3s var(--ease-cinematic), box-shadow 0.3s var(--ease-cinematic), opacity 0.3s var(--ease-fade);
 }
 
 strong {
@@ -378,8 +378,8 @@ strong {
 }
 
 .btn:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 16px 32px var(--shadow-strong);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 16px var(--shadow);
 }
 
 .btn--primary {
@@ -469,11 +469,11 @@ strong {
   padding: 1rem 1.05rem;
   text-decoration: none;
   background: var(--surface);
-  transition: transform 0.34s var(--ease-cinematic), border-color 0.34s var(--ease-fade), background-color 0.34s var(--ease-fade);
+  transition: transform 0.24s var(--ease-cinematic), border-color 0.24s var(--ease-fade), background-color 0.24s var(--ease-fade);
 }
 
 .notes-route:hover {
-  transform: translateY(-1px);
+  transform: translateY(-0.5px);
   border-color: var(--ink);
   background: var(--hover-wash);
 }
@@ -541,7 +541,7 @@ strong {
   padding: 1rem 0;
   text-decoration: none;
   color: inherit;
-  transition: transform 0.34s var(--ease-cinematic), background-color 0.34s var(--ease-fade);
+  transition: transform 0.24s var(--ease-cinematic), background-color 0.24s var(--ease-fade);
 }
 
 .concept-card:last-child {
@@ -568,7 +568,7 @@ strong {
 }
 
 .concept-card:hover {
-  transform: translateX(4px);
+  transform: translateX(1.5px);
   background: var(--hover-wash);
 }
 
@@ -648,7 +648,7 @@ strong {
   text-transform: uppercase;
   text-decoration: none;
   color: var(--muted);
-  transition: border-color 0.3s var(--ease-fade), color 0.3s var(--ease-fade), background-color 0.3s var(--ease-fade);
+  transition: border-color 0.2s var(--ease-fade), color 0.2s var(--ease-fade), background-color 0.2s var(--ease-fade);
 }
 
 .detail-nav a:hover {
@@ -757,7 +757,7 @@ strong {
   padding: 1.15rem;
   text-decoration: none;
   color: inherit;
-  transition: transform 0.48s var(--ease-cinematic), border-color 0.48s var(--ease-fade), box-shadow 0.48s var(--ease-cinematic);
+  transition: transform 0.28s var(--ease-cinematic), border-color 0.28s var(--ease-fade), box-shadow 0.28s var(--ease-cinematic), background-color 0.28s var(--ease-fade);
 }
 
 .minimal-hero,
@@ -768,7 +768,7 @@ strong {
 .detail-block {
   position: relative;
   overflow: hidden;
-  transition: transform 0.48s var(--ease-cinematic), border-color 0.48s var(--ease-fade), box-shadow 0.48s var(--ease-cinematic), background-color 0.48s var(--ease-fade);
+  transition: transform 0.28s var(--ease-cinematic), border-color 0.28s var(--ease-fade), box-shadow 0.28s var(--ease-cinematic), background-color 0.28s var(--ease-fade);
 }
 
 .minimal-hero::before,
@@ -782,8 +782,8 @@ strong {
   inset: 0;
   background: linear-gradient(120deg, transparent 20%, var(--sheen) 50%, transparent 80%);
   opacity: 0;
-  transform: translateX(-16%);
-  transition: opacity 0.45s var(--ease-fade), transform 0.55s var(--ease-cinematic);
+  transform: translateX(-8%);
+  transition: opacity 0.28s var(--ease-fade), transform 0.34s var(--ease-cinematic);
   pointer-events: none;
 }
 
@@ -802,22 +802,22 @@ strong {
   background: var(--ink);
   transform: scaleX(0);
   transform-origin: left center;
-  transition: transform 0.52s var(--ease-cinematic);
+  transition: transform 0.32s var(--ease-cinematic);
 }
 
 .minimal-hero:hover,
 .minimal-hero:focus-within {
-  transform: translateY(-4px);
+  transform: translateY(-2px);
   border-color: var(--ink);
   background-color: var(--hover-wash);
-  box-shadow: 0 22px 44px var(--shadow-strong);
+  box-shadow: 0 12px 24px var(--shadow);
 }
 
 .minimal-card:hover {
-  transform: translateY(-6px);
+  transform: translateY(-2px);
   border-color: var(--ink);
   background-color: var(--hover-wash);
-  box-shadow: 0 20px 40px var(--shadow-strong);
+  box-shadow: 0 12px 24px var(--shadow);
 }
 
 .minimal-note:hover,
@@ -828,10 +828,10 @@ strong {
 .notes-route:focus-within,
 .detail-block:hover,
 .detail-block:focus-within {
-  transform: translateY(-6px);
+  transform: translateY(-2px);
   border-color: var(--ink);
   background-color: var(--hover-wash);
-  box-shadow: 0 20px 40px var(--shadow-strong);
+  box-shadow: 0 12px 24px var(--shadow);
 }
 
 .minimal-hero:hover::before,
