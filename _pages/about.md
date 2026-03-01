@@ -102,11 +102,12 @@ title: "Richard Cheam"
       <p class="home-project-card__lead">
         Benchmarking transformers against a custom expert router to see how specialization shapes sentiment fairness.
       </p>
-      <div class="home-project-card__stats">
-        <span class="detail-chip detail-chip--impact"><span class="detail-chip__value">Reproducible benchmark</span></span>
-        <span class="detail-chip detail-chip--stack"><span class="detail-chip__value">PyTorch • Hugging Face • MoE</span></span>
-      </div>
-      <a class="home-project-card__cta" href="{{ '/projects/imdb-moe/' | relative_url }}">Explore the project</a>
+    <span class="home-project-card__badge" aria-hidden="true">LLM</span>
+    <div class="home-project-card__stats">
+      <span class="detail-chip detail-chip--impact"><span class="detail-chip__value">Reproducible benchmark</span></span>
+      <span class="detail-chip detail-chip--stack"><span class="detail-chip__value">PyTorch • Hugging Face • MoE</span></span>
+    </div>
+    <a class="home-project-card__cta" href="{{ '/projects/imdb-moe/' | relative_url }}">Explore the project</a>
     </article>
     <article class="home-project-card">
       <p class="home-project-card__kicker">Computer Vision • December 2024</p>
@@ -114,10 +115,11 @@ title: "Richard Cheam"
       <p class="home-project-card__lead">
         Low-label training with pseudo-label refreshes and SimCLR probes to make fewer labels feel abundant.
       </p>
-      <div class="home-project-card__stats">
-        <span class="detail-chip detail-chip--impact"><span class="detail-chip__value">98.55% SimCLR probe</span></span>
-        <span class="detail-chip detail-chip--constraint"><span class="detail-chip__value">100 labels</span></span>
-      </div>
+    <span class="home-project-card__badge" aria-hidden="true">SSL</span>
+    <div class="home-project-card__stats">
+      <span class="detail-chip detail-chip--impact"><span class="detail-chip__value">98.55% SimCLR probe</span></span>
+      <span class="detail-chip detail-chip--constraint"><span class="detail-chip__value">100 labels</span></span>
+    </div>
       <a class="home-project-card__cta" href="{{ '/projects/mnist-ssl/' | relative_url }}">See the build details</a>
     </article>
   </div>

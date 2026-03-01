@@ -17,6 +17,7 @@ permalink: /projects/
     <article class="home-project-card">
       <p class="home-project-card__kicker">NLP • March 2025</p>
       <h3>IMDb Sentiment with Mixture of Experts</h3>
+      <span class="home-project-card__badge" aria-hidden="true">LLM</span>
       <p class="home-project-card__lead">
         Benchmarking BERT-family backbones while designing a router-steering expert stack that reacts to sentiment
         ambiguity with graceful scaling.
@@ -33,6 +34,7 @@ permalink: /projects/
     <article class="home-project-card">
       <p class="home-project-card__kicker">Computer Vision • December 2024</p>
       <h3>SSL &amp; Semi-supervised Learning on MNIST</h3>
+      <span class="home-project-card__badge" aria-hidden="true">SSL</span>
       <p class="home-project-card__lead">
         Low-label training with pseudo-label refreshes and SimCLR probes to turn 100 samples into confident proofs.
       </p>

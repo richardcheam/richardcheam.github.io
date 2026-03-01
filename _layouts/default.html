@@ -45,6 +45,10 @@
           var reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
           var introSeenKey = "intro_seen_v2";
           var introSeen = false;
+          var loader = document.getElementById("cinematic-loader");
+          var cinematicCursor = document.querySelector(".cinematic-cursor");
+          var hasCoarsePointer = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
+          var disableCinematicCursor = reduceMotion || hasCoarsePointer;
 
           try {
             introSeen = localStorage.getItem(introSeenKey) === "1";
@@ -219,17 +223,59 @@
             render();
           }
 
+          function initCinematicLoader() {
+            if (!loader) return;
+            loader.classList.add("is-active");
+          }
+
+          function hideCinematicLoader() {
+            if (!loader) return;
+            loader.classList.remove("is-active");
+          }
+
+          function initCinematicCursor() {
+            if (disableCinematicCursor) return;
+            if (!cinematicCursor) {
+              cinematicCursor = document.createElement("div");
+              cinematicCursor.className = "cinematic-cursor";
+              document.body.appendChild(cinematicCursor);
+            }
+
+            var cursorX = window.innerWidth / 2;
+            var cursorY = window.innerHeight / 2;
+            var targetX = cursorX;
+            var targetY = cursorY;
+            var ease = 0.1;
+
+            function animateCursor() {
+              cursorX += (targetX - cursorX) * ease;
+              cursorY += (targetY - cursorY) * ease;
+              cinematicCursor.style.setProperty("transform", "translate(" + cursorX + "px, " + cursorY + "px) translate(-50%, -50%) scale(0.85)");
+              window.requestAnimationFrame(animateCursor);
+            }
+
+            window.addEventListener("mousemove", function (event) {
+              targetX = event.clientX;
+              targetY = event.clientY;
+            });
+
+            animateCursor();
+          }
+
           initDetailTabs();
           initCinematicMotion();
           updateScrollProgress();
           window.addEventListener("scroll", updateScrollProgress, { passive: true });
           window.addEventListener("resize", updateScrollProgress);
           initCursorAmbience();
+          initCinematicLoader();
+          initCinematicCursor();
 
           if (introSeen || reduceMotion) {
             body.classList.remove("intro-pending");
             body.classList.add("intro-complete");
             if (intro) intro.remove();
+            hideCinematicLoader();
           } else {
             window.setTimeout(function () {
               body.classList.remove("intro-pending");
@@ -240,6 +286,7 @@
               if (intro) {
                 window.setTimeout(function () {
                   intro.remove();
+                  hideCinematicLoader();
                 }, 1220);
               }
             }, 1650);
@@ -251,6 +298,10 @@
   <body class="intro-pending">
     <div class="cinematic-noise" aria-hidden="true"></div>
     <div class="cinematic-progress" aria-hidden="true"><span id="scroll-progress-bar"></span></div>
+    <div id="cinematic-loader" class="cinematic-loader" aria-hidden="true">
+      <div class="loader-ring"></div>
+      <p class="loader-signature">Loading frame</p>
+    </div>
     <div id="intro-screen" class="intro-screen" aria-hidden="true">
       <p class="intro-screen__name">{{ site.title }}</p>
     </div>
