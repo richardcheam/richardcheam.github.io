@@ -4,8 +4,6 @@ title: "Projects"
 permalink: /projects/
 ---
 
-<p class="minimal-intro">Problem → Build → Result summaries recruiters can scan quickly.</p>
-
 <section id="imdb-moe" class="minimal-project">
   <p class="minimal-kicker">NLP • March 2025</p>
   <h2>IMDb Sentiment with Mixture of Experts</h2>

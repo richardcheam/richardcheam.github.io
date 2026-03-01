@@ -1,7 +1,7 @@
 ---
 ---
 
-@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Sora:wght@300;400;500&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Sora:wght@200;300;400&display=swap");
 
 :root {
   color-scheme: light dark;
@@ -75,6 +75,7 @@ body {
 body {
   color: var(--ink);
   font-family: "Sora", "Avenir Next", "Segoe UI", sans-serif;
+  font-weight: 300;
   line-height: 1.6;
   background-image: linear-gradient(180deg, var(--wash), transparent 35%);
   background-size: 100% 220%;
@@ -98,7 +99,7 @@ h3,
 h4 {
   color: var(--ink);
   font-family: "Sora", "Avenir Next", "Segoe UI", sans-serif;
-  font-weight: 500;
+  font-weight: 400;
   letter-spacing: -0.02em;
   line-height: 1.2;
 }
@@ -142,7 +143,7 @@ html.js body.intro-complete .intro-screen {
   margin: 0;
   color: var(--ink);
   font-family: "Sora", "Avenir Next", "Segoe UI", sans-serif;
-  font-weight: 500;
+  font-weight: 400;
   font-size: clamp(1.2rem, 6vw, 2.8rem);
   letter-spacing: 0.28em;
   text-transform: uppercase;
@@ -184,7 +185,7 @@ li {
 
 .site-title {
   font-family: "Sora", "Avenir Next", "Segoe UI", sans-serif;
-  font-weight: 500;
+  font-weight: 400;
   text-decoration: none;
   letter-spacing: 0.03em;
 }
@@ -199,7 +200,7 @@ li {
 .site-nav a {
   position: relative;
   text-decoration: none;
-  font-weight: 400;
+  font-weight: 300;
   transition: opacity 0.42s var(--ease-fade);
 }
 
@@ -267,7 +268,7 @@ li {
 .btn {
   display: inline-block;
   border-radius: 999px;
-  font-weight: 500;
+  font-weight: 400;
   border: 1px solid var(--stroke);
   padding: 0.5rem 0.95rem;
   text-decoration: none;
@@ -275,7 +276,7 @@ li {
 }
 
 strong {
-  font-weight: 500;
+  font-weight: 400;
 }
 
 .btn:hover {

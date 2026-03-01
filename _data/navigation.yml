@@ -8,11 +8,11 @@ main:
   - title: "Projects"
     url: /projects/
 
-  - title: "Notes"
-    url: /notes/
-
   - title: "CV"
     url: /cv/
+
+  - title: "Notes"
+    url: /notes/
 
   - title: "Contact"
     url: /contact/
