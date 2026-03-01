@@ -41,6 +41,7 @@
           var toggle = document.getElementById("theme-toggle");
           var body = document.body;
           var intro = document.getElementById("intro-screen");
+          var progressBar = document.getElementById("scroll-progress-bar");
           var reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
           var introSeenKey = "intro_seen_v1";
           var introSeen = false;
@@ -82,6 +83,95 @@
             });
           }
 
+          function initCinematicMotion() {
+            var revealTargets = Array.prototype.slice.call(
+              document.querySelectorAll(
+                ".site-main > *:not(script), .minimal-hero, .minimal-project, .minimal-card, .minimal-note, .concept-card, .notes-route"
+              )
+            );
+            var uniqueTargets = [];
+            var seen = typeof Set !== "undefined" ? new Set() : null;
+
+            revealTargets.forEach(function (target) {
+              if (!target) return;
+              if (seen) {
+                if (seen.has(target)) return;
+                seen.add(target);
+              }
+              target.classList.add("cinematic-reveal");
+              uniqueTargets.push(target);
+            });
+
+            if (reduceMotion || typeof IntersectionObserver === "undefined") {
+              uniqueTargets.forEach(function (target) {
+                target.classList.add("is-visible");
+              });
+              return;
+            }
+
+            uniqueTargets.forEach(function (target, index) {
+              target.style.setProperty("--reveal-index", index % 7);
+            });
+
+            var revealObserver = new IntersectionObserver(
+              function (entries, observer) {
+                entries.forEach(function (entry) {
+                  if (!entry.isIntersecting) return;
+                  entry.target.classList.add("is-visible");
+                  observer.unobserve(entry.target);
+                });
+              },
+              {
+                threshold: 0.16,
+                rootMargin: "0px 0px -8% 0px"
+              }
+            );
+
+            uniqueTargets.forEach(function (target) {
+              revealObserver.observe(target);
+            });
+          }
+
+          function updateScrollProgress() {
+            if (!progressBar) return;
+            var doc = document.documentElement;
+            var scrollTop = window.pageYOffset || doc.scrollTop || 0;
+            var maxScroll = Math.max(0, doc.scrollHeight - window.innerHeight);
+            var progress = maxScroll > 0 ? Math.min(1, scrollTop / maxScroll) : 0;
+            progressBar.style.transform = "scaleY(" + progress.toFixed(4) + ")";
+          }
+
+          function initCursorAmbience() {
+            if (reduceMotion) return;
+            if (window.matchMedia && window.matchMedia("(pointer: coarse)").matches) return;
+
+            var currentX = window.innerWidth * 0.5;
+            var currentY = window.innerHeight * 0.28;
+            var targetX = currentX;
+            var targetY = currentY;
+
+            function render() {
+              currentX += (targetX - currentX) * 0.08;
+              currentY += (targetY - currentY) * 0.08;
+              root.style.setProperty("--cursor-x", currentX.toFixed(1) + "px");
+              root.style.setProperty("--cursor-y", currentY.toFixed(1) + "px");
+              window.requestAnimationFrame(render);
+            }
+
+            window.addEventListener("mousemove", function (event) {
+              targetX = event.clientX;
+              targetY = event.clientY;
+            });
+
+            render();
+          }
+
+          initCinematicMotion();
+          updateScrollProgress();
+          window.addEventListener("scroll", updateScrollProgress, { passive: true });
+          window.addEventListener("resize", updateScrollProgress);
+          initCursorAmbience();
+
           if (introSeen || reduceMotion) {
             body.classList.remove("intro-pending");
             body.classList.add("intro-complete");
@@ -105,6 +195,8 @@
     </script>
   </head>
   <body class="intro-pending">
+    <div class="cinematic-noise" aria-hidden="true"></div>
+    <div class="cinematic-progress" aria-hidden="true"><span id="scroll-progress-bar"></span></div>
     <div id="intro-screen" class="intro-screen" aria-hidden="true">
       <p class="intro-screen__name">{{ site.title }}</p>
     </div>

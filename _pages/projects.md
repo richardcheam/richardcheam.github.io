@@ -16,7 +16,7 @@ permalink: /projects/
   </div>
   <p><strong>Stack:</strong> Hugging Face, PyTorch, MoE</p>
   <p class="project-links">
-    <a class="btn btn--inverse" href="{{ '/projects/imdb-moe/' | relative_url }}">View case study</a>
+    <a class="btn btn--inverse" href="{{ '/projects/imdb-moe/' | relative_url }}">More info</a>
   </p>
 </section>
 
@@ -30,20 +30,6 @@ permalink: /projects/
   </div>
   <p><strong>Stack:</strong> PyTorch, CNN, SimCLR</p>
   <p class="project-links">
-    <a class="btn btn--inverse" href="{{ '/projects/mnist-ssl/' | relative_url }}">View case study</a>
-  </p>
-</section>
-
-<section id="elsa-frailty" class="minimal-project">
-  <p class="minimal-kicker">Research Data Science • 2024</p>
-  <h2>ELSA Structuring and Frailty Index Pipeline</h2>
-  <div class="project-points">
-    <p><strong>Problem:</strong> Longitudinal survey data across 18 years was heterogeneous and difficult to analyze consistently.</p>
-    <p><strong>Build:</strong> Unified waves into modular domains and created a 57-variable frailty scoring workflow.</p>
-    <p><strong>Result:</strong> Reproducible dataset and aging trajectory analysis for 8,000+ participants.</p>
-  </div>
-  <p><strong>Stack:</strong> Python, pandas, statistics, reproducible data pipeline</p>
-  <p class="project-links">
-    <a class="btn btn--inverse" href="{{ '/projects/elsa-frailty/' | relative_url }}">View case study</a>
+    <a class="btn btn--inverse" href="{{ '/projects/mnist-ssl/' | relative_url }}">More info</a>
   </p>
 </section>
