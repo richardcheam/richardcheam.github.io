@@ -273,5 +273,34 @@
     <footer class="site-footer">
       <p>&copy; {{ site.time | date: '%Y' }} {{ site.title }}.</p>
     </footer>
+    <script>
+      (function () {
+        var searchInput = document.getElementById("notes-search-input");
+        var cards = document.querySelectorAll(".notes-category-card");
+        var emptyMessage = document.querySelector(".notes-search-empty");
+
+        if (!searchInput || cards.length === 0) return;
+
+        function updateVisibility() {
+          var query = searchInput.value.trim().toLowerCase();
+          var matched = 0;
+
+          cards.forEach(function (card) {
+            var haystack =
+              ((card.dataset.label || "") + " " + (card.dataset.summary || "") + " " + (card.dataset.count || "")).toLowerCase();
+            var matches = query === "" || haystack.indexOf(query) !== -1;
+            card.hidden = !matches;
+            if (matches) matched += 1;
+          });
+
+          if (emptyMessage) {
+            emptyMessage.hidden = query === "" || matched > 0;
+          }
+        }
+
+        searchInput.addEventListener("input", updateVisibility);
+        updateVisibility();
+      })();
+    </script>
   </body>
 </html>

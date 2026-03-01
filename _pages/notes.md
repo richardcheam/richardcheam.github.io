@@ -44,7 +44,7 @@ permalink: /notes/
       {% else %}
         {% assign category_href = '/notes/' | relative_url %}
       {% endif %}
-      <a class="notes-category-card" data-has-notes="{{ has_notes }}" href="{{ category_href }}">
+      <a class="notes-category-card" data-has-notes="{{ has_notes }}" data-label="{{ cat.label | escape }}" data-summary="{{ cat.summary | escape }}" data-count="{{ cat_count }}" href="{{ category_href }}">
         <p class="notes-category-card__eyebrow">{{ cat.label }}{% if has_notes %} · {{ cat_count }}{% endif %}</p>
         <p class="notes-category-card__summary">{{ cat.summary }}</p>
         {% if has_notes %}
@@ -55,6 +55,7 @@ permalink: /notes/
       </a>
     {% endfor %}
   </div>
+  <p class="notes-search-empty" hidden>No categories match that term. Try another keyword.</p>
 </section>
 
 <section class="home-section notes-fundamentals" aria-label="Fundamentals primer">
