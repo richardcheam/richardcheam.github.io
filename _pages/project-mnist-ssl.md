@@ -12,9 +12,9 @@ github_url: "https://github.com/richardcheam"
   <p class="minimal-intro">Case study on low-label learning with pseudo-labeling and SimCLR representations.</p>
 
   <div class="detail-chips" aria-label="Project highlights">
-    <span class="detail-chip">Impact: 98.55% SimCLR probe</span>
-    <span class="detail-chip">Constraint: 100 labels</span>
-    <span class="detail-chip">Stack: PyTorch • CNN • SimCLR</span>
+    <span class="detail-chip detail-chip--impact"><span class="detail-chip__label">Impact:</span> <span class="detail-chip__value">98.55% SimCLR probe</span></span>
+    <span class="detail-chip detail-chip--constraint"><span class="detail-chip__label">Constraint:</span> <span class="detail-chip__value">100 labels</span></span>
+    <span class="detail-chip detail-chip--stack"><span class="detail-chip__label">Stack:</span> <span class="detail-chip__value">PyTorch • CNN • SimCLR</span></span>
   </div>
 
   <nav class="detail-nav" aria-label="Section navigation">

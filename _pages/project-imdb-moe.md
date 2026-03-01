@@ -12,9 +12,9 @@ github_url: "https://github.com/richardcheam"
   <p class="minimal-intro">Case study focused on benchmarking transformer baselines and testing dynamic expert routing.</p>
 
   <div class="detail-chips" aria-label="Project highlights">
-    <span class="detail-chip">Role: ML Engineer</span>
-    <span class="detail-chip">Impact: Reproducible benchmark framework</span>
-    <span class="detail-chip">Stack: PyTorch • Hugging Face • MoE</span>
+    <span class="detail-chip detail-chip--role"><span class="detail-chip__label">Role:</span> <span class="detail-chip__value">ML Engineer</span></span>
+    <span class="detail-chip detail-chip--impact"><span class="detail-chip__label">Impact:</span> <span class="detail-chip__value">Reproducible benchmark framework</span></span>
+    <span class="detail-chip detail-chip--stack"><span class="detail-chip__label">Stack:</span> <span class="detail-chip__value">PyTorch • Hugging Face • MoE</span></span>
   </div>
 
   <nav class="detail-nav" aria-label="Section navigation">

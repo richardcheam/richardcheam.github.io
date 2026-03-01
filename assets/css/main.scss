@@ -18,6 +18,18 @@
   --sheen: rgba(0, 0, 0, 0.06);
   --shadow: rgba(0, 0, 0, 0.1);
   --shadow-strong: rgba(0, 0, 0, 0.14);
+  --signal: #b42318;
+  --signal-soft: rgba(180, 35, 24, 0.1);
+  --chip-impact: #1f4fd2;
+  --chip-impact-soft: rgba(31, 79, 210, 0.12);
+  --chip-constraint: #c2410c;
+  --chip-constraint-soft: rgba(194, 65, 12, 0.12);
+  --chip-stack: #0f766e;
+  --chip-stack-soft: rgba(15, 118, 110, 0.12);
+  --chip-role: #6d28d9;
+  --chip-role-soft: rgba(109, 40, 217, 0.12);
+  --chip-scale: #0f766e;
+  --chip-scale-soft: rgba(15, 118, 110, 0.12);
   --radius: 14px;
   --ease-cinematic: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-fade: cubic-bezier(0.22, 0.61, 0.36, 1);
@@ -40,6 +52,18 @@
     --sheen: rgba(255, 255, 255, 0.09);
     --shadow: rgba(255, 255, 255, 0.08);
     --shadow-strong: rgba(255, 255, 255, 0.1);
+    --signal: #ff6b66;
+    --signal-soft: rgba(255, 107, 102, 0.14);
+    --chip-impact: #7aa2ff;
+    --chip-impact-soft: rgba(122, 162, 255, 0.16);
+    --chip-constraint: #ff9c6e;
+    --chip-constraint-soft: rgba(255, 156, 110, 0.16);
+    --chip-stack: #46d4c3;
+    --chip-stack-soft: rgba(70, 212, 195, 0.16);
+    --chip-role: #c29bff;
+    --chip-role-soft: rgba(194, 155, 255, 0.16);
+    --chip-scale: #46d4c3;
+    --chip-scale-soft: rgba(70, 212, 195, 0.16);
   }
 }
 
@@ -57,6 +81,18 @@ html[data-theme="dark"] {
   --sheen: rgba(255, 255, 255, 0.09);
   --shadow: rgba(255, 255, 255, 0.08);
   --shadow-strong: rgba(255, 255, 255, 0.1);
+  --signal: #ff6b66;
+  --signal-soft: rgba(255, 107, 102, 0.14);
+  --chip-impact: #7aa2ff;
+  --chip-impact-soft: rgba(122, 162, 255, 0.16);
+  --chip-constraint: #ff9c6e;
+  --chip-constraint-soft: rgba(255, 156, 110, 0.16);
+  --chip-stack: #46d4c3;
+  --chip-stack-soft: rgba(70, 212, 195, 0.16);
+  --chip-role: #c29bff;
+  --chip-role-soft: rgba(194, 155, 255, 0.16);
+  --chip-scale: #46d4c3;
+  --chip-scale-soft: rgba(70, 212, 195, 0.16);
 }
 
 html[data-theme="light"] {
@@ -73,6 +109,18 @@ html[data-theme="light"] {
   --sheen: rgba(0, 0, 0, 0.06);
   --shadow: rgba(0, 0, 0, 0.1);
   --shadow-strong: rgba(0, 0, 0, 0.14);
+  --signal: #b42318;
+  --signal-soft: rgba(180, 35, 24, 0.1);
+  --chip-impact: #1f4fd2;
+  --chip-impact-soft: rgba(31, 79, 210, 0.12);
+  --chip-constraint: #c2410c;
+  --chip-constraint-soft: rgba(194, 65, 12, 0.12);
+  --chip-stack: #0f766e;
+  --chip-stack-soft: rgba(15, 118, 110, 0.12);
+  --chip-role: #6d28d9;
+  --chip-role-soft: rgba(109, 40, 217, 0.12);
+  --chip-scale: #0f766e;
+  --chip-scale-soft: rgba(15, 118, 110, 0.12);
 }
 
 * {
@@ -612,7 +660,9 @@ strong {
 }
 
 .detail-chip {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
   border: 1px solid var(--stroke);
   border-radius: 999px;
   padding: 0.24rem 0.58rem;
@@ -621,6 +671,52 @@ strong {
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--muted);
+}
+
+.detail-chip__label {
+  font-weight: 500;
+}
+
+.detail-chip__value {
+  color: var(--ink-soft);
+}
+
+.detail-chip--impact {
+  border-color: var(--chip-impact);
+  background: var(--chip-impact-soft);
+}
+
+.detail-chip--impact .detail-chip__label {
+  color: var(--chip-impact);
+}
+
+.detail-chip--constraint {
+  border-color: var(--chip-constraint);
+  background: var(--chip-constraint-soft);
+}
+
+.detail-chip--constraint .detail-chip__label {
+  color: var(--chip-constraint);
+}
+
+.detail-chip--stack,
+.detail-chip--scale {
+  border-color: var(--chip-stack);
+  background: var(--chip-stack-soft);
+}
+
+.detail-chip--stack .detail-chip__label,
+.detail-chip--scale .detail-chip__label {
+  color: var(--chip-stack);
+}
+
+.detail-chip--role {
+  border-color: var(--chip-role);
+  background: var(--chip-role-soft);
+}
+
+.detail-chip--role .detail-chip__label {
+  color: var(--chip-role);
 }
 
 .detail-nav {
@@ -735,8 +831,25 @@ strong {
 }
 
 .project-backlink {
-  color: var(--muted);
+  display: inline-block;
+  border: 1px solid var(--signal);
+  border-radius: 999px;
+  padding: 0.2rem 0.56rem;
+  color: var(--signal);
+  background: var(--signal-soft);
   text-decoration: none;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.66rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  transition: background-color 0.2s var(--ease-fade), color 0.2s var(--ease-fade), border-color 0.2s var(--ease-fade);
+}
+
+.project-backlink:hover {
+  background: var(--signal);
+  color: #ffffff;
+  border-color: var(--signal);
+  opacity: 1;
 }
 
 .minimal-grid {
