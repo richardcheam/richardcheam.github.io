@@ -4,6 +4,8 @@ title: "Projects"
 permalink: /projects/
 ---
 
+<p class="minimal-intro">Selected projects with focused problem framing, build details, and outcomes.</p>
+
 <section id="imdb-moe" class="minimal-project">
   <p class="minimal-kicker">NLP • March 2025</p>
   <h2>IMDb Sentiment with Mixture of Experts</h2>
@@ -13,6 +15,9 @@ permalink: /projects/
     <p><strong>Result:</strong> Reproducible experimentation framework for scalable model comparison and selective expert activation.</p>
   </div>
   <p><strong>Stack:</strong> Hugging Face, PyTorch, MoE</p>
+  <p class="project-links">
+    <a class="btn btn--inverse" href="{{ '/projects/imdb-moe/' | relative_url }}">View case study</a>
+  </p>
 </section>
 
 <section id="mnist-ssl" class="minimal-project">
@@ -24,6 +29,9 @@ permalink: /projects/
     <p><strong>Result:</strong> 97.18% (semi-supervised), 98.55% linear-probe with SimCLR, 98.44% with MLP head.</p>
   </div>
   <p><strong>Stack:</strong> PyTorch, CNN, SimCLR</p>
+  <p class="project-links">
+    <a class="btn btn--inverse" href="{{ '/projects/mnist-ssl/' | relative_url }}">View case study</a>
+  </p>
 </section>
 
 <section id="elsa-frailty" class="minimal-project">
@@ -35,4 +43,7 @@ permalink: /projects/
     <p><strong>Result:</strong> Reproducible dataset and aging trajectory analysis for 8,000+ participants.</p>
   </div>
   <p><strong>Stack:</strong> Python, pandas, statistics, reproducible data pipeline</p>
+  <p class="project-links">
+    <a class="btn btn--inverse" href="{{ '/projects/elsa-frailty/' | relative_url }}">View case study</a>
+  </p>
 </section>

@@ -73,6 +73,6 @@
   label: Agents & Tool Use
   summary: Planning loops, tools, memory, and orchestration patterns.
 
-- key: safety-ethics
-  label: Safety, Ethics & Policy
-  summary: Risk, alignment, governance, privacy, and responsible AI.
+# - key: safety-ethics
+#   label: Safety, Ethics & Policy
+#   summary: Risk, alignment, governance, privacy, and responsible AI.
