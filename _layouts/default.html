@@ -141,6 +141,10 @@
               var panels = Array.prototype.slice.call(group.querySelectorAll("[data-detail-panel]"));
               if (triggers.length === 0 || panels.length === 0) return;
 
+              panels.forEach(function (panel, index) {
+                panel.style.setProperty("--detail-index", index);
+              });
+
               function activate(panelId) {
                 var hasActive = false;
 

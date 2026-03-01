@@ -903,6 +903,8 @@ html.js body.intro-complete .intro-screen {
   filter: blur(0);
   pointer-events: auto;
   box-shadow: 0 24px 48px var(--shadow-soft);
+  animation: detailReveal 0.66s var(--ease-cinematic) forwards;
+  animation-delay: calc(var(--detail-index, 0) * 0.12s);
 }
 
 .detail-block.is-active::before {
@@ -1020,6 +1022,19 @@ html.js body.intro-complete .intro-screen {
     opacity: 1;
     transform: translateY(0);
     letter-spacing: 0.26em;
+  }
+}
+
+@keyframes detailReveal {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+    filter: blur(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
   }
 }
 
