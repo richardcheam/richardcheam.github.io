@@ -1,17 +1,20 @@
 # Ordered category registry for the Notes page.
 # key must match `category` in each note after slugify.
 
-- key: fundamentals
-  label: Fundamentals
-  summary: Core concepts, intuition, and review notes.
+# - key: fundamentals
+#   label: Fundamentals
+#   summary: Core concepts, intuition, and review notes.
 
-- key: classical-ml
-  label: Classical ML
-  summary: Tree models, linear models, kernels, and feature engineering.
-
+# - key: classical-ml
+#   label: Classical ML
+#   summary: Tree models, linear models, kernels, and feature engineering.
 - key: deep-learning
   label: Deep Learning
   summary: Neural architectures, optimization, and training patterns.
+
+- key: speech
+  label: Speech
+  summary: ASR, TTS, streaming inference, and speech pipelines.
 
 - key: nlp
   label: NLP
@@ -21,61 +24,57 @@
   label: LLM
   summary: Prompting, fine-tuning, retrieval, and evaluation for large language models.
 
-- key: speech
-  label: Speech
-  summary: ASR, TTS, streaming inference, and speech pipelines.
-
 - key: computer-vision
   label: Computer Vision
   summary: Detection, segmentation, representation learning, and visual reasoning.
 
-- key: multimodal
-  label: Multimodal
-  summary: Methods combining text, vision, speech, and structured data.
+# - key: multimodal
+#   label: Multimodal
+#   summary: Methods combining text, vision, speech, and structured data.
 
-- key: world-models
-  label: World Models
-  summary: Latent dynamics, simulation, planning, and model-based reasoning.
+# - key: world-models
+#   label: World Models
+#   summary: Latent dynamics, simulation, planning, and model-based reasoning.
 
-- key: bayesian
-  label: Bayesian & Probabilistic
-  summary: Uncertainty, priors, posterior inference, and probabilistic modeling.
+# - key: bayesian
+#   label: Bayesian & Probabilistic
+#   summary: Uncertainty, priors, posterior inference, and probabilistic modeling.
 
-- key: causal-ml
-  label: Causal ML
-  summary: Structural counterfactuals, treatment effects, and causal discovery.
+# - key: causal-ml
+#   label: Causal ML
+#   summary: Structural counterfactuals, treatment effects, and causal discovery.
 
-- key: reinforcement-learning
-  label: Reinforcement Learning
-  summary: Policy learning, value methods, exploration, and decision-making.
+# - key: reinforcement-learning
+#   label: Reinforcement Learning
+#   summary: Policy learning, value methods, exploration, and decision-making.
 
-- key: generative-models
-  label: Generative Models
-  summary: Diffusion, VAEs, GANs, and generation control.
+# - key: generative-models
+#   label: Generative Models
+#   summary: Diffusion, VAEs, GANs, and generation control.
 
-- key: graph-ml
-  label: Graph ML
-  summary: Graph neural networks, knowledge graphs, and relational learning.
+# - key: graph-ml
+#   label: Graph ML
+#   summary: Graph neural networks, knowledge graphs, and relational learning.
 
-- key: time-series
-  label: Time Series
-  summary: Forecasting, temporal representation, and sequence modeling.
+# - key: time-series
+#   label: Time Series
+#   summary: Forecasting, temporal representation, and sequence modeling.
 
-- key: optimization
-  label: Optimization
-  summary: Schedulers, optimizers, objectives, and convergence diagnostics.
+# - key: optimization
+#   label: Optimization
+#   summary: Schedulers, optimizers, objectives, and convergence diagnostics.
 
-- key: evaluation
-  label: Evaluation & Benchmarking
-  summary: Metrics, ablations, robustness checks, and comparison protocols.
+# - key: evaluation
+#   label: Evaluation & Benchmarking
+#   summary: Metrics, ablations, robustness checks, and comparison protocols.
 
-- key: mlops
-  label: MLOps & Production
-  summary: Deployment, monitoring, CI/CD, scaling, and reliability.
+# - key: mlops
+#   label: MLOps & Production
+#   summary: Deployment, monitoring, CI/CD, scaling, and reliability.
 
-- key: agents
-  label: Agents & Tool Use
-  summary: Planning loops, tools, memory, and orchestration patterns.
+# - key: agents
+#   label: Agents & Tool Use
+#   summary: Planning loops, tools, memory, and orchestration patterns.
 
 # - key: safety-ethics
 #   label: Safety, Ethics & Policy

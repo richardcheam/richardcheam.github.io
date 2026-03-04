@@ -70,6 +70,103 @@
 
           refreshThemeUi();
 
+          var megaRoot = document.querySelector("[data-mega-root]");
+          var megaShell = megaRoot && megaRoot.querySelector("[data-mega-shell]");
+          var megaTriggers = megaRoot ? Array.prototype.slice.call(megaRoot.querySelectorAll("[data-mega-target]")) : [];
+          var megaPanels = megaRoot ? Array.prototype.slice.call(megaRoot.querySelectorAll("[data-mega-panel]")) : [];
+          var megaCloseTimer = null;
+          var desktopMega = window.matchMedia && window.matchMedia("(min-width: 901px)").matches;
+          var activeMega = null;
+
+          function clearMegaClose() {
+            if (!megaCloseTimer) return;
+            window.clearTimeout(megaCloseTimer);
+            megaCloseTimer = null;
+          }
+
+          function setMegaOpen(isOpen) {
+            if (!megaRoot || !megaShell) return;
+            megaRoot.classList.toggle("is-mega-open", isOpen);
+            megaShell.setAttribute("aria-hidden", isOpen ? "false" : "true");
+          }
+
+          function activateMega(target) {
+            if (!megaRoot || !megaShell) return;
+            activeMega = target;
+
+            megaPanels.forEach(function (panel) {
+              panel.classList.toggle("is-active", panel.getAttribute("data-mega-panel") === target);
+            });
+
+            megaTriggers.forEach(function (trigger) {
+              var isActive = trigger.getAttribute("data-mega-target") === target;
+              trigger.classList.toggle("is-active", isActive);
+              trigger.setAttribute("aria-expanded", isActive ? "true" : "false");
+            });
+
+            setMegaOpen(true);
+          }
+
+          function closeMega() {
+            activeMega = null;
+            megaPanels.forEach(function (panel) {
+              panel.classList.remove("is-active");
+            });
+            megaTriggers.forEach(function (trigger) {
+              trigger.classList.remove("is-active");
+              trigger.setAttribute("aria-expanded", "false");
+            });
+            setMegaOpen(false);
+          }
+
+          function scheduleMegaClose() {
+            clearMegaClose();
+            megaCloseTimer = window.setTimeout(closeMega, 140);
+          }
+
+          if (megaRoot && megaShell && megaTriggers.length > 0) {
+            megaTriggers.forEach(function (trigger) {
+              trigger.addEventListener("mouseenter", function () {
+                if (!desktopMega) return;
+                clearMegaClose();
+                activateMega(trigger.getAttribute("data-mega-target"));
+              });
+
+              trigger.addEventListener("focus", function () {
+                if (!desktopMega) return;
+                clearMegaClose();
+                activateMega(trigger.getAttribute("data-mega-target"));
+              });
+            });
+
+            megaRoot.addEventListener("mouseenter", clearMegaClose);
+            megaRoot.addEventListener("mouseleave", function () {
+              if (!desktopMega) return;
+              scheduleMegaClose();
+            });
+            megaRoot.addEventListener("focusin", clearMegaClose);
+            megaRoot.addEventListener("focusout", function (event) {
+              if (!desktopMega) return;
+              var nextFocused = event.relatedTarget;
+              if (!nextFocused || !megaRoot.contains(nextFocused)) {
+                scheduleMegaClose();
+              }
+            });
+
+            document.addEventListener("keydown", function (event) {
+              if (event.key === "Escape") closeMega();
+            });
+
+            document.addEventListener("click", function (event) {
+              if (!megaRoot.contains(event.target)) closeMega();
+            });
+
+            window.addEventListener("resize", function () {
+              desktopMega = window.matchMedia && window.matchMedia("(min-width: 901px)").matches;
+              if (!desktopMega) closeMega();
+            });
+          }
+
           var revealTargets = Array.prototype.slice.call(document.querySelectorAll("[data-reveal]"));
           if (revealTargets.length > 0) {
             revealTargets.forEach(function (target, index) {
@@ -212,15 +309,103 @@
         </div>
       </div>
     {% endif %}
-    <header class="site-header">
+    <header class="site-header" data-mega-root>
       <div class="site-header__inner">
-        <a class="site-title" href="{{ '/' | relative_url }}">{{ site.title }}</a>
+        <a class="site-title" href="{{ '/' | relative_url }}">Home</a>
         <nav class="site-nav" aria-label="Primary">
-          {% for link in site.data.navigation.main %}
-            <a href="{{ link.url | relative_url }}">{{ link.title }}</a>
-          {% endfor %}
+          <a class="site-nav__item" href="{{ '/projects/' | relative_url }}" data-mega-target="projects" aria-haspopup="true" aria-expanded="false">Projects</a>
+          <a class="site-nav__item" href="{{ '/notes/' | relative_url }}" data-mega-target="notes" aria-haspopup="true" aria-expanded="false">Technical Notes</a>
+          <a class="site-nav__item" href="{{ '/blog/' | relative_url }}" data-mega-target="blog" aria-haspopup="true" aria-expanded="false">Blog</a>
+          <a class="site-nav__item" href="{{ '/cv/' | relative_url }}">About Me</a>
+          <a class="site-nav__item" href="{{ '/contact/' | relative_url }}" data-mega-target="contact" aria-haspopup="true" aria-expanded="false">Contact</a>
         </nav>
         <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch color mode">Dark</button>
+      </div>
+      <div class="mega-shell" data-mega-shell aria-hidden="true">
+        <section class="mega-panel" data-mega-panel="projects">
+          <div class="mega-col">
+            <h3>Explore Projects</h3>
+            <a href="{{ '/projects/' | relative_url }}">All Projects</a>
+            <a href="{{ '/projects/imdb-moe/' | relative_url }}">IMDb Sentiment with MoE</a>
+            <a href="{{ '/projects/mnist-ssl/' | relative_url }}">MNIST SSL Case Study</a>
+          </div>
+          <div class="mega-col">
+            <h3>Build Focus</h3>
+            <a href="{{ '/projects/' | relative_url }}">NLP and LLM Systems</a>
+            <a href="{{ '/projects/' | relative_url }}">Computer Vision Training</a>
+            <a href="{{ '/projects/' | relative_url }}">Evaluation and Reproducibility</a>
+          </div>
+          <div class="mega-col">
+            <h3>More from Projects</h3>
+            <a href="https://github.com/richardcheam" target="_blank" rel="noopener noreferrer">GitHub Repositories</a>
+            <a href="{{ '/notes/' | relative_url }}">Related Technical Notes</a>
+            <a href="{{ '/contact/' | relative_url }}">Discuss Collaboration</a>
+          </div>
+        </section>
+
+        <section class="mega-panel" data-mega-panel="notes">
+          <div class="mega-col">
+            <h3>Explore Technical Notes</h3>
+            <a href="{{ '/notes/' | relative_url }}">All Technical Notes</a>
+            <a href="{{ '/notes/fundamentals/' | relative_url }}">Fundamentals</a>
+            <a href="{{ '/notes/2026-03-01-world-model/' | relative_url }}">World Models</a>
+          </div>
+          <div class="mega-col">
+            <h3>Key Topics</h3>
+            <a href="{{ '/notes/' | relative_url }}">LLM and NLP</a>
+            <a href="{{ '/notes/' | relative_url }}">Speech and Vision</a>
+            <a href="{{ '/notes/' | relative_url }}">Optimization and Evaluation</a>
+          </div>
+          <div class="mega-col">
+            <h3>More from Notes</h3>
+            <a href="{{ '/blog/' | relative_url }}">Technical Blog</a>
+            <a href="{{ '/projects/' | relative_url }}">Project Case Studies</a>
+            <a href="{{ '/contact/' | relative_url }}">Share References</a>
+          </div>
+        </section>
+
+        <section class="mega-panel" data-mega-panel="blog">
+          <div class="mega-col">
+            <h3>Explore Blog</h3>
+            <a href="{{ '/blog/' | relative_url }}">All Posts</a>
+            <a href="{{ '/notes/2026-03-01-paper-review/' | relative_url }}">Paper Review</a>
+            <a href="{{ '/notes/2026-03-01-speech-ai/' | relative_url }}">Speech AI Notes</a>
+          </div>
+          <div class="mega-col">
+            <h3>Read by Goal</h3>
+            <a href="{{ '/blog/' | relative_url }}">Concept Explanations</a>
+            <a href="{{ '/blog/' | relative_url }}">Implementation Notes</a>
+            <a href="{{ '/blog/' | relative_url }}">Research Takeaways</a>
+          </div>
+          <div class="mega-col">
+            <h3>More from Blog</h3>
+            <a href="{{ '/notes/' | relative_url }}">Technical Notes Library</a>
+            <a href="{{ '/projects/' | relative_url }}">Projects</a>
+            <a href="{{ '/contact/' | relative_url }}">Connect</a>
+          </div>
+        </section>
+
+        <section class="mega-panel" data-mega-panel="contact">
+          <div class="mega-col">
+            <h3>Contact</h3>
+            <a href="{{ '/contact/' | relative_url }}">Contact Page</a>
+            <a href="{{ '/cv/' | relative_url }}">About Me</a>
+            <a href="mailto:richard.cheam@etu.u-paris.fr">Email</a>
+            <a href="https://www.linkedin.com/in/richard-cheam" target="_blank" rel="noopener noreferrer">LinkedIn</a>
+          </div>
+          <div class="mega-col">
+            <h3>Profiles</h3>
+            <a href="https://github.com/richardcheam" target="_blank" rel="noopener noreferrer">GitHub</a>
+            <a href="{{ '/projects/' | relative_url }}">Project Portfolio</a>
+            <a href="{{ '/notes/' | relative_url }}">Technical Notes</a>
+          </div>
+          <div class="mega-col">
+            <h3>Focus Areas</h3>
+            <a href="{{ '/projects/' | relative_url }}">ML / AI Engineering</a>
+            <a href="{{ '/notes/' | relative_url }}">Research Summaries</a>
+            <a href="{{ '/blog/' | relative_url }}">Technical Writing</a>
+          </div>
+        </section>
       </div>
     </header>
 

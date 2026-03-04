@@ -67,7 +67,7 @@ title: "Richard Cheam"
 
 <section id="notes" class="section-block" data-reveal>
   <header class="section-head">
-    <p class="section-eyebrow">Knowledge Notes</p>
+    <p class="section-eyebrow">Technical Notes</p>
     <h2>AI paper summaries and concept cards</h2>
     <p class="section-description">A compact memory system for papers and concepts I revisit often.</p>
   </header>

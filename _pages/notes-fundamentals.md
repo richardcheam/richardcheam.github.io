@@ -7,7 +7,7 @@ permalink: /notes/fundamentals/
 {% assign sorted_notes = site.notes | sort: "date" | reverse %}
 
 <section class="page-intro" data-reveal>
-  <p><a class="notes-backlink" href="{{ '/notes/' | relative_url }}">Back to Notes</a></p>
+  <p><a class="notes-backlink" href="{{ '/notes/' | relative_url }}">Back to Technical Notes</a></p>
   <p class="section-eyebrow">Fundamentals</p>
   <h2>Core concepts first</h2>
   <p class="section-description">

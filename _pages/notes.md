@@ -1,13 +1,13 @@
 ---
 layout: default
-title: "Notes"
+title: "Technical Notes"
 permalink: /notes/
 ---
 
 {% assign sorted_notes = site.notes | sort: "date" | reverse %}
 
 <section class="page-intro" data-reveal>
-  <p class="section-eyebrow">Knowledge Notes</p>
+  <p class="section-eyebrow">Technical Notes</p>
   <h2>AI paper summaries and memory-friendly reviews</h2>
   <p class="section-description">
     This is my structured learning space: concise notes, core takeaways, and tags for fast retrieval.

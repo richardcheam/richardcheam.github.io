@@ -1,6 +1,6 @@
 ---
 layout: default
-title: "CV"
+title: "About Me"
 permalink: /cv/
 ---
 

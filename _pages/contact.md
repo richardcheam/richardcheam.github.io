@@ -5,10 +5,10 @@ permalink: /contact/
 ---
 
 <section class="page-intro" data-reveal>
-  <p class="section-eyebrow">Contact</p>
-  <h2>Let’s build practical AI products</h2>
+  <!-- <p class="section-eyebrow">Contact</p>
+  <h2>Let’s build practical AI products</h2> -->
   <p class="section-description">
-    Open to Data Scientist and ML/AI Engineer opportunities, research collaborations, and technical discussions.
+    Open to Data Scientist and ML/AI Engineer opportunities, collaborations, and technical discussions.
   </p>
 </section>
 
