@@ -29,6 +29,10 @@
           var toggle = document.getElementById("theme-toggle");
           var reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
           var themeMeta = document.querySelector('meta[name="theme-color"]');
+          var scrollProgressBar = document.getElementById("scroll-progress-bar");
+          var introScreen = document.getElementById("intro-screen");
+          var body = document.body;
+          var isHome = body.getAttribute("data-page") === "/";
 
           function prefersDark() {
             return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
@@ -95,6 +99,15 @@
                 revealObserver.observe(target);
               });
             }
+          }
+
+          function updateScrollProgress() {
+            if (!scrollProgressBar) return;
+            var doc = document.documentElement;
+            var scrollTop = window.pageYOffset || doc.scrollTop || 0;
+            var maxScroll = Math.max(0, doc.scrollHeight - window.innerHeight);
+            var progress = maxScroll > 0 ? Math.min(1, scrollTop / maxScroll) : 0;
+            scrollProgressBar.style.transform = "scaleX(" + progress.toFixed(4) + ")";
           }
 
           var tabGroups = Array.prototype.slice.call(document.querySelectorAll("[data-detail-tabs]"));
@@ -167,12 +180,38 @@
             applyFilter();
           }
 
-          document.body.classList.add("page-ready");
+          function finishIntro() {
+            body.classList.remove("intro-pending");
+            body.classList.remove("intro-started");
+            body.classList.add("intro-complete");
+          }
+
+          if (introScreen && isHome && !reduceMotion) {
+            window.setTimeout(function () {
+              body.classList.add("intro-started");
+            }, 40);
+            window.setTimeout(finishIntro, 2150);
+          } else {
+            finishIntro();
+          }
+
+          updateScrollProgress();
+          window.addEventListener("scroll", updateScrollProgress, { passive: true });
+          window.addEventListener("resize", updateScrollProgress);
         });
       })();
     </script>
   </head>
-  <body>
+  <body class="{% if page.url == '/' %}intro-pending{% else %}intro-complete{% endif %}" data-page="{{ page.url }}">
+    <div class="scroll-progress" aria-hidden="true"><span id="scroll-progress-bar"></span></div>
+    {% if page.url == '/' %}
+      <div id="intro-screen" class="intro-screen" aria-hidden="true">
+        <div class="intro-screen__inner">
+          <p class="intro-screen__name">{{ site.title }}</p>
+          <p class="intro-screen__subtitle">Machine Learning &amp; AI Engineer</p>
+        </div>
+      </div>
+    {% endif %}
     <header class="site-header">
       <div class="site-header__inner">
         <a class="site-title" href="{{ '/' | relative_url }}">{{ site.title }}</a>
