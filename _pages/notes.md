@@ -34,7 +34,8 @@ permalink: /notes/
     {% for cat in site.data.notes_categories %}
       {% assign cat_count = 0 %}
       {% for note in sorted_notes %}
-        {% if note.category | default: "" | slugify == cat.key %}
+        {% assign note_key = note.category | default: "" | slugify %}
+        {% if note_key == cat.key %}
           {% assign cat_count = cat_count | plus: 1 %}
         {% endif %}
       {% endfor %}
@@ -71,7 +72,8 @@ permalink: /notes/
   </div>
   {% assign fundamentals_count = 0 %}
   {% for note in sorted_notes %}
-    {% if note.category | default: "" | slugify == "fundamentals" %}
+    {% assign note_key = note.category | default: "" | slugify %}
+    {% if note_key == "fundamentals" %}
       {% assign fundamentals_count = fundamentals_count | plus: 1 %}
     {% endif %}
   {% endfor %}
@@ -82,7 +84,8 @@ permalink: /notes/
       <div class="fundamentals-summary__grid">
         {% assign fundamentals_rendered = 0 %}
         {% for note in sorted_notes %}
-          {% if note.category | default: "" | slugify == "fundamentals" %}
+          {% assign note_key = note.category | default: "" | slugify %}
+          {% if note_key == "fundamentals" %}
             {% if fundamentals_rendered < 3 %}
               <article class="fundamentals-summary__card">
                 <h3>{{ note.title }}</h3>

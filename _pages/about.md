@@ -63,7 +63,8 @@ title: "Richard Cheam"
     {% for cat in site.data.notes_categories %}
       {% assign cat_count = 0 %}
       {% for note in sorted_notes %}
-        {% if note.category | default: "" | slugify == cat.key %}
+        {% assign note_key = note.category | default: "" | slugify %}
+        {% if note_key == cat.key %}
           {% assign cat_count = cat_count | plus: 1 %}
         {% endif %}
       {% endfor %}
