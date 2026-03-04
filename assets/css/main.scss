@@ -1,12 +1,12 @@
 ---
 ---
 
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Libre+Bodoni:wght@400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap");
 
 :root {
   color-scheme: light dark;
   --font-body: "Inter", "SF Pro Text", "SF Pro Display", "Segoe UI", sans-serif;
-  --font-display: "Libre Bodoni", "Playfair Display", "Cormorant Garamond", "Times New Roman", serif;
+  --font-display: "Cormorant Garamond", "Playfair Display", "Libre Bodoni", "Times New Roman", serif;
   --font-nav: var(--font-display);
   --bg: #ffffff;
   --surface: #fafafa;
@@ -350,14 +350,40 @@ body.intro-complete .scroll-progress {
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
-  filter: blur(5px);
-  transform: translateY(-18px) scale(0.968);
+  filter: blur(6px);
+  clip-path: inset(0 0 100% 0 round 0 0 24px 24px);
+  transform: perspective(1200px) translateY(-22px) rotateX(-10deg) scale(0.965);
   transform-origin: top center;
+  will-change: transform, opacity, filter, clip-path;
   transition:
-    opacity 520ms var(--mega-ease),
-    transform 680ms var(--mega-ease),
-    filter 680ms var(--mega-ease),
-    visibility 520ms var(--mega-ease);
+    opacity 620ms var(--mega-ease),
+    transform 900ms var(--mega-ease),
+    filter 900ms var(--mega-ease),
+    clip-path 900ms var(--mega-ease),
+    visibility 620ms var(--mega-ease);
+}
+
+.mega-shell::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--text) 26%, transparent), transparent);
+  opacity: 0.42;
+  pointer-events: none;
+}
+
+.mega-shell::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(120% 100% at 50% -10%, color-mix(in srgb, var(--text) 8%, transparent), transparent 58%),
+    linear-gradient(180deg, transparent 0%, color-mix(in srgb, var(--bg) 34%, transparent) 100%);
+  opacity: 0.6;
+  pointer-events: none;
 }
 
 .site-header.is-mega-open .mega-shell {
@@ -365,7 +391,9 @@ body.intro-complete .scroll-progress {
   visibility: visible;
   pointer-events: auto;
   filter: blur(0);
-  transform: translateY(0) scale(1);
+  clip-path: inset(0 0 0 0 round 0 0 24px 24px);
+  transform: perspective(1200px) translateY(0) rotateX(0deg) scale(1);
+  box-shadow: 0 40px 82px -42px rgba(0, 0, 0, 0.5);
 }
 
 .mega-panel {
@@ -379,7 +407,7 @@ body.intro-complete .scroll-progress {
 
 .mega-panel.is-active {
   display: grid;
-  animation: megaPanelIn 620ms var(--mega-ease);
+  animation: megaPanelIn 760ms var(--mega-ease);
 }
 
 .mega-panel--single {
@@ -1277,12 +1305,12 @@ html.js [data-reveal].is-visible {
 @keyframes megaPanelIn {
   from {
     opacity: 0;
-    transform: translateY(-18px) scale(0.982);
-    filter: blur(5px);
+    transform: perspective(1000px) translateY(-22px) rotateX(-8deg) scale(0.98);
+    filter: blur(6px);
   }
   to {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: perspective(1000px) translateY(0) rotateX(0deg) scale(1);
     filter: blur(0);
   }
 }
