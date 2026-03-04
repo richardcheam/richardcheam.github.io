@@ -73,6 +73,30 @@ html[data-theme="dark"] {
   --mega-bg: rgba(20, 20, 20, 0.82);
 }
 
+html[data-theme="burgundy"] {
+  color-scheme: dark;
+  --bg: #140b12;
+  --surface: #1d1119;
+  --surface-strong: #261722;
+  --text: #f9f2e7;
+  --text-secondary: #d9b7a2;
+  --border: #533243;
+  --border-strong: #7a5468;
+  --focus-ring: #cf9d4a;
+  --header-bg: rgba(20, 11, 18, 0.9);
+  --callout-definition: #d2a14b;
+  --callout-pitfall: #d98273;
+  --shadow: 0 26px 52px -30px rgba(0, 0, 0, 0.62);
+  --shadow-hover: 0 34px 62px -26px rgba(0, 0, 0, 0.72);
+  --mega-bg: rgba(32, 17, 28, 0.84);
+}
+
+html[data-theme="burgundy"] body {
+  background-image:
+    radial-gradient(circle at 12% -16%, rgba(214, 147, 74, 0.2), transparent 46%),
+    radial-gradient(circle at 88% 2%, rgba(152, 45, 86, 0.22), transparent 42%);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -340,23 +364,29 @@ body.intro-complete .scroll-progress {
   top: 100%;
   border-top: 1px solid var(--border);
   background: var(--mega-bg);
-  backdrop-filter: blur(20px);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--bg) 62%, transparent), color-mix(in srgb, var(--bg) 34%, transparent)),
+    var(--mega-bg);
+  backdrop-filter: blur(24px) saturate(122%);
   box-shadow: 0 28px 62px -36px rgba(0, 0, 0, 0.45);
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
-  transform: translateY(-10px) scale(0.985);
+  filter: blur(4px);
+  transform: translateY(-16px) scale(0.972);
   transform-origin: top center;
   transition:
-    opacity 300ms var(--mega-ease),
-    transform 300ms var(--mega-ease),
-    visibility 300ms var(--mega-ease);
+    opacity 420ms var(--mega-ease),
+    transform 500ms var(--mega-ease),
+    filter 500ms var(--mega-ease),
+    visibility 420ms var(--mega-ease);
 }
 
 .site-header.is-mega-open .mega-shell {
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
+  filter: blur(0);
   transform: translateY(0) scale(1);
 }
 
@@ -371,7 +401,37 @@ body.intro-complete .scroll-progress {
 
 .mega-panel.is-active {
   display: grid;
-  animation: megaPanelIn 320ms var(--mega-ease);
+  animation: megaPanelIn 460ms var(--mega-ease);
+}
+
+.mega-panel.is-active .mega-col > * {
+  opacity: 0;
+  transform: translateY(8px);
+  animation: megaItemIn 520ms var(--mega-ease) forwards;
+}
+
+.mega-panel.is-active .mega-col > *:nth-child(1) {
+  animation-delay: 56ms;
+}
+
+.mega-panel.is-active .mega-col > *:nth-child(2) {
+  animation-delay: 98ms;
+}
+
+.mega-panel.is-active .mega-col > *:nth-child(3) {
+  animation-delay: 132ms;
+}
+
+.mega-panel.is-active .mega-col > *:nth-child(4) {
+  animation-delay: 164ms;
+}
+
+.mega-panel.is-active .mega-col > *:nth-child(5) {
+  animation-delay: 198ms;
+}
+
+.mega-panel.is-active .mega-col > *:nth-child(6) {
+  animation-delay: 226ms;
 }
 
 .mega-panel--single {
@@ -445,7 +505,7 @@ body.intro-complete .scroll-progress {
   color: var(--text);
   border-radius: 999px;
   height: 38px;
-  min-width: 82px;
+  min-width: 104px;
   padding: 0 var(--space-2);
   font-weight: 520;
   cursor: pointer;
@@ -534,7 +594,7 @@ body.intro-complete .scroll-progress {
     radial-gradient(42% 42% at 80% 20%, rgba(167, 88, 255, 0.41) 0%, rgba(167, 88, 255, 0) 74%),
     radial-gradient(44% 44% at 68% 78%, rgba(255, 94, 172, 0.39) 0%, rgba(255, 94, 172, 0) 76%),
     radial-gradient(46% 46% at 28% 76%, rgba(255, 86, 86, 0.36) 0%, rgba(255, 86, 86, 0) 74%);
-  animation: heroGradientDrift 24s linear infinite;
+  animation: heroGradientDrift 16s linear infinite;
 }
 
 .hero__glow::after {
@@ -544,7 +604,7 @@ body.intro-complete .scroll-progress {
     radial-gradient(38% 38% at 72% 66%, rgba(194, 112, 255, 0.31) 0%, rgba(194, 112, 255, 0) 74%),
     radial-gradient(36% 36% at 52% 16%, rgba(255, 118, 188, 0.28) 0%, rgba(255, 118, 188, 0) 74%),
     radial-gradient(38% 38% at 42% 88%, rgba(255, 106, 106, 0.26) 0%, rgba(255, 106, 106, 0) 76%);
-  animation: heroGradientDriftAlt 30s linear infinite;
+  animation: heroGradientDriftAlt 20s linear infinite;
 }
 
 .hero::after {
@@ -1233,7 +1293,8 @@ html.js [data-reveal].is-visible {
 
   .mega-shell,
   .mega-panel,
-  .mega-col a {
+  .mega-col a,
+  .mega-col h3 {
     transition: none;
     animation: none;
   }
@@ -1247,7 +1308,20 @@ html.js [data-reveal].is-visible {
 @keyframes megaPanelIn {
   from {
     opacity: 0;
-    transform: translateY(-6px);
+    transform: translateY(-14px) scale(0.986);
+    filter: blur(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes megaItemIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
   }
   to {
     opacity: 1;
@@ -1257,37 +1331,37 @@ html.js [data-reveal].is-visible {
 
 @keyframes heroGradientDrift {
   0% {
-    transform: translate3d(-2.5%, -1.5%, 0) scale(1);
+    transform: translate3d(-5.2%, -3.4%, 0) scale(0.98) rotate(-2deg);
   }
   25% {
-    transform: translate3d(1.6%, -0.8%, 0) scale(1.05);
+    transform: translate3d(4.4%, -2.6%, 0) scale(1.1) rotate(1.4deg);
   }
   50% {
-    transform: translate3d(2%, 1.8%, 0) scale(1.08);
+    transform: translate3d(5.6%, 4.2%, 0) scale(1.15) rotate(2.4deg);
   }
   75% {
-    transform: translate3d(-0.8%, 2.4%, 0) scale(1.03);
+    transform: translate3d(-3.8%, 5.1%, 0) scale(1.06) rotate(0.8deg);
   }
   100% {
-    transform: translate3d(-2.5%, -1.5%, 0) scale(1);
+    transform: translate3d(-5.2%, -3.4%, 0) scale(0.98) rotate(-2deg);
   }
 }
 
 @keyframes heroGradientDriftAlt {
   0% {
-    transform: translate3d(2.2%, 1.2%, 0) scale(1.01);
+    transform: translate3d(4.8%, 3.2%, 0) scale(1) rotate(2deg);
   }
   25% {
-    transform: translate3d(0.6%, -1.4%, 0) scale(1.06);
+    transform: translate3d(1.4%, -3.2%, 0) scale(1.11) rotate(-0.8deg);
   }
   50% {
-    transform: translate3d(-2.4%, -2%, 0) scale(1.08);
+    transform: translate3d(-5.2%, -4.4%, 0) scale(1.15) rotate(-2.3deg);
   }
   75% {
-    transform: translate3d(-0.2%, 1.8%, 0) scale(1.03);
+    transform: translate3d(-2.1%, 4.6%, 0) scale(1.06) rotate(0.6deg);
   }
   100% {
-    transform: translate3d(2.2%, 1.2%, 0) scale(1.01);
+    transform: translate3d(4.8%, 3.2%, 0) scale(1) rotate(2deg);
   }
 }
 

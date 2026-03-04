@@ -21,7 +21,7 @@
           savedTheme = null;
         }
 
-        if (savedTheme === "light" || savedTheme === "dark") {
+        if (savedTheme === "light" || savedTheme === "dark" || savedTheme === "burgundy") {
           root.setAttribute("data-theme", savedTheme);
         } else {
           root.setAttribute("data-theme", "light");
@@ -36,24 +36,39 @@
           var body = document.body;
           var isHome = body.getAttribute("data-page") === "/";
 
-          function prefersDark() {
-            return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+          var themeOrder = ["light", "dark", "burgundy"];
+          var themeNames = {
+            light: "Light",
+            dark: "Dark",
+            burgundy: "Burgundy"
+          };
+          var themeMetaColors = {
+            light: "#ffffff",
+            dark: "#0d0d0d",
+            burgundy: "#1b0d14"
+          };
+
+          function getTheme() {
+            var explicit = root.getAttribute("data-theme");
+            if (themeOrder.indexOf(explicit) !== -1) return explicit;
+            return "light";
           }
 
-          function isDarkTheme() {
-            var explicit = root.getAttribute("data-theme");
-            if (explicit === "dark") return true;
-            if (explicit === "light") return false;
-            return prefersDark();
+          function getNextTheme(currentTheme) {
+            var currentIndex = themeOrder.indexOf(currentTheme);
+            if (currentIndex === -1) return "light";
+            return themeOrder[(currentIndex + 1) % themeOrder.length];
           }
 
           function refreshThemeUi() {
+            var currentTheme = getTheme();
             if (themeMeta) {
-              themeMeta.setAttribute("content", isDarkTheme() ? "#0d0d0d" : "#ffffff");
+              themeMeta.setAttribute("content", themeMetaColors[currentTheme] || themeMetaColors.light);
             }
 
             if (toggle) {
-              var nextLabel = isDarkTheme() ? "Light" : "Dark";
+              var nextTheme = getNextTheme(currentTheme);
+              var nextLabel = themeNames[nextTheme] || "Light";
               toggle.textContent = nextLabel;
               toggle.setAttribute("aria-label", "Switch to " + nextLabel + " mode");
             }
@@ -61,7 +76,7 @@
 
           if (toggle) {
             toggle.addEventListener("click", function () {
-              var next = isDarkTheme() ? "light" : "dark";
+              var next = getNextTheme(getTheme());
               root.setAttribute("data-theme", next);
               try {
                 localStorage.setItem(themeKey, next);
@@ -123,7 +138,7 @@
 
           function scheduleMegaClose() {
             clearMegaClose();
-            megaCloseTimer = window.setTimeout(closeMega, 140);
+            megaCloseTimer = window.setTimeout(closeMega, 220);
           }
 
           if (megaRoot && megaShell && megaTriggers.length > 0) {
