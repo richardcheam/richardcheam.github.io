@@ -23,6 +23,8 @@
 
         if (savedTheme === "light" || savedTheme === "dark") {
           root.setAttribute("data-theme", savedTheme);
+        } else {
+          root.setAttribute("data-theme", "light");
         }
 
         document.addEventListener("DOMContentLoaded", function () {
