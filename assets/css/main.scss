@@ -1,10 +1,12 @@
 ---
 ---
 
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@400;500;600;700&display=swap");
 
 :root {
   color-scheme: light dark;
+  --font-body: "Inter", "SF Pro Text", "SF Pro Display", "Segoe UI", sans-serif;
+  --font-nav: "Sora", "Inter", "SF Pro Text", "Segoe UI", sans-serif;
   --bg: #ffffff;
   --surface: #fafafa;
   --surface-strong: #f4f4f4;
@@ -81,7 +83,7 @@ html {
 
 body {
   margin: 0;
-  font-family: "Inter", "SF Pro Text", "SF Pro Display", "Segoe UI", sans-serif;
+  font-family: var(--font-body);
   font-size: 15px;
   line-height: 1.55;
   background: var(--bg);
@@ -298,6 +300,14 @@ body.intro-complete .scroll-progress {
   letter-spacing: 0.08em;
 }
 
+.site-title,
+.site-nav__item,
+.theme-toggle,
+.mega-col h3,
+.mega-col a {
+  font-family: var(--font-nav);
+}
+
 .site-nav {
   margin-left: auto;
   display: flex;
@@ -362,6 +372,39 @@ body.intro-complete .scroll-progress {
 .mega-panel.is-active {
   display: grid;
   animation: megaPanelIn 320ms var(--mega-ease);
+}
+
+.mega-panel--single {
+  grid-template-columns: 1fr;
+}
+
+.mega-col--solo {
+  display: flex;
+  align-items: center;
+}
+
+.mega-col--stack {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 18px;
+}
+
+.mega-primary-link {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 560;
+  letter-spacing: 0.01em;
+  transition: opacity 200ms var(--ease-out), transform 200ms var(--ease-out);
+}
+
+.mega-primary-link:hover,
+.mega-primary-link:focus-visible {
+  opacity: 0.78;
+  transform: translateX(2px);
 }
 
 .mega-col h3 {

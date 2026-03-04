@@ -24,7 +24,7 @@ permalink: /blog/
       {% endif %}
     {% endfor %}
 
-    <a class="blog-card" data-reveal href="{{ note.url | relative_url }}">
+    <a class="blog-card" data-reveal data-filter-card data-filter-text="{{ note.title | downcase }} {{ category_label | downcase }} {{ note_key }} {{ note_key | replace: '-', ' ' }} {{ note.excerpt | strip_html | downcase }}" href="{{ note.url | relative_url }}">
       <p class="card-meta">{{ category_label }}{% if note.date %} · {{ note.date | date: "%d %b %Y" }}{% endif %}</p>
       <h3 class="card-title">{{ note.title }}</h3>
       <p class="card-summary">{{ note.excerpt | strip_html | truncate: 180 }}</p>

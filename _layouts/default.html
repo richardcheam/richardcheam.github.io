@@ -256,9 +256,23 @@
           var filterCards = Array.prototype.slice.call(document.querySelectorAll("[data-filter-card]"));
           var filterEmpty = document.querySelector("[data-filter-empty]");
 
-          if (filterInput && filterCards.length > 0) {
-            function applyFilter() {
-              var query = filterInput.value.trim().toLowerCase();
+          if (filterCards.length > 0) {
+            var initialFilter = "";
+            try {
+              var params = new URLSearchParams(window.location.search);
+              initialFilter = (params.get("category") || params.get("q") || "").trim().toLowerCase();
+            } catch (e) {
+              initialFilter = "";
+            }
+
+            if (filterInput && initialFilter) {
+              filterInput.value = initialFilter;
+            }
+
+            function applyFilter(queryValue) {
+              var query = typeof queryValue === "string"
+                ? queryValue.trim().toLowerCase()
+                : (filterInput ? filterInput.value.trim().toLowerCase() : "");
               var matches = 0;
 
               filterCards.forEach(function (card) {
@@ -273,8 +287,13 @@
               }
             }
 
-            filterInput.addEventListener("input", applyFilter);
-            applyFilter();
+            if (filterInput) {
+              filterInput.addEventListener("input", function () {
+                applyFilter();
+              });
+            }
+
+            applyFilter(initialFilter);
           }
 
           function finishIntro() {
@@ -317,95 +336,34 @@
           <a class="site-nav__item" href="{{ '/notes/' | relative_url }}" data-mega-target="notes" aria-haspopup="true" aria-expanded="false">Technical Notes</a>
           <a class="site-nav__item" href="{{ '/blog/' | relative_url }}" data-mega-target="blog" aria-haspopup="true" aria-expanded="false">Blog</a>
           <a class="site-nav__item" href="{{ '/cv/' | relative_url }}">About Me</a>
-          <a class="site-nav__item" href="{{ '/contact/' | relative_url }}" data-mega-target="contact" aria-haspopup="true" aria-expanded="false">Contact</a>
         </nav>
         <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch color mode">Dark</button>
       </div>
       <div class="mega-shell" data-mega-shell aria-hidden="true">
-        <section class="mega-panel" data-mega-panel="projects">
-          <div class="mega-col">
-            <h3>Explore Projects</h3>
-            <a href="{{ '/projects/' | relative_url }}">All Projects</a>
-            <a href="{{ '/projects/imdb-moe/' | relative_url }}">IMDb Sentiment with MoE</a>
-            <a href="{{ '/projects/mnist-ssl/' | relative_url }}">MNIST SSL Case Study</a>
-          </div>
-          <div class="mega-col">
-            <h3>Build Focus</h3>
-            <a href="{{ '/projects/' | relative_url }}">NLP and LLM Systems</a>
-            <a href="{{ '/projects/' | relative_url }}">Computer Vision Training</a>
-            <a href="{{ '/projects/' | relative_url }}">Evaluation and Reproducibility</a>
-          </div>
-          <div class="mega-col">
-            <h3>More from Projects</h3>
-            <a href="https://github.com/richardcheam" target="_blank" rel="noopener noreferrer">GitHub Repositories</a>
-            <a href="{{ '/notes/' | relative_url }}">Related Technical Notes</a>
-            <a href="{{ '/contact/' | relative_url }}">Discuss Collaboration</a>
+        <section class="mega-panel mega-panel--single" data-mega-panel="projects">
+          <div class="mega-col mega-col--solo">
+            <a class="mega-primary-link" href="{{ '/projects/' | relative_url }}">All Projects</a>
           </div>
         </section>
 
-        <section class="mega-panel" data-mega-panel="notes">
-          <div class="mega-col">
-            <h3>Explore Technical Notes</h3>
-            <a href="{{ '/notes/' | relative_url }}">All Technical Notes</a>
-            <a href="{{ '/notes/fundamentals/' | relative_url }}">Fundamentals</a>
-            <a href="{{ '/notes/2026-03-01-world-model/' | relative_url }}">World Models</a>
-          </div>
-          <div class="mega-col">
-            <h3>Key Topics</h3>
-            <a href="{{ '/notes/' | relative_url }}">LLM and NLP</a>
-            <a href="{{ '/notes/' | relative_url }}">Speech and Vision</a>
-            <a href="{{ '/notes/' | relative_url }}">Optimization and Evaluation</a>
-          </div>
-          <div class="mega-col">
-            <h3>More from Notes</h3>
-            <a href="{{ '/blog/' | relative_url }}">Technical Blog</a>
-            <a href="{{ '/projects/' | relative_url }}">Project Case Studies</a>
-            <a href="{{ '/contact/' | relative_url }}">Share References</a>
+        <section class="mega-panel mega-panel--single" data-mega-panel="notes">
+          <div class="mega-col mega-col--stack">
+            <a class="mega-primary-link" href="{{ '/notes/fundamentals/' | relative_url }}">Fundamentals</a>
+            {% for cat in site.data.notes_categories %}
+              <a class="mega-primary-link" href="{{ '/notes/' | relative_url }}?category={{ cat.key | uri_escape }}#notes-search-input">{{ cat.label }}</a>
+            {% endfor %}
           </div>
         </section>
 
-        <section class="mega-panel" data-mega-panel="blog">
-          <div class="mega-col">
-            <h3>Explore Blog</h3>
-            <a href="{{ '/blog/' | relative_url }}">All Posts</a>
-            <a href="{{ '/notes/2026-03-01-paper-review/' | relative_url }}">Paper Review</a>
-            <a href="{{ '/notes/2026-03-01-speech-ai/' | relative_url }}">Speech AI Notes</a>
-          </div>
-          <div class="mega-col">
-            <h3>Read by Goal</h3>
-            <a href="{{ '/blog/' | relative_url }}">Concept Explanations</a>
-            <a href="{{ '/blog/' | relative_url }}">Implementation Notes</a>
-            <a href="{{ '/blog/' | relative_url }}">Research Takeaways</a>
-          </div>
-          <div class="mega-col">
-            <h3>More from Blog</h3>
-            <a href="{{ '/notes/' | relative_url }}">Technical Notes Library</a>
-            <a href="{{ '/projects/' | relative_url }}">Projects</a>
-            <a href="{{ '/contact/' | relative_url }}">Connect</a>
+        <section class="mega-panel mega-panel--single" data-mega-panel="blog">
+          <div class="mega-col mega-col--stack">
+            <a class="mega-primary-link" href="{{ '/blog/' | relative_url }}">All Blog Posts</a>
+            {% for cat in site.data.notes_categories %}
+              <a class="mega-primary-link" href="{{ '/blog/' | relative_url }}?category={{ cat.key | uri_escape }}">{{ cat.label }}</a>
+            {% endfor %}
           </div>
         </section>
 
-        <section class="mega-panel" data-mega-panel="contact">
-          <div class="mega-col">
-            <h3>Contact</h3>
-            <a href="{{ '/contact/' | relative_url }}">Contact Page</a>
-            <a href="{{ '/cv/' | relative_url }}">About Me</a>
-            <a href="mailto:richard.cheam@etu.u-paris.fr">Email</a>
-            <a href="https://www.linkedin.com/in/richard-cheam" target="_blank" rel="noopener noreferrer">LinkedIn</a>
-          </div>
-          <div class="mega-col">
-            <h3>Profiles</h3>
-            <a href="https://github.com/richardcheam" target="_blank" rel="noopener noreferrer">GitHub</a>
-            <a href="{{ '/projects/' | relative_url }}">Project Portfolio</a>
-            <a href="{{ '/notes/' | relative_url }}">Technical Notes</a>
-          </div>
-          <div class="mega-col">
-            <h3>Focus Areas</h3>
-            <a href="{{ '/projects/' | relative_url }}">ML / AI Engineering</a>
-            <a href="{{ '/notes/' | relative_url }}">Research Summaries</a>
-            <a href="{{ '/blog/' | relative_url }}">Technical Writing</a>
-          </div>
-        </section>
       </div>
     </header>
 

@@ -9,14 +9,14 @@ title: "Richard Cheam"
 <section id="hero" class="hero section-block">
   <p class="section-eyebrow" data-reveal>AI / Machine Learning Engineer</p>
   <h1 class="hero__name" data-reveal>Richard Cheam</h1>
-  <p class="hero__tagline" data-reveal>Building practical AI systems with clean research-to-product execution.</p>
+  <!-- <p class="hero__tagline" data-reveal>Building practical AI systems with clean research-to-product execution.</p> -->
   <p class="hero__support" data-reveal>
-    Engineer's and Master's degree in Data Science &amp; AI. Currently at Renault, focused on dependable,
-    production-ready ML experiences.
+    Engineer's and Master's degree in Data Science &amp; AI. Currently at Renault, focused on dependable, production-ready ML experiences.
   </p>
   <div class="hero__actions" data-reveal>
     <a class="btn btn--primary" href="#projects">View Projects</a>
     <a class="btn btn--ghost" href="https://github.com/richardcheam" target="_blank" rel="noopener noreferrer">GitHub</a>
+    <a class="btn btn--ghost" href="#contact">Contact</a>
   </div>
 </section>
 
@@ -116,15 +116,14 @@ title: "Richard Cheam"
   <header class="section-head">
     <p class="section-eyebrow">Experience / Skills</p>
     <h2>Research-grade thinking, product-grade delivery</h2>
-    <p class="section-description">I optimize for clear methodology, fast iteration, and production reliability.</p>
+    <p class="section-description">More on About Me section.</p>
   </header>
   <div class="experience-layout">
     <article class="premium-card" data-reveal>
       <h3 class="card-title">Experience</h3>
       <ul class="experience-list">
         <li><strong>Renault</strong><span>AI Engineer Apprentice · Current</span></li>
-        <li><strong>ensIIE / Paris-Saclay</strong><span>Data Science &amp; AI Engineering</span></li>
-        <li><strong>Research mindset</strong><span>Reproducibility, evaluation, ablation discipline</span></li>
+        <li><strong>ensIIE, Paris-Saclay, Paris Cité</strong><span>Data Science &amp; AI Engineering</span></li>
       </ul>
     </article>
     <article class="premium-card" data-reveal>
@@ -136,9 +135,7 @@ title: "Richard Cheam"
         <span class="tag">NLP / LLM</span>
         <span class="tag">Computer Vision</span>
         <span class="tag">Speech AI</span>
-        <span class="tag">Experiment Tracking</span>
-        <span class="tag">Model Evaluation</span>
-        <span class="tag">MLOps Basics</span>
+        <span class="tag">MLOps</span>
       </div>
     </article>
   </div>
@@ -147,10 +144,9 @@ title: "Richard Cheam"
 <section id="contact" class="section-block" data-reveal>
   <article class="premium-card contact-panel" data-reveal>
     <p class="section-eyebrow">Contact</p>
-    <h2>Open to ML/AI engineering opportunities</h2>
-    <p class="section-description">If your team values clarity, reproducible experimentation, and product impact, I would love to connect.</p>
+    <h2>Open to Data Scientist and ML/AI Engineer opportunities</h2>
+    <p class="section-description">Feel free to contact me for collaborations, technical discussions, and more.</p>
     <div class="contact-links">
-      <a href="{{ '/contact/' | relative_url }}">Contact page</a>
       <a href="mailto:richard.cheam@etu.u-paris.fr">Email</a>
       <a href="https://github.com/richardcheam" target="_blank" rel="noopener noreferrer">GitHub</a>
       <a href="https://www.linkedin.com/in/richard-cheam" target="_blank" rel="noopener noreferrer">LinkedIn</a>
