@@ -67,7 +67,10 @@ title: "Richard Cheam"
           {% assign cat_count = cat_count | plus: 1 %}
         {% endif %}
       {% endfor %}
-      {% assign has_notes = cat_count > 0 %}
+      {% assign has_notes = false %}
+      {% if cat_count > 0 %}
+        {% assign has_notes = true %}
+      {% endif %}
       {% if cat.key == "fundamentals" %}
         {% assign category_href = '/notes/fundamentals/' | relative_url %}
       {% else %}

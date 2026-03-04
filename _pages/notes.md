@@ -38,7 +38,10 @@ permalink: /notes/
           {% assign cat_count = cat_count | plus: 1 %}
         {% endif %}
       {% endfor %}
-      {% assign has_notes = cat_count > 0 %}
+      {% assign has_notes = false %}
+      {% if cat_count > 0 %}
+        {% assign has_notes = true %}
+      {% endif %}
       {% if cat.key == "fundamentals" %}
         {% assign category_href = '/notes/fundamentals/' | relative_url %}
       {% else %}
@@ -66,20 +69,31 @@ permalink: /notes/
       This section focuses solely on the foundations I revisit constantly. Each block points to the full concept note.
     </p>
   </div>
-  {% assign fundamentals = sorted_notes | where_exp: "note", "note.category | default: \"\" | slugify == \"fundamentals\"" %}
+  {% assign fundamentals_count = 0 %}
+  {% for note in sorted_notes %}
+    {% if note.category | default: "" | slugify == "fundamentals" %}
+      {% assign fundamentals_count = fundamentals_count | plus: 1 %}
+    {% endif %}
+  {% endfor %}
   <div class="fundamentals-summary">
-    {% if fundamentals.size == 0 %}
+    {% if fundamentals_count == 0 %}
       <p>No fundamentals yet. Add a markdown file under <code>_notes/</code> with <code>category: \"fundamentals\"</code>.</p>
     {% else %}
       <div class="fundamentals-summary__grid">
-        {% for note in fundamentals limit:3 %}
-          <article class="fundamentals-summary__card">
-            <h3>{{ note.title }}</h3>
-            {% if note.excerpt %}
-              <p>{{ note.excerpt | strip_html | truncate: 120 }}</p>
+        {% assign fundamentals_rendered = 0 %}
+        {% for note in sorted_notes %}
+          {% if note.category | default: "" | slugify == "fundamentals" %}
+            {% if fundamentals_rendered < 3 %}
+              <article class="fundamentals-summary__card">
+                <h3>{{ note.title }}</h3>
+                {% if note.excerpt %}
+                  <p>{{ note.excerpt | strip_html | truncate: 120 }}</p>
+                {% endif %}
+                <a class="home-blog-card__cta" href="{{ note.url | relative_url }}">Read the block</a>
+              </article>
+              {% assign fundamentals_rendered = fundamentals_rendered | plus: 1 %}
             {% endif %}
-            <a class="home-blog-card__cta" href="{{ note.url | relative_url }}">Read the block</a>
-          </article>
+          {% endif %}
         {% endfor %}
       </div>
     {% endif %}

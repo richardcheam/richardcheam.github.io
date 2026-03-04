@@ -5,7 +5,12 @@ permalink: /notes/fundamentals/
 ---
 
 {% assign sorted_notes = site.notes | sort: "date" | reverse %}
-{% assign fundamentals = sorted_notes | where_exp: "note", "note.category | default: \"\" | slugify == \"fundamentals\"" %}
+{% assign fundamentals_count = 0 %}
+{% for note in sorted_notes %}
+  {% if note.category | default: "" | slugify == "fundamentals" %}
+    {% assign fundamentals_count = fundamentals_count | plus: 1 %}
+  {% endif %}
+{% endfor %}
 
 <section class="home-section" aria-label="Fundamentals overview">
   <div class="home-section__header">
@@ -20,8 +25,9 @@ permalink: /notes/fundamentals/
 </section>
 
 <section class="concept-list" aria-label="Fundamentals concept blocks">
-  {% if fundamentals.size > 0 %}
-    {% for note in fundamentals %}
+  {% if fundamentals_count > 0 %}
+    {% for note in sorted_notes %}
+      {% if note.category | default: "" | slugify == "fundamentals" %}
       <a class="concept-card" href="{{ note.url | relative_url }}">
         <p class="concept-card__meta">Concept{% if note.date %} · {{ note.date | date: "%d %b %Y" }}{% endif %}</p>
         <h2>{{ note.title }}</h2>
@@ -29,6 +35,7 @@ permalink: /notes/fundamentals/
           <p>{{ note.excerpt | strip_html | truncate: 180 }}</p>
         {% endif %}
       </a>
+      {% endif %}
     {% endfor %}
   {% else %}
     <div class="concept-card concept-card--empty">
