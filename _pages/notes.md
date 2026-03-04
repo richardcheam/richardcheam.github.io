@@ -6,31 +6,21 @@ permalink: /notes/
 
 {% assign sorted_notes = site.notes | sort: "date" | reverse %}
 
-<section class="home-section notes-page-intro">
-  <div class="home-section__header">
-    <p class="home-section__eyebrow">Notes</p>
-    <h2>Minimal dailies for maximal recall</h2>
-    <p class="home-section__description">
-      The hub is intentionally quiet—just a statement about the collection plus the category map you requested.
-      You can start with the fundamentals path and dive into any pillar from there.
-    </p>
-  </div>
-  <div class="notes-search">
-    <label class="notes-search__label" for="notes-search-input">Find a category or keyword</label>
-    <input id="notes-search-input" type="search" placeholder="Search (not live yet)" />
-    <p class="notes-search__hint">Filtering is in mind for the next iteration—this layout keeps the focus on categories.</p>
-  </div>
+<section class="page-intro" data-reveal>
+  <p class="section-eyebrow">Knowledge Notes</p>
+  <h2>AI paper summaries and memory-friendly reviews</h2>
+  <p class="section-description">
+    This is my structured learning space: concise notes, core takeaways, and tags for fast retrieval.
+  </p>
 </section>
 
-<section class="home-section" aria-label="Notes categories">
-  <div class="home-section__header">
-    <p class="home-section__eyebrow">Categories</p>
-    <h2>Structured playground</h2>
-    <p class="home-section__description">
-      Tap any thread and the site routes to concept-heavy pages (like fundamentals) where blocks are easy to read.
-    </p>
-  </div>
-  <div class="notes-category-grid">
+<section class="section-block" data-reveal>
+  <header class="section-head">
+    <p class="section-eyebrow">Categories</p>
+    <h2>Topic map</h2>
+    <p class="section-description">Fundamentals is the curated starting point. Other categories expand as new notes are added.</p>
+  </header>
+  <div class="cards-grid">
     {% for cat in site.data.notes_categories %}
       {% assign cat_count = 0 %}
       {% for note in sorted_notes %}
@@ -39,67 +29,53 @@ permalink: /notes/
           {% assign cat_count = cat_count | plus: 1 %}
         {% endif %}
       {% endfor %}
-      {% assign has_notes = false %}
-      {% if cat_count > 0 %}
-        {% assign has_notes = true %}
-      {% endif %}
+
       {% if cat.key == "fundamentals" %}
         {% assign category_href = '/notes/fundamentals/' | relative_url %}
       {% else %}
         {% assign category_href = '/notes/' | relative_url %}
       {% endif %}
-      <a class="notes-category-card" data-has-notes="{{ has_notes }}" data-label="{{ cat.label | escape }}" data-summary="{{ cat.summary | escape }}" data-count="{{ cat_count }}" href="{{ category_href }}">
-        <p class="notes-category-card__eyebrow">{{ cat.label }}{% if has_notes %} · {{ cat_count }}{% endif %}</p>
-        <p class="notes-category-card__summary">{{ cat.summary }}</p>
-        {% if has_notes %}
-          <p class="notes-category-card__count">Open {{ cat_count }} logged thought{% if cat_count != 1 %}s{% endif %}</p>
-        {% else %}
-          <p class="notes-category-card__count">Future note rack</p>
-        {% endif %}
+
+      <a class="premium-card category-card" data-reveal href="{{ category_href }}" aria-label="{{ cat.label }}">
+        <p class="card-meta">{{ cat.label }}{% if cat_count > 0 %} · {{ cat_count }}{% endif %}</p>
+        <h3 class="card-title">{{ cat.summary }}</h3>
+        <span class="card-link">Open</span>
       </a>
     {% endfor %}
   </div>
-  <p class="notes-search-empty" hidden>No categories match that term. Try another keyword.</p>
 </section>
 
-<section class="home-section notes-fundamentals" aria-label="Fundamentals primer">
-  <div class="home-section__header">
-    <p class="home-section__eyebrow">Fundamentals</p>
-    <h2>The primer I open first</h2>
-    <p class="home-section__description">
-      This section focuses solely on the foundations I revisit constantly. Each block points to the full concept note.
-    </p>
+<section class="section-block" data-reveal>
+  <header class="section-head">
+    <p class="section-eyebrow">Library</p>
+    <h2>Browse notes</h2>
+    <p class="section-description">Search by topic, category, or keyword.</p>
+  </header>
+
+  <div class="filter-wrap" data-reveal>
+    <input class="filter-input" id="notes-search-input" data-filter-input type="search" placeholder="Search notes (e.g. speech, transformer, optimization)">
+    <p class="filter-empty" data-filter-empty hidden>No notes match that keyword.</p>
   </div>
-  {% assign fundamentals_count = 0 %}
-  {% for note in sorted_notes %}
-    {% assign note_key = note.category | default: "" | slugify %}
-    {% if note_key == "fundamentals" %}
-      {% assign fundamentals_count = fundamentals_count | plus: 1 %}
-    {% endif %}
-  {% endfor %}
-  <div class="fundamentals-summary">
-    {% if fundamentals_count == 0 %}
-      <p>No fundamentals yet. Add a markdown file under <code>_notes/</code> with <code>category: \"fundamentals\"</code>.</p>
-    {% else %}
-      <div class="fundamentals-summary__grid">
-        {% assign fundamentals_rendered = 0 %}
-        {% for note in sorted_notes %}
-          {% assign note_key = note.category | default: "" | slugify %}
-          {% if note_key == "fundamentals" %}
-            {% if fundamentals_rendered < 3 %}
-              <article class="fundamentals-summary__card">
-                <h3>{{ note.title }}</h3>
-                {% if note.excerpt %}
-                  <p>{{ note.excerpt | strip_html | truncate: 120 }}</p>
-                {% endif %}
-                <a class="home-blog-card__cta" href="{{ note.url | relative_url }}">Read the block</a>
-              </article>
-              {% assign fundamentals_rendered = fundamentals_rendered | plus: 1 %}
-            {% endif %}
-          {% endif %}
-        {% endfor %}
-      </div>
-    {% endif %}
-    <a class="btn btn--primary" href="{{ '/notes/fundamentals/' | relative_url }}">Enter fundamentals</a>
+
+  <div class="notes-list">
+    {% for note in sorted_notes %}
+      {% assign note_key = note.category | default: "note" | slugify %}
+      {% assign category_label = "Note" %}
+      {% for cat in site.data.notes_categories %}
+        {% if cat.key == note_key %}
+          {% assign category_label = cat.label %}
+        {% endif %}
+      {% endfor %}
+
+      <a class="notes-card" data-reveal data-filter-card data-filter-text="{{ note.title | downcase }} {{ category_label | downcase }} {{ note.excerpt | strip_html | downcase }}" href="{{ note.url | relative_url }}">
+        <p class="card-meta">{{ category_label }}{% if note.date %} · {{ note.date | date: "%d %b %Y" }}{% endif %}</p>
+        <h3 class="card-title">{{ note.title }}</h3>
+        <p class="card-summary">{{ note.excerpt | default: "Short summary and implementation reminders." | strip_html | truncate: 150 }}</p>
+        <div class="card-tags">
+          <span class="tag">{{ category_label }}</span>
+          <span class="tag">AI</span>
+        </div>
+      </a>
+    {% endfor %}
   </div>
 </section>

@@ -6,52 +6,65 @@ demo_url: ""
 github_url: "https://github.com/richardcheam"
 ---
 
-<div class="detail-shell detail-shell--project" data-detail-tabs>
-  <p><a class="project-backlink" href="{{ '/projects/' | relative_url }}">Back to Projects</a></p>
-  <p class="minimal-kicker">NLP • March 2025</p>
-  <p class="minimal-intro">Case study focused on benchmarking transformer baselines and testing dynamic expert routing.</p>
+<div class="detail-shell" data-detail-tabs>
+  <p data-reveal><a class="project-backlink" href="{{ '/projects/' | relative_url }}">Back to Projects</a></p>
+  <p class="minimal-kicker" data-reveal>NLP · March 2025</p>
+  <p class="minimal-intro" data-reveal>Benchmarking transformer baselines while testing whether expert routing improves specialization.</p>
 
-  <div class="detail-chips" aria-label="Project highlights">
+  <div class="detail-chips" aria-label="Project highlights" data-reveal>
     <span class="detail-chip detail-chip--role"><span class="detail-chip__label">Role:</span> <span class="detail-chip__value">ML Engineer</span></span>
     <span class="detail-chip detail-chip--impact"><span class="detail-chip__label">Impact:</span> <span class="detail-chip__value">Reproducible benchmark framework</span></span>
-    <span class="detail-chip detail-chip--stack"><span class="detail-chip__label">Stack:</span> <span class="detail-chip__value">PyTorch • Hugging Face • MoE</span></span>
+    <span class="detail-chip detail-chip--stack"><span class="detail-chip__label">Stack:</span> <span class="detail-chip__value">PyTorch · Hugging Face · MoE</span></span>
   </div>
 
-  <nav class="detail-nav" aria-label="Section navigation">
+  <nav class="detail-nav" aria-label="Section navigation" data-reveal>
     <a href="#tldr" data-detail-trigger>TL;DR</a>
     <a href="#build" data-detail-trigger>Build</a>
     <a href="#results" data-detail-trigger>Results</a>
     <a href="#links" data-detail-trigger>Links</a>
   </nav>
 
-  <section id="tldr" class="minimal-project detail-block detail-block--tldr" data-detail-panel>
+  <section id="tldr" class="detail-block" data-detail-panel>
     <h2>TL;DR</h2>
     <ul class="detail-list">
-      <li><strong>Problem:</strong> Compare strong transformer baselines and test whether routing experts can specialize better.</li>
-      <li><strong>Impact:</strong> Built a controlled framework for fair architecture comparisons and ablation runs.</li>
-      <li><strong>Stack:</strong> DistilBERT, RoBERTa, DeBERTa, custom MoE in PyTorch.</li>
+      <li><strong>Problem:</strong> Compare strong transformer baselines and verify whether routed experts improve handling of ambiguous sentiment.</li>
+      <li><strong>Approach:</strong> Controlled training protocol for DistilBERT, RoBERTa, DeBERTa, and a custom Mixture-of-Experts architecture.</li>
+      <li><strong>Outcome:</strong> Reusable framework for fair ablations, confidence analysis, and extension to new datasets.</li>
     </ul>
   </section>
 
-  <section id="build" class="minimal-project detail-block detail-block--alt" data-detail-panel hidden>
+  <section id="build" class="detail-block" data-detail-panel hidden>
     <h2>What I Built</h2>
     <div class="project-points">
-      <p><strong>Data pipeline:</strong> Consistent preprocessing, tokenization strategy, and train/validation/test split controls.</p>
-      <p><strong>Baselines:</strong> DistilBERT, RoBERTa, and DeBERTa under aligned training settings.</p>
-      <p><strong>MoE design:</strong> Router-guided expert selection with tracked expert usage distribution and confidence behavior.</p>
-      <p><strong>Evaluation:</strong> Accuracy/F1 comparison, compute tracking, and error analysis by review length and sentiment polarity.</p>
+      <p><strong>Data pipeline:</strong> Consistent preprocessing, tokenization controls, and deterministic train/validation/test splits.</p>
+      <p><strong>Baseline set:</strong> DistilBERT, RoBERTa, and DeBERTa under aligned hyperparameters.</p>
+      <p><strong>MoE design:</strong> Router-guided expert activation with usage distribution tracking and confidence monitoring.</p>
+      <p><strong>Evaluation:</strong> Accuracy/F1, error slices by review length, and compute-efficiency comparisons.</p>
     </div>
   </section>
 
-  <section id="results" class="minimal-project detail-block" data-detail-panel hidden>
+  <section id="results" class="detail-block" data-detail-panel hidden>
     <h2>Results</h2>
     <div class="detail-metric-grid">
-      <div class="detail-metric"><p class="detail-metric__label">Evidence</p><h3>Structured Ablations</h3><p>Each model was evaluated under aligned settings for direct comparison.</p></div>
-      <div class="detail-metric"><p class="detail-metric__label">Engineering</p><h3>Reusable Pipeline</h3><p>Experiment config can be reused for new models and datasets quickly.</p></div>
+      <article class="detail-metric">
+        <p class="detail-metric__label">Evidence</p>
+        <h3>Structured Ablations</h3>
+        <p>Each model was evaluated under aligned conditions for defensible comparison.</p>
+      </article>
+      <article class="detail-metric">
+        <p class="detail-metric__label">Engineering</p>
+        <h3>Reusable Pipeline</h3>
+        <p>Experiment setup can be reused quickly for new architectures and datasets.</p>
+      </article>
+      <article class="detail-metric">
+        <p class="detail-metric__label">Product Value</p>
+        <h3>Clear Decision Support</h3>
+        <p>Framework helps choose model families based on quality/efficiency tradeoffs.</p>
+      </article>
     </div>
   </section>
 
-  <section id="links" class="minimal-project detail-block detail-block--alt" data-detail-panel hidden>
+  <section id="links" class="detail-block" data-detail-panel hidden>
     <h2>Links</h2>
     <p class="project-links">
       {% if page.demo_url and page.demo_url != "" %}

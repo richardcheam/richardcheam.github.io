@@ -4,10 +4,21 @@ title: "Contact"
 permalink: /contact/
 ---
 
-If you would like to discuss Data Science, ML/AI engineering, research collaborations, or job opportunities, feel free to contact me.
+<section class="page-intro" data-reveal>
+  <p class="section-eyebrow">Contact</p>
+  <h2>Let’s build practical AI products</h2>
+  <p class="section-description">
+    Open to Data Scientist and ML/AI Engineer opportunities, research collaborations, and technical discussions.
+  </p>
+</section>
 
-- Email: [richard.cheam@etu.u-paris.fr](mailto:richard.cheam@etu.u-paris.fr)
-<!-- - Phone: +33 7 85 89 86 17 -->
-- GitHub: [github.com/richardcheam](https://github.com/richardcheam)
-- LinkedIn: [Richard Cheam](https://www.linkedin.com/in/richard-cheam)
-- Location: Paris, France
+<section class="section-block" data-reveal>
+  <article class="premium-card contact-panel" data-reveal>
+    <div class="contact-links">
+      <a href="mailto:richard.cheam@etu.u-paris.fr">richard.cheam@etu.u-paris.fr</a>
+      <a href="https://github.com/richardcheam" target="_blank" rel="noopener noreferrer">github.com/richardcheam</a>
+      <a href="https://www.linkedin.com/in/richard-cheam" target="_blank" rel="noopener noreferrer">linkedin.com/in/richard-cheam</a>
+      <a href="https://maps.google.com/?q=Paris,France" target="_blank" rel="noopener noreferrer">Paris, France</a>
+    </div>
+  </article>
+</section>

@@ -11,301 +11,168 @@
       (function () {
         var root = document.documentElement;
         root.classList.add("js");
-        var key = "theme";
-        var saved = null;
+
+        var themeKey = "theme";
+        var savedTheme = null;
 
         try {
-          saved = localStorage.getItem(key);
+          savedTheme = localStorage.getItem(themeKey);
         } catch (e) {
-          saved = null;
+          savedTheme = null;
         }
 
-        if (saved === "light" || saved === "dark") {
-          root.setAttribute("data-theme", saved);
-        }
-
-        function isDarkNow() {
-          var explicit = root.getAttribute("data-theme");
-          if (explicit === "light") return false;
-          if (explicit === "dark") return true;
-          return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
-        }
-
-        function updateThemeColor() {
-          var meta = document.querySelector('meta[name="theme-color"]');
-          if (!meta) return;
-          meta.setAttribute("content", isDarkNow() ? "#000000" : "#ffffff");
+        if (savedTheme === "light" || savedTheme === "dark") {
+          root.setAttribute("data-theme", savedTheme);
         }
 
         document.addEventListener("DOMContentLoaded", function () {
           var toggle = document.getElementById("theme-toggle");
-          var body = document.body;
-          var intro = document.getElementById("intro-screen");
-          var progressBar = document.getElementById("scroll-progress-bar");
           var reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-          var introSeenKey = "intro_seen_v2";
-          var introSeen = false;
-          var loader = document.getElementById("cinematic-loader");
-          var cinematicCursor = document.querySelector(".cinematic-cursor");
-          var hasCoarsePointer = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
-          var disableCinematicCursor = reduceMotion || hasCoarsePointer;
+          var themeMeta = document.querySelector('meta[name="theme-color"]');
 
-          try {
-            introSeen = localStorage.getItem(introSeenKey) === "1";
-          } catch (e) {
-            introSeen = false;
+          function prefersDark() {
+            return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
           }
 
-          function updateToggleText() {
-            if (!toggle) return;
-            toggle.textContent = isDarkNow() ? "Light" : "Dark";
+          function isDarkTheme() {
+            var explicit = root.getAttribute("data-theme");
+            if (explicit === "dark") return true;
+            if (explicit === "light") return false;
+            return prefersDark();
           }
 
-          updateToggleText();
-          updateThemeColor();
+          function refreshThemeUi() {
+            if (themeMeta) {
+              themeMeta.setAttribute("content", isDarkTheme() ? "#0d0d0d" : "#ffffff");
+            }
+
+            if (toggle) {
+              var nextLabel = isDarkTheme() ? "Light" : "Dark";
+              toggle.textContent = nextLabel;
+              toggle.setAttribute("aria-label", "Switch to " + nextLabel + " mode");
+            }
+          }
 
           if (toggle) {
             toggle.addEventListener("click", function () {
-              var next = isDarkNow() ? "light" : "dark";
+              var next = isDarkTheme() ? "light" : "dark";
               root.setAttribute("data-theme", next);
               try {
-                localStorage.setItem(key, next);
+                localStorage.setItem(themeKey, next);
               } catch (e) {}
-              updateToggleText();
-              updateThemeColor();
+              refreshThemeUi();
             });
           }
 
-          var media = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)");
-          if (media && media.addEventListener) {
-            media.addEventListener("change", function () {
-              var explicit = root.getAttribute("data-theme");
-              if (!explicit) {
-                updateToggleText();
-                updateThemeColor();
-              }
-            });
-          }
+          refreshThemeUi();
 
-          function initCinematicMotion() {
-            var revealTargets = Array.prototype.slice.call(
-              document.querySelectorAll(
-                ".site-main > *:not(script), .minimal-hero, .minimal-project, .minimal-card, .minimal-note, .concept-card, .notes-route, .detail-nav, .detail-block, .detail-metric"
-              )
-            );
-            var uniqueTargets = [];
-            var seen = typeof Set !== "undefined" ? new Set() : null;
-
-            revealTargets.forEach(function (target) {
-              if (!target) return;
-              if (seen) {
-                if (seen.has(target)) return;
-                seen.add(target);
-              }
-              target.classList.add("cinematic-reveal");
-              uniqueTargets.push(target);
+          var revealTargets = Array.prototype.slice.call(document.querySelectorAll("[data-reveal]"));
+          if (revealTargets.length > 0) {
+            revealTargets.forEach(function (target, index) {
+              target.style.setProperty("--reveal-index", index % 8);
             });
 
             if (reduceMotion || typeof IntersectionObserver === "undefined") {
-              uniqueTargets.forEach(function (target) {
+              revealTargets.forEach(function (target) {
                 target.classList.add("is-visible");
               });
-              return;
+            } else {
+              var revealObserver = new IntersectionObserver(
+                function (entries, observer) {
+                  entries.forEach(function (entry) {
+                    if (!entry.isIntersecting) return;
+                    entry.target.classList.add("is-visible");
+                    observer.unobserve(entry.target);
+                  });
+                },
+                {
+                  threshold: 0.15,
+                  rootMargin: "0px 0px -8% 0px"
+                }
+              );
+
+              revealTargets.forEach(function (target) {
+                revealObserver.observe(target);
+              });
             }
-
-            uniqueTargets.forEach(function (target, index) {
-              target.style.setProperty("--reveal-index", index % 7);
-            });
-
-            var revealObserver = new IntersectionObserver(
-              function (entries, observer) {
-                entries.forEach(function (entry) {
-                  if (!entry.isIntersecting) return;
-                  entry.target.classList.add("is-visible");
-                  observer.unobserve(entry.target);
-                });
-              },
-              {
-                threshold: 0.16,
-                rootMargin: "0px 0px -8% 0px"
-              }
-            );
-
-            uniqueTargets.forEach(function (target) {
-              revealObserver.observe(target);
-            });
           }
 
-          function initDetailTabs() {
-            var groups = Array.prototype.slice.call(document.querySelectorAll("[data-detail-tabs]"));
-            if (groups.length === 0) return;
+          var tabGroups = Array.prototype.slice.call(document.querySelectorAll("[data-detail-tabs]"));
+          tabGroups.forEach(function (group) {
+            var triggers = Array.prototype.slice.call(group.querySelectorAll("[data-detail-trigger]"));
+            var panels = Array.prototype.slice.call(group.querySelectorAll("[data-detail-panel]"));
+            if (triggers.length === 0 || panels.length === 0) return;
 
-            groups.forEach(function (group) {
-              var triggers = Array.prototype.slice.call(group.querySelectorAll("[data-detail-trigger]"));
-              var panels = Array.prototype.slice.call(group.querySelectorAll("[data-detail-panel]"));
-              if (triggers.length === 0 || panels.length === 0) return;
+            function activate(panelId) {
+              var hasActive = false;
 
-              panels.forEach(function (panel, index) {
-                panel.style.setProperty("--detail-index", index);
+              panels.forEach(function (panel) {
+                var isActive = panel.id === panelId;
+                panel.hidden = !isActive;
+                panel.classList.toggle("is-active", isActive);
+                if (isActive) hasActive = true;
               });
-
-              function activate(panelId) {
-                var hasActive = false;
-
-                panels.forEach(function (panel) {
-                  var isActive = panel.id === panelId;
-                  panel.hidden = !isActive;
-                  panel.classList.toggle("is-active", isActive);
-                  if (isActive) hasActive = true;
-                });
-
-                triggers.forEach(function (trigger) {
-                  var targetId = (trigger.getAttribute("href") || "").replace(/^#/, "");
-                  var isActive = targetId === panelId;
-                  trigger.classList.toggle("is-active", isActive);
-                  trigger.setAttribute("aria-current", isActive ? "true" : "false");
-                });
-
-                return hasActive;
-              }
 
               triggers.forEach(function (trigger) {
-                trigger.addEventListener("click", function (event) {
-                  var targetId = (trigger.getAttribute("href") || "").replace(/^#/, "");
-                  if (!targetId) return;
-                  event.preventDefault();
-                  if (!activate(targetId)) return;
-                  if (window.history && window.history.replaceState) {
-                    window.history.replaceState(null, "", "#" + targetId);
-                  }
-                });
+                var targetId = (trigger.getAttribute("href") || "").replace(/^#/, "");
+                var isActive = targetId === panelId;
+                trigger.classList.toggle("is-active", isActive);
+                trigger.setAttribute("aria-current", isActive ? "true" : "false");
               });
 
-              var initialHash = (window.location.hash || "").replace(/^#/, "");
-              var firstId = (triggers[0].getAttribute("href") || "").replace(/^#/, "");
-              if (!activate(initialHash)) {
-                activate(firstId);
+              return hasActive;
+            }
+
+            triggers.forEach(function (trigger) {
+              trigger.addEventListener("click", function (event) {
+                var targetId = (trigger.getAttribute("href") || "").replace(/^#/, "");
+                if (!targetId) return;
+                event.preventDefault();
+                if (!activate(targetId)) return;
+                if (window.history && window.history.replaceState) {
+                  window.history.replaceState(null, "", "#" + targetId);
+                }
+              });
+            });
+
+            var hash = (window.location.hash || "").replace(/^#/, "");
+            var fallback = (triggers[0].getAttribute("href") || "").replace(/^#/, "");
+            if (!activate(hash)) {
+              activate(fallback);
+            }
+          });
+
+          var filterInput = document.querySelector("[data-filter-input]");
+          var filterCards = Array.prototype.slice.call(document.querySelectorAll("[data-filter-card]"));
+          var filterEmpty = document.querySelector("[data-filter-empty]");
+
+          if (filterInput && filterCards.length > 0) {
+            function applyFilter() {
+              var query = filterInput.value.trim().toLowerCase();
+              var matches = 0;
+
+              filterCards.forEach(function (card) {
+                var haystack = (card.getAttribute("data-filter-text") || "").toLowerCase();
+                var show = query === "" || haystack.indexOf(query) !== -1;
+                card.hidden = !show;
+                if (show) matches += 1;
+              });
+
+              if (filterEmpty) {
+                filterEmpty.hidden = query === "" || matches > 0;
               }
-            });
-          }
-
-          function updateScrollProgress() {
-            if (!progressBar) return;
-            var doc = document.documentElement;
-            var scrollTop = window.pageYOffset || doc.scrollTop || 0;
-            var maxScroll = Math.max(0, doc.scrollHeight - window.innerHeight);
-            var progress = maxScroll > 0 ? Math.min(1, scrollTop / maxScroll) : 0;
-            progressBar.style.transform = "scaleY(" + progress.toFixed(4) + ")";
-          }
-
-          function initCursorAmbience() {
-            if (reduceMotion) return;
-            if (window.matchMedia && window.matchMedia("(pointer: coarse)").matches) return;
-
-            var currentX = window.innerWidth * 0.5;
-            var currentY = window.innerHeight * 0.28;
-            var targetX = currentX;
-            var targetY = currentY;
-
-            function render() {
-              currentX += (targetX - currentX) * 0.08;
-              currentY += (targetY - currentY) * 0.08;
-              root.style.setProperty("--cursor-x", currentX.toFixed(1) + "px");
-              root.style.setProperty("--cursor-y", currentY.toFixed(1) + "px");
-              window.requestAnimationFrame(render);
             }
 
-            window.addEventListener("mousemove", function (event) {
-              targetX = event.clientX;
-              targetY = event.clientY;
-            });
-
-            render();
+            filterInput.addEventListener("input", applyFilter);
+            applyFilter();
           }
 
-          function initCinematicLoader() {
-            if (!loader) return;
-            loader.classList.add("is-active");
-          }
-
-          function hideCinematicLoader() {
-            if (!loader) return;
-            loader.classList.remove("is-active");
-          }
-
-          function initCinematicCursor() {
-            if (disableCinematicCursor) return;
-            if (!cinematicCursor) {
-              cinematicCursor = document.createElement("div");
-              cinematicCursor.className = "cinematic-cursor";
-              document.body.appendChild(cinematicCursor);
-            }
-
-            var cursorX = window.innerWidth / 2;
-            var cursorY = window.innerHeight / 2;
-            var targetX = cursorX;
-            var targetY = cursorY;
-            var ease = 0.1;
-
-            function animateCursor() {
-              cursorX += (targetX - cursorX) * ease;
-              cursorY += (targetY - cursorY) * ease;
-              cinematicCursor.style.setProperty("transform", "translate(" + cursorX + "px, " + cursorY + "px) translate(-50%, -50%) scale(0.85)");
-              window.requestAnimationFrame(animateCursor);
-            }
-
-            window.addEventListener("mousemove", function (event) {
-              targetX = event.clientX;
-              targetY = event.clientY;
-            });
-
-            animateCursor();
-          }
-
-          initDetailTabs();
-          initCinematicMotion();
-          updateScrollProgress();
-          window.addEventListener("scroll", updateScrollProgress, { passive: true });
-          window.addEventListener("resize", updateScrollProgress);
-          initCursorAmbience();
-          initCinematicLoader();
-          initCinematicCursor();
-
-          if (introSeen || reduceMotion) {
-            body.classList.remove("intro-pending");
-            body.classList.add("intro-complete");
-            if (intro) intro.remove();
-            hideCinematicLoader();
-          } else {
-            window.setTimeout(function () {
-              body.classList.remove("intro-pending");
-              body.classList.add("intro-complete");
-              try {
-                localStorage.setItem(introSeenKey, "1");
-              } catch (e) {}
-              if (intro) {
-                window.setTimeout(function () {
-                  intro.remove();
-                  hideCinematicLoader();
-                }, 1220);
-              }
-            }, 1650);
-          }
+          document.body.classList.add("page-ready");
         });
       })();
     </script>
   </head>
-  <body class="intro-pending">
-    <div class="cinematic-noise" aria-hidden="true"></div>
-    <div class="cinematic-progress" aria-hidden="true"><span id="scroll-progress-bar"></span></div>
-    <div id="cinematic-loader" class="cinematic-loader" aria-hidden="true">
-      <div class="loader-ring"></div>
-      <p class="loader-signature">Loading frame</p>
-    </div>
-    <div id="intro-screen" class="intro-screen" aria-hidden="true">
-      <p class="intro-screen__name">{{ site.title }}</p>
-    </div>
-
+  <body>
     <header class="site-header">
       <div class="site-header__inner">
         <a class="site-title" href="{{ '/' | relative_url }}">{{ site.title }}</a>
@@ -314,48 +181,21 @@
             <a href="{{ link.url | relative_url }}">{{ link.title }}</a>
           {% endfor %}
         </nav>
-        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle color theme">Dark</button>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch color mode">Dark</button>
       </div>
     </header>
 
     <main class="site-main">
       {% if page.url != '/' and page.title %}
-        <h1>{{ page.title }}</h1>
+        <header class="page-heading" data-reveal>
+          <h1>{{ page.title }}</h1>
+        </header>
       {% endif %}
       {{ content }}
     </main>
 
     <footer class="site-footer">
-      <p>&copy; {{ site.time | date: '%Y' }} {{ site.title }}.</p>
+      <p>&copy; {{ site.time | date: '%Y' }} {{ site.title }}</p>
     </footer>
-    <script>
-      (function () {
-        var searchInput = document.getElementById("notes-search-input");
-        var cards = document.querySelectorAll(".notes-category-card");
-        var emptyMessage = document.querySelector(".notes-search-empty");
-
-        if (!searchInput || cards.length === 0) return;
-
-        function updateVisibility() {
-          var query = searchInput.value.trim().toLowerCase();
-          var matched = 0;
-
-          cards.forEach(function (card) {
-            var haystack =
-              ((card.dataset.label || "") + " " + (card.dataset.summary || "") + " " + (card.dataset.count || "")).toLowerCase();
-            var matches = query === "" || haystack.indexOf(query) !== -1;
-            card.hidden = !matches;
-            if (matches) matched += 1;
-          });
-
-          if (emptyMessage) {
-            emptyMessage.hidden = query === "" || matched > 0;
-          }
-        }
-
-        searchInput.addEventListener("input", updateVisibility);
-        updateVisibility();
-      })();
-    </script>
   </body>
 </html>

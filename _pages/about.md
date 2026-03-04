@@ -6,125 +6,154 @@ title: "Richard Cheam"
 
 {% assign sorted_notes = site.notes | sort: "date" | reverse %}
 
-<div class="home-hero">
-  <p class="home-hero__tag">AI Engineer Apprentice · Paris</p>
-  <h1 class="home-hero__title">Richard Cheam</h1>
-  <p class="home-hero__subtitle">
-    Building cinematic, trustworthy AI experiences at Renault. I obsess over speech, world modeling, and
-    making high-impact research feel instantly readable for teams shipping real products.
+<section id="hero" class="hero section-block">
+  <p class="section-eyebrow" data-reveal>AI / Machine Learning Engineer</p>
+  <h1 class="hero__name" data-reveal>Richard Cheam</h1>
+  <p class="hero__tagline" data-reveal>Building practical AI systems with clean research-to-product execution.</p>
+  <p class="hero__support" data-reveal>
+    Engineer's and Master's degree in Data Science &amp; AI. Currently at Renault, focused on dependable,
+    production-ready ML experiences.
   </p>
-  <div class="home-hero__cta">
-    <a class="btn btn--ghost" href="/notes/">Notes</a>
-    <a class="btn btn--ghost" href="/projects/">Projects</a>
-    <a class="btn btn--primary" href="/contact/">Contact</a>
+  <div class="hero__actions" data-reveal>
+    <a class="btn btn--primary" href="#projects">View Projects</a>
+    <a class="btn btn--ghost" href="https://github.com/richardcheam" target="_blank" rel="noopener noreferrer">GitHub</a>
   </div>
-</div>
+</section>
 
-<section class="home-section home-section--blog" aria-label="Latest writing">
-  <div class="home-section__header">
-    <p class="home-section__eyebrow">Writing</p>
-    <h2>Short-form lab notes</h2>
-    <p class="home-section__description">
-      What I read, build, and want to remember. Each log is trimmed to the insight so you can scan it fast.
-      Hover to preview and click to dive deeper.
-    </p>
+<section id="projects" class="section-block" data-reveal>
+  <header class="section-head">
+    <p class="section-eyebrow">Featured Projects</p>
+    <h2>Product-style project showcases</h2>
+    <p class="section-description">Focused work with clear outcomes, stack decisions, and engineering constraints.</p>
+  </header>
+  <div class="cards-grid">
+    <article class="premium-card project-card" data-reveal>
+      <p class="card-meta">NLP · March 2025</p>
+      <h3 class="card-title">IMDb Sentiment with Mixture of Experts</h3>
+      <p class="card-summary">Benchmarked transformer baselines against a custom expert-routing architecture for robust sentiment classification.</p>
+      <div class="project-stack">
+        <span class="tag">PyTorch</span>
+        <span class="tag">Hugging Face</span>
+        <span class="tag">MoE</span>
+      </div>
+      <a class="card-link" href="{{ '/projects/imdb-moe/' | relative_url }}">View project</a>
+    </article>
+
+    <article class="premium-card project-card" data-reveal>
+      <p class="card-meta">Computer Vision · December 2024</p>
+      <h3 class="card-title">SSL and Semi-supervised Learning on MNIST</h3>
+      <p class="card-summary">Reached strong accuracy under extreme label scarcity with pseudo-labeling and SimCLR representation learning.</p>
+      <div class="project-stack">
+        <span class="tag">PyTorch</span>
+        <span class="tag">CNN</span>
+        <span class="tag">SimCLR</span>
+      </div>
+      <a class="card-link" href="{{ '/projects/mnist-ssl/' | relative_url }}">View project</a>
+    </article>
+
+    <article class="premium-card project-card" data-reveal>
+      <p class="card-meta">Speech Systems · Ongoing</p>
+      <h3 class="card-title">Streaming Speech Reliability Toolkit</h3>
+      <p class="card-summary">Latency-oriented evaluation setup for real-time speech pipelines with reproducible traces and release checklists.</p>
+      <div class="project-stack">
+        <span class="tag">ASR</span>
+        <span class="tag">Latency</span>
+        <span class="tag">Observability</span>
+      </div>
+      <a class="card-link" href="{{ '/notes/2026-03-01-speech-ai/' | relative_url }}">View summary</a>
+    </article>
   </div>
-  <div class="home-blog-grid">
-    {% for note in sorted_notes limit:3 %}
+</section>
+
+<section id="notes" class="section-block" data-reveal>
+  <header class="section-head">
+    <p class="section-eyebrow">Knowledge Notes</p>
+    <h2>AI paper summaries and concept cards</h2>
+    <p class="section-description">A compact memory system for papers and concepts I revisit often.</p>
+  </header>
+  <div class="notes-grid">
+    {% for note in sorted_notes limit:4 %}
       {% assign note_key = note.category | default: "note" | slugify %}
-      {% assign note_label = "Note" %}
+      {% assign category_label = "Note" %}
       {% for cat in site.data.notes_categories %}
         {% if cat.key == note_key %}
-          {% assign note_label = cat.label %}
+          {% assign category_label = cat.label %}
         {% endif %}
       {% endfor %}
-      <article class="home-blog-card">
-        <p class="home-blog-card__meta">{{ note_label }}{% if note.date %} • {{ note.date | date: "%d %b %Y" }}{% endif %}</p>
-        <h3>{{ note.title }}</h3>
-        {% if note.excerpt %}
-          <p class="home-blog-card__excerpt">{{ note.excerpt | strip_html | truncate: 130 }}</p>
-        {% endif %}
-        <a class="home-blog-card__cta" href="{{ note.url | relative_url }}">Open note</a>
+      <article class="premium-card" data-reveal>
+        <p class="card-meta">{{ category_label }}</p>
+        <h3 class="card-title">{{ note.title }}</h3>
+        <p class="card-summary">{{ note.excerpt | default: "Practical summary with key intuition and implementation notes." | strip_html | truncate: 125 }}</p>
+        <div class="card-tags">
+          <span class="tag">{{ category_label }}</span>
+          <span class="tag">AI</span>
+        </div>
+        <a class="card-link" href="{{ note.url | relative_url }}">Read summary</a>
       </article>
     {% endfor %}
   </div>
 </section>
 
-<section class="home-section home-section--knowledge" aria-label="Knowledge overview">
-  <div class="home-section__header">
-    <p class="home-section__eyebrow">Knowledge base</p>
-    <h2>Categories with living memory</h2>
-    <p class="home-section__description">
-      Each pillar links to curated concept stacks. Start at fundamentals or explore exact topics I revisit often.
-      This space mirrors how I reason systematically about AI.
-    </p>
-  </div>
-  <div class="notes-category-grid">
-    {% for cat in site.data.notes_categories %}
-      {% assign cat_count = 0 %}
-      {% for note in sorted_notes %}
-        {% assign note_key = note.category | default: "" | slugify %}
-        {% if note_key == cat.key %}
-          {% assign cat_count = cat_count | plus: 1 %}
-        {% endif %}
-      {% endfor %}
-      {% assign has_notes = false %}
-      {% if cat_count > 0 %}
-        {% assign has_notes = true %}
-      {% endif %}
-      {% if cat.key == "fundamentals" %}
-        {% assign category_href = '/notes/fundamentals/' | relative_url %}
-      {% else %}
-        {% assign category_href = '/notes/' | relative_url %}
-      {% endif %}
-      <a class="notes-category-card" data-has-notes="{{ has_notes }}" href="{{ category_href }}">
-        <p class="notes-category-card__eyebrow">{{ cat.label }}{% if has_notes %} · {{ cat_count }}{% endif %}</p>
-        <p class="notes-category-card__summary">{{ cat.summary }}</p>
-        {% if has_notes %}
-          <p class="notes-category-card__count">Contains {{ cat_count }} logged thought{% if cat_count != 1 %}s{% endif %}</p>
-        {% else %}
-          <p class="notes-category-card__count">Coming soon</p>
-        {% endif %}
-      </a>
+<section id="blog" class="section-block" data-reveal>
+  <header class="section-head">
+    <p class="section-eyebrow">Blog</p>
+    <h2>Technical notes for long-term recall</h2>
+    <p class="section-description">Clear explanations written for future-me and helpful for anyone learning with implementation context.</p>
+  </header>
+  <div class="blog-grid">
+    {% for note in sorted_notes limit:3 offset:1 %}
+      <article class="premium-card" data-reveal>
+        <p class="card-meta">Technical post{% if note.date %} · {{ note.date | date: "%d %b %Y" }}{% endif %}</p>
+        <h3 class="card-title">{{ note.title }}</h3>
+        <p class="card-summary">{{ note.excerpt | default: "Short practical write-up with definitions, tradeoffs, and implementation reminders." | strip_html | truncate: 138 }}</p>
+        <a class="card-link" href="{{ note.url | relative_url }}">Read more</a>
+      </article>
     {% endfor %}
   </div>
 </section>
 
-<section class="home-section home-section--projects" aria-label="Featured projects">
-  <div class="home-section__header">
-    <p class="home-section__eyebrow">Projects</p>
-    <h2>Selected builds</h2>
-    <p class="home-section__description">
-      Cinematic prototypes with crisp instrumentation, ready for recruitment and teammates. Click any card for deep
-      dives, TL;DR chips, and live artifacts.
-    </p>
-  </div>
-  <div class="home-project-grid">
-    <article class="home-project-card">
-      <p class="home-project-card__kicker">NLP • March 2025</p>
-      <h3>IMDb Sentiment with Mixture of Experts</h3>
-      <p class="home-project-card__lead">
-        Benchmarking transformers against a custom expert router to see how specialization shapes sentiment fairness.
-      </p>
-    <span class="home-project-card__badge" aria-hidden="true">LLM</span>
-    <div class="home-project-card__stats">
-      <span class="detail-chip detail-chip--impact"><span class="detail-chip__value">Reproducible benchmark</span></span>
-      <span class="detail-chip detail-chip--stack"><span class="detail-chip__value">PyTorch • Hugging Face • MoE</span></span>
-    </div>
-    <a class="home-project-card__cta" href="{{ '/projects/imdb-moe/' | relative_url }}">Explore the project</a>
+<section id="experience" class="section-block" data-reveal>
+  <header class="section-head">
+    <p class="section-eyebrow">Experience / Skills</p>
+    <h2>Research-grade thinking, product-grade delivery</h2>
+    <p class="section-description">I optimize for clear methodology, fast iteration, and production reliability.</p>
+  </header>
+  <div class="experience-layout">
+    <article class="premium-card" data-reveal>
+      <h3 class="card-title">Experience</h3>
+      <ul class="experience-list">
+        <li><strong>Renault</strong><span>AI Engineer Apprentice · Current</span></li>
+        <li><strong>ensIIE / Paris-Saclay</strong><span>Data Science &amp; AI Engineering</span></li>
+        <li><strong>Research mindset</strong><span>Reproducibility, evaluation, ablation discipline</span></li>
+      </ul>
     </article>
-    <article class="home-project-card">
-      <p class="home-project-card__kicker">Computer Vision • December 2024</p>
-      <h3>SSL &amp; Semi-supervised Learning on MNIST</h3>
-      <p class="home-project-card__lead">
-        Low-label training with pseudo-label refreshes and SimCLR probes to make fewer labels feel abundant.
-      </p>
-    <span class="home-project-card__badge" aria-hidden="true">SSL</span>
-    <div class="home-project-card__stats">
-      <span class="detail-chip detail-chip--impact"><span class="detail-chip__value">98.55% SimCLR probe</span></span>
-      <span class="detail-chip detail-chip--constraint"><span class="detail-chip__value">100 labels</span></span>
-    </div>
-      <a class="home-project-card__cta" href="{{ '/projects/mnist-ssl/' | relative_url }}">See the build details</a>
+    <article class="premium-card" data-reveal>
+      <h3 class="card-title">Skills</h3>
+      <p class="card-summary">Core stack used in projects, paper replications, and applied system design.</p>
+      <div class="skills-cloud">
+        <span class="tag">Python</span>
+        <span class="tag">PyTorch</span>
+        <span class="tag">NLP / LLM</span>
+        <span class="tag">Computer Vision</span>
+        <span class="tag">Speech AI</span>
+        <span class="tag">Experiment Tracking</span>
+        <span class="tag">Model Evaluation</span>
+        <span class="tag">MLOps Basics</span>
+      </div>
     </article>
   </div>
+</section>
+
+<section id="contact" class="section-block" data-reveal>
+  <article class="premium-card contact-panel" data-reveal>
+    <p class="section-eyebrow">Contact</p>
+    <h2>Open to ML/AI engineering opportunities</h2>
+    <p class="section-description">If your team values clarity, reproducible experimentation, and product impact, I would love to connect.</p>
+    <div class="contact-links">
+      <a href="{{ '/contact/' | relative_url }}">Contact page</a>
+      <a href="mailto:richard.cheam@etu.u-paris.fr">Email</a>
+      <a href="https://github.com/richardcheam" target="_blank" rel="noopener noreferrer">GitHub</a>
+      <a href="https://www.linkedin.com/in/richard-cheam" target="_blank" rel="noopener noreferrer">LinkedIn</a>
+    </div>
+  </article>
 </section>
