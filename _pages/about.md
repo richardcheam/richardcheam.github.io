@@ -8,16 +8,18 @@ title: "Richard Cheam"
 
 <section id="hero" class="hero section-block">
   <div class="hero__glow" aria-hidden="true"></div>
-  <p class="section-eyebrow" data-reveal>AI / Machine Learning Engineer</p>
-  <h1 class="hero__name" data-reveal>Richard Cheam</h1>
-  <!-- <p class="hero__tagline" data-reveal>Building practical AI systems with clean research-to-product execution.</p> -->
-  <p class="hero__support" data-reveal>
-    Engineer's and Master's degree in Data Science &amp; AI. Currently at Renault.
-  </p>
-  <div class="hero__actions" data-reveal>
-    <a class="btn btn--primary" href="#projects">View Projects</a>
-    <a class="btn btn--ghost" href="https://github.com/richardcheam" target="_blank" rel="noopener noreferrer">GitHub</a>
-    <a class="btn btn--ghost" href="#contact">Contact</a>
+  <div class="hero-container">
+    <p class="section-eyebrow" data-reveal>AI / Machine Learning Engineer</p>
+    <h1 class="hero__name" data-reveal>Richard Cheam</h1>
+    <!-- <p class="hero__tagline" data-reveal>Building practical AI systems with clean research-to-product execution.</p> -->
+    <p class="hero__support" data-reveal>
+      Engineer's and Master's degree in Data Science &amp; AI. Currently at Renault.
+    </p>
+    <div class="hero__actions" data-reveal>
+      <a class="btn btn--primary" href="#projects">View Projects</a>
+      <a class="btn btn--ghost" href="https://github.com/richardcheam" target="_blank" rel="noopener noreferrer">GitHub</a>
+      <a class="btn btn--ghost" href="#contact">Contact</a>
+    </div>
   </div>
 </section>
 

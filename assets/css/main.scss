@@ -537,6 +537,8 @@ body.intro-complete .scroll-progress {
   padding-top: var(--space-5);
   padding-bottom: var(--space-6);
   position: relative;
+  margin-left: calc(50% - 50vw);
+  margin-right: calc(50% - 50vw);
   overflow: hidden;
   isolation: isolate;
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -546,6 +548,11 @@ body.intro-complete .scroll-progress {
     radial-gradient(120% 92% at 58% 96%, rgba(167, 37, 92, 0.32), transparent 52%),
     linear-gradient(122deg, #10172f 0%, #251538 34%, #4a1d4a 64%, #241031 100%);
   box-shadow: 0 34px 64px -42px rgba(0, 0, 0, 0.52);
+}
+
+.hero-container {
+  width: min(var(--container), calc(100% - var(--space-5)));
+  margin: 0 auto;
 }
 
 .hero > :not(.hero__glow) {
@@ -1238,6 +1245,10 @@ html.js [data-reveal].is-visible {
   .hero {
     padding-top: var(--space-4);
     padding-bottom: var(--space-5);
+  }
+
+  .hero-container {
+    width: min(var(--container), calc(100% - var(--space-4)));
   }
 
   .hero__actions {
