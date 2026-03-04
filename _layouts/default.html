@@ -21,7 +21,7 @@
           savedTheme = null;
         }
 
-        if (savedTheme === "light" || savedTheme === "dark" || savedTheme === "burgundy") {
+        if (savedTheme === "light" || savedTheme === "dark") {
           root.setAttribute("data-theme", savedTheme);
         } else {
           root.setAttribute("data-theme", "light");
@@ -36,16 +36,14 @@
           var body = document.body;
           var isHome = body.getAttribute("data-page") === "/";
 
-          var themeOrder = ["light", "dark", "burgundy"];
+          var themeOrder = ["light", "dark"];
           var themeNames = {
             light: "Light",
-            dark: "Dark",
-            burgundy: "Burgundy"
+            dark: "Dark"
           };
           var themeMetaColors = {
             light: "#ffffff",
-            dark: "#0d0d0d",
-            burgundy: "#11060b"
+            dark: "#0d0d0d"
           };
 
           function getTheme() {
@@ -138,7 +136,7 @@
 
           function scheduleMegaClose() {
             clearMegaClose();
-            megaCloseTimer = window.setTimeout(closeMega, 220);
+            megaCloseTimer = window.setTimeout(closeMega, 280);
           }
 
           if (megaRoot && megaShell && megaTriggers.length > 0) {
