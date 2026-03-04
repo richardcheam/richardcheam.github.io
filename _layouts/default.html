@@ -341,8 +341,11 @@
       </div>
       <div class="mega-shell" data-mega-shell aria-hidden="true">
         <section class="mega-panel mega-panel--single" data-mega-panel="projects">
-          <div class="mega-col mega-col--solo">
+          <div class="mega-col mega-col--list">
             <a class="mega-primary-link" href="{{ '/projects/' | relative_url }}">All Projects</a>
+            <a class="mega-primary-link" href="{{ '/projects/imdb-moe/' | relative_url }}">IMDb Sentiment with Mixture of Experts</a>
+            <a class="mega-primary-link" href="{{ '/projects/mnist-ssl/' | relative_url }}">SSL and Semi-supervised Learning on MNIST</a>
+            <a class="mega-primary-link" href="{{ '/notes/2026-03-01-speech-ai/' | relative_url }}">Streaming Speech Reliability Toolkit</a>
           </div>
         </section>
 
@@ -356,10 +359,11 @@
         </section>
 
         <section class="mega-panel mega-panel--single" data-mega-panel="blog">
-          <div class="mega-col mega-col--stack">
+          <div class="mega-col mega-col--list">
             <a class="mega-primary-link" href="{{ '/blog/' | relative_url }}">All Blog Posts</a>
-            {% for cat in site.data.notes_categories %}
-              <a class="mega-primary-link" href="{{ '/blog/' | relative_url }}?category={{ cat.key | uri_escape }}">{{ cat.label }}</a>
+            {% assign blog_notes = site.notes | sort: "date" | reverse %}
+            {% for note in blog_notes %}
+              <a class="mega-primary-link" href="{{ note.url | relative_url }}">{{ note.title }}</a>
             {% endfor %}
           </div>
         </section>
