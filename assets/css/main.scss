@@ -741,6 +741,13 @@ body.intro-complete .scroll-progress {
   border-color: rgba(46, 34, 74, 0.18);
 }
 
+.hero__actions .hero-icon-btn {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border-radius: 999px;
+}
+
 html[data-theme="dark"] .hero {
   border: none;
   background:
@@ -830,6 +837,7 @@ html[data-theme="dark"] .hero::before {
   transition: transform 320ms var(--ease-out), box-shadow 320ms var(--ease-out), border-color 280ms var(--ease-out);
   position: relative;
   overflow: hidden;
+  isolation: isolate;
 }
 
 .premium-card::before {
@@ -841,6 +849,38 @@ html[data-theme="dark"] .hero::before {
   transform: translateX(-14%);
   pointer-events: none;
   transition: opacity 340ms var(--ease-out), transform 460ms var(--ease-out);
+  z-index: 2;
+}
+
+.premium-card::after,
+.notes-card::after,
+.blog-card::after,
+.concept-card::after {
+  content: "";
+  position: absolute;
+  inset: -34% -26%;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0;
+  transform: translateY(8px) scale(0.96);
+  filter: blur(22px) saturate(126%) contrast(102%);
+  background:
+    radial-gradient(42% 42% at 20% 24%, rgba(86, 148, 240, 0.34) 0%, rgba(86, 148, 240, 0) 74%),
+    radial-gradient(38% 38% at 82% 22%, rgba(170, 96, 232, 0.32) 0%, rgba(170, 96, 232, 0) 74%),
+    radial-gradient(44% 42% at 64% 82%, rgba(236, 108, 182, 0.3) 0%, rgba(236, 108, 182, 0) 76%),
+    radial-gradient(40% 40% at 30% 78%, rgba(230, 92, 114, 0.26) 0%, rgba(230, 92, 114, 0) 74%),
+    radial-gradient(56% 54% at 70% 66%, rgba(255, 255, 255, 0.48) 0%, rgba(255, 255, 255, 0) 78%);
+  background-size: 240% 240%;
+  background-position: 34% 46%;
+  transition: opacity 360ms var(--ease-out), transform 420ms var(--ease-out);
+}
+
+.premium-card > *,
+.notes-card > *,
+.blog-card > *,
+.concept-card > * {
+  position: relative;
+  z-index: 1;
 }
 
 .premium-card:hover,
@@ -854,6 +894,19 @@ html[data-theme="dark"] .hero::before {
 .premium-card:focus-within::before {
   opacity: 1;
   transform: translateX(0);
+}
+
+.premium-card:hover::after,
+.premium-card:focus-within::after,
+.notes-card:hover::after,
+.notes-card:focus-visible::after,
+.blog-card:hover::after,
+.blog-card:focus-visible::after,
+.concept-card:hover::after,
+.concept-card:focus-visible::after {
+  opacity: 0.82;
+  transform: translateY(0) scale(1);
+  animation: cardAuraDrift 7.2s linear infinite, cardAuraPulse 3.4s ease-in-out infinite;
 }
 
 .premium-card:focus-visible,
@@ -1088,6 +1141,9 @@ html[data-theme="dark"] .hero::before {
   padding: var(--space-3);
   text-decoration: none;
   box-shadow: var(--shadow);
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
   transition: transform 260ms var(--ease-out), box-shadow 260ms var(--ease-out);
 }
 
@@ -1531,6 +1587,14 @@ html.js [data-reveal].is-visible {
   .hero::before {
     animation: none;
   }
+
+  .premium-card::after,
+  .notes-card::after,
+  .blog-card::after,
+  .concept-card::after {
+    animation: none;
+    transition: none;
+  }
 }
 
 @keyframes megaPanelIn {
@@ -1713,6 +1777,39 @@ html.js [data-reveal].is-visible {
   100% {
     opacity: 0.42;
     transform: scale(0.98) translate3d(-3%, 1%, 0);
+  }
+}
+
+@keyframes cardAuraDrift {
+  0% {
+    background-position: 28% 44%;
+  }
+  20% {
+    background-position: 86% 20%;
+  }
+  40% {
+    background-position: 74% 84%;
+  }
+  60% {
+    background-position: 16% 76%;
+  }
+  80% {
+    background-position: 64% 24%;
+  }
+  100% {
+    background-position: 28% 44%;
+  }
+}
+
+@keyframes cardAuraPulse {
+  0% {
+    filter: blur(20px) saturate(122%) contrast(101%);
+  }
+  50% {
+    filter: blur(24px) saturate(130%) contrast(104%);
+  }
+  100% {
+    filter: blur(20px) saturate(122%) contrast(101%);
   }
 }
 

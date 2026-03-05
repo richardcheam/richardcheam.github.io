@@ -17,7 +17,12 @@ title: "Richard Cheam"
     </p>
     <div class="hero__actions" data-reveal>
       <a class="btn btn--primary" href="#projects">View Projects</a>
-      <a class="btn btn--ghost" href="https://github.com/richardcheam" target="_blank" rel="noopener noreferrer">GitHub</a>
+      <a class="btn btn--ghost hero-icon-btn" href="https://github.com/richardcheam" target="_blank" rel="noopener noreferrer" aria-label="GitHub">
+        <svg class="contact-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 .75a11.25 11.25 0 0 0-3.56 21.92c.56.1.77-.24.77-.54v-1.9c-3.14.69-3.8-1.35-3.8-1.35a2.99 2.99 0 0 0-1.25-1.64c-1.02-.7.08-.69.08-.69a2.37 2.37 0 0 1 1.72 1.16 2.43 2.43 0 0 0 3.32.95 2.44 2.44 0 0 1 .73-1.53c-2.5-.28-5.12-1.25-5.12-5.56a4.36 4.36 0 0 1 1.16-3.03 4.06 4.06 0 0 1 .11-2.99s.94-.3 3.08 1.16a10.7 10.7 0 0 1 5.6 0c2.14-1.46 3.08-1.16 3.08-1.16.45.95.49 2.07.11 2.99a4.35 4.35 0 0 1 1.16 3.03c0 4.32-2.63 5.28-5.14 5.55a2.73 2.73 0 0 1 .77 2.12v3.14c0 .3.2.65.78.54A11.25 11.25 0 0 0 12 .75Z"/>
+        </svg>
+        <span class="sr-only">GitHub</span>
+      </a>
       <a class="btn btn--ghost" href="#contact">Contact</a>
     </div>
   </div>
@@ -26,8 +31,8 @@ title: "Richard Cheam"
 <section id="projects" class="section-block" data-reveal>
   <header class="section-head">
     <p class="section-eyebrow">Featured Projects</p>
-    <h2>Product-style project showcases</h2>
-    <p class="section-description">Focused work with clear outcomes, stack decisions, and engineering constraints.</p>
+    <h2>Project Card</h2>
+    <p class="section-description">My personal and academic projects.</p>
   </header>
   <div class="cards-grid">
     <article class="premium-card project-card" data-reveal>
@@ -71,8 +76,8 @@ title: "Richard Cheam"
 <section id="notes" class="section-block" data-reveal>
   <header class="section-head">
     <p class="section-eyebrow">Technical Notes</p>
-    <h2>AI paper summaries and concept cards</h2>
-    <p class="section-description">A compact memory system for papers and concepts I revisit often.</p>
+    <h2>Paper summaries and concept cards</h2>
+    <p class="section-description">Review section for papers and concepts and I have read for myself to revisit.</p>
   </header>
   <div class="notes-grid">
     {% for note in sorted_notes limit:4 %}
@@ -100,8 +105,8 @@ title: "Richard Cheam"
 <section id="blog" class="section-block" data-reveal>
   <header class="section-head">
     <p class="section-eyebrow">Blog</p>
-    <h2>Technical notes for long-term recall</h2>
-    <p class="section-description">Clear explanations written for future-me and helpful for anyone learning with implementation context.</p>
+    <h2>Long-term recall</h2>
+    <p class="section-description">Clear explanations written for future-me (since I tend to forget) and helpful for anyone learning.</p>
   </header>
   <div class="blog-grid">
     {% for note in sorted_notes limit:3 offset:1 %}
