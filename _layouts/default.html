@@ -21,11 +21,7 @@
           savedTheme = null;
         }
 
-        if (savedTheme === "light" || savedTheme === "dark") {
-          root.setAttribute("data-theme", savedTheme);
-        } else {
-          root.setAttribute("data-theme", "light");
-        }
+        root.setAttribute("data-theme", "light");
 
         document.addEventListener("DOMContentLoaded", function () {
           var toggle = document.getElementById("theme-toggle");
@@ -36,14 +32,12 @@
           var body = document.body;
           var isHome = body.getAttribute("data-page") === "/";
 
-          var themeOrder = ["light", "dark"];
+          var themeOrder = ["light"];
           var themeNames = {
-            light: "Light",
-            dark: "Dark"
+            light: "Light"
           };
           var themeMetaColors = {
-            light: "#ffffff",
-            dark: "#0d0d0d"
+            light: "#ffffff"
           };
 
           function getTheme() {
@@ -213,6 +207,83 @@
             }
           }
 
+          function getStaggerColumns(grid) {
+            if (grid.classList.contains("cards-grid")) {
+              if (window.matchMedia("(max-width: 760px)").matches) return 1;
+              if (window.matchMedia("(max-width: 1024px)").matches) return 2;
+              return 3;
+            }
+            if (grid.classList.contains("notes-grid") || grid.classList.contains("blog-grid")) {
+              return window.matchMedia("(max-width: 760px)").matches ? 1 : 2;
+            }
+            return 1;
+          }
+
+          function applyCardStagger() {
+            var staggerGrids = Array.prototype.slice.call(
+              document.querySelectorAll(".cards-grid, .notes-grid, .blog-grid, .notes-list, .blog-list, .concept-list")
+            );
+
+            staggerGrids.forEach(function (grid) {
+              var columns = Math.max(1, getStaggerColumns(grid));
+              var staggerItems = Array.prototype.slice.call(grid.children).filter(function (item) {
+                return item.hasAttribute("data-reveal");
+              });
+
+              staggerItems.forEach(function (item, index) {
+                item.style.setProperty("--card-stagger-row", Math.floor(index / columns));
+                item.style.setProperty("--card-stagger-col", index % columns);
+              });
+            });
+          }
+
+          applyCardStagger();
+          window.addEventListener("resize", applyCardStagger);
+
+          var hero = document.querySelector(".hero");
+          var heroGlow = hero && hero.querySelector(".hero__glow");
+          if (hero && heroGlow && !reduceMotion) {
+            var heroTargetX = 0;
+            var heroTargetY = 0;
+            var heroCurrentX = 0;
+            var heroCurrentY = 0;
+            var heroRaf = null;
+
+            function renderHeroParallax() {
+              heroCurrentX += (heroTargetX - heroCurrentX) * 0.12;
+              heroCurrentY += (heroTargetY - heroCurrentY) * 0.12;
+              hero.style.setProperty("--hero-parallax-x", heroCurrentX.toFixed(2) + "px");
+              hero.style.setProperty("--hero-parallax-y", heroCurrentY.toFixed(2) + "px");
+
+              if (Math.abs(heroTargetX - heroCurrentX) > 0.04 || Math.abs(heroTargetY - heroCurrentY) > 0.04) {
+                heroRaf = window.requestAnimationFrame(renderHeroParallax);
+              } else {
+                heroRaf = null;
+              }
+            }
+
+            function scheduleHeroParallax() {
+              if (heroRaf) return;
+              heroRaf = window.requestAnimationFrame(renderHeroParallax);
+            }
+
+            hero.addEventListener("pointermove", function (event) {
+              var rect = hero.getBoundingClientRect();
+              if (!rect.width || !rect.height) return;
+              var offsetX = (event.clientX - rect.left) / rect.width - 0.5;
+              var offsetY = (event.clientY - rect.top) / rect.height - 0.5;
+              heroTargetX = offsetX * 14;
+              heroTargetY = offsetY * 10;
+              scheduleHeroParallax();
+            });
+
+            hero.addEventListener("pointerleave", function () {
+              heroTargetX = 0;
+              heroTargetY = 0;
+              scheduleHeroParallax();
+            });
+          }
+
           function updateScrollProgress() {
             if (!scrollProgressBar) return;
             var doc = document.documentElement;
@@ -326,6 +397,43 @@
             finishIntro();
           }
 
+          if (!reduceMotion) {
+            document.addEventListener("click", function (event) {
+              if (event.defaultPrevented) return;
+              if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+
+              var link = event.target && event.target.closest ? event.target.closest("a[href]") : null;
+              if (!link) return;
+              if (link.target && link.target !== "_self") return;
+              if (link.hasAttribute("download")) return;
+
+              var hrefAttr = link.getAttribute("href") || "";
+              if (hrefAttr === "" || hrefAttr.charAt(0) === "#") return;
+              if (hrefAttr.indexOf("javascript:") === 0 || hrefAttr.indexOf("mailto:") === 0 || hrefAttr.indexOf("tel:") === 0) return;
+
+              var targetUrl = null;
+              try {
+                targetUrl = new URL(link.href, window.location.href);
+              } catch (e) {
+                return;
+              }
+
+              if (targetUrl.origin !== window.location.origin) return;
+              if (targetUrl.pathname === window.location.pathname && targetUrl.search === window.location.search && targetUrl.hash) return;
+              if (targetUrl.href === window.location.href) return;
+
+              event.preventDefault();
+              body.classList.add("route-leaving");
+              window.setTimeout(function () {
+                window.location.assign(targetUrl.href);
+              }, 170);
+            });
+          }
+
+          window.addEventListener("pageshow", function () {
+            body.classList.remove("route-leaving");
+          });
+
           updateScrollProgress();
           window.addEventListener("scroll", updateScrollProgress, { passive: true });
           window.addEventListener("resize", updateScrollProgress);
@@ -352,7 +460,6 @@
           <a class="site-nav__item" href="{{ '/blog/' | relative_url }}" data-mega-target="blog" aria-haspopup="true" aria-expanded="false">Blog</a>
           <a class="site-nav__item" href="{{ '/cv/' | relative_url }}">About Me</a>
         </nav>
-        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch color mode">Dark</button>
       </div>
       <div class="mega-shell" data-mega-shell aria-hidden="true">
         <section class="mega-panel mega-panel--single" data-mega-panel="projects">
