@@ -1040,34 +1040,6 @@ html[data-theme="dark"] .hero::before {
   flex-wrap: wrap;
 }
 
-.cv-highlights {
-  display: grid;
-  gap: var(--space-3);
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-
-.cv-stat {
-  min-height: 160px;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-}
-
-.cv-stat__value {
-  margin: 0;
-  color: var(--text);
-  font-family: var(--font-display);
-  font-size: clamp(1.6rem, 2.4vw, 2.1rem);
-  font-weight: 640;
-  letter-spacing: -0.02em;
-}
-
-.cv-stat__label {
-  margin: var(--space-2) 0 0;
-  color: var(--text-secondary);
-  font-size: 14px;
-}
-
 .cv-experience-list {
   display: grid;
   gap: var(--space-3);
@@ -1534,10 +1506,6 @@ html.js [data-reveal].is-visible {
     grid-template-columns: 1fr;
   }
 
-  .cv-highlights {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .cv-skills-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1596,7 +1564,6 @@ html.js [data-reveal].is-visible {
   .cards-grid,
   .notes-grid,
   .blog-grid,
-  .cv-highlights,
   .cv-skills-grid,
   .cv-bottom-grid {
     grid-template-columns: 1fr;

@@ -5,10 +5,11 @@ permalink: /cv/
 ---
 
 <section class="page-intro" data-reveal>
-  <p class="section-eyebrow">About Me</p>
-  <h2>AI Engineer with research depth and product execution focus</h2>
+  <p class="section-eyebrow">Curriculum Vitae</p>
+  <h2>Richard Cheam</h2>
   <p class="section-description">
-    AI Engineer apprentice working across speech, NLP/LLMs, and computer vision. I focus on taking ideas from experimentation to reliable, measurable systems.
+    AI Engineer apprentice with experience in applied machine learning and research across speech, NLP/LLMs, and computer vision.
+    Open to Data Scientist and ML/AI Engineer opportunities.
   </p>
   <div class="cv-actions">
     <a class="btn btn--primary" href="{{ '/projects/' | relative_url }}">View Projects</a>
@@ -18,33 +19,8 @@ permalink: /cv/
 
 <section class="section-block" data-reveal>
   <header class="section-head">
-    <p class="section-eyebrow">Quick Highlights</p>
-    <h2>Fast recruiter scan</h2>
-  </header>
-  <div class="cv-highlights">
-    <article class="premium-card cv-stat" data-reveal>
-      <p class="cv-stat__value">4+</p>
-      <p class="cv-stat__label">Industry and research experiences</p>
-    </article>
-    <article class="premium-card cv-stat" data-reveal>
-      <p class="cv-stat__value">3</p>
-      <p class="cv-stat__label">Core domains: Speech, NLP/LLM, Vision</p>
-    </article>
-    <article class="premium-card cv-stat" data-reveal>
-      <p class="cv-stat__value">8k+</p>
-      <p class="cv-stat__label">Participants processed in longitudinal analysis</p>
-    </article>
-    <article class="premium-card cv-stat" data-reveal>
-      <p class="cv-stat__value">Now</p>
-      <p class="cv-stat__label">AI Engineer Apprentice at Renault</p>
-    </article>
-  </div>
-</section>
-
-<section class="section-block" data-reveal>
-  <header class="section-head">
-    <p class="section-eyebrow">Professional Experience</p>
-    <h2>What I built and delivered</h2>
+    <p class="section-eyebrow">Experience</p>
+    <h2>Professional Experience</h2>
   </header>
   <div class="cv-experience-list">
     <article class="premium-card cv-role-card" data-reveal>
@@ -88,7 +64,7 @@ permalink: /cv/
 <section class="section-block" data-reveal>
   <header class="section-head">
     <p class="section-eyebrow">Skills</p>
-    <h2>Technical Stack</h2>
+    <h2>Technical Skills</h2>
   </header>
   <div class="cv-skills-grid">
     <article class="premium-card" data-reveal>
