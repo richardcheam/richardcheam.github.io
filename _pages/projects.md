@@ -6,7 +6,7 @@ permalink: /projects/
 
 <section class="page-intro" data-reveal>
   <p class="section-eyebrow">Projects</p>
-  <h2>Selected ML / AI builds</h2>
+  <h2>Selected ML / AI works</h2>
   <p class="section-description">
     Each project is presented with a clear problem statement, implementation details, and measurable outcomes.
   </p>

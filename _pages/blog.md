@@ -7,10 +7,10 @@ permalink: /blog/
 {% assign sorted_notes = site.notes | sort: 'date' | reverse %}
 
 <section class="page-intro" data-reveal>
-  <p class="section-eyebrow">Blog</p>
-  <h2>Technical explainers for future recall</h2>
+  <p class="section-eyebrow">My blog post</p>
+  <h2>Technical explainers for myself to review or any learner.</h2>
   <p class="section-description">
-    Practical write-ups on ML foundations and implementation decisions, written to stay useful months later.
+    Practical write-ups on ML/AI.
   </p>
 </section>
 

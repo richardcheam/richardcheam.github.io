@@ -458,6 +458,11 @@ body.intro-complete .scroll-progress {
   transition: opacity 200ms var(--ease-out), transform 200ms var(--ease-out);
 }
 
+.mega-primary-link--root {
+  font-weight: 680;
+  color: var(--text);
+}
+
 .mega-primary-link:hover,
 .mega-primary-link:focus-visible {
   opacity: 0.78;

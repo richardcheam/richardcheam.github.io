@@ -8,9 +8,9 @@ permalink: /notes/
 
 <section class="page-intro" data-reveal>
   <p class="section-eyebrow">Technical Notes</p>
-  <h2>AI paper summaries and memory-friendly reviews</h2>
+  <h2>Paper summaries and memory-friendly reviews</h2>
   <p class="section-description">
-    This is my structured learning space: concise notes, core takeaways, and tags for fast retrieval.
+    This is my learning space: concise notes, core takeaways, and tags for fast retrieval.
   </p>
 </section>
 
@@ -18,7 +18,7 @@ permalink: /notes/
   <header class="section-head">
     <p class="section-eyebrow">Categories</p>
     <h2>Topic map</h2>
-    <p class="section-description">Fundamentals is the curated starting point. Other categories expand as new notes are added.</p>
+    <p class="section-description">Different technical notes are grouped by their topic.</p>
   </header>
   <div class="cards-grid">
     {% for cat in site.data.notes_categories %}

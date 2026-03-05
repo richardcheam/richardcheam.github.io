@@ -6,7 +6,7 @@ permalink: /cv/
 
 <section class="page-intro" data-reveal>
   <p class="section-eyebrow">Curriculum Vitae</p>
-  <h2>Richard Cheam</h2>
+  <h2>Richard CHEAM</h2>
   <p class="section-description">
     AI Engineer apprentice with experience in applied machine learning and research across speech, NLP/LLMs, and computer vision.
   </p>
