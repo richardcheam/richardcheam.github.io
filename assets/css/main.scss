@@ -1033,6 +1033,81 @@ html[data-theme="dark"] .hero::before {
   font-weight: 580;
 }
 
+.cv-actions {
+  margin-top: var(--space-3);
+  display: inline-flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.cv-highlights {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.cv-stat {
+  min-height: 160px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.cv-stat__value {
+  margin: 0;
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: clamp(1.6rem, 2.4vw, 2.1rem);
+  font-weight: 640;
+  letter-spacing: -0.02em;
+}
+
+.cv-stat__label {
+  margin: var(--space-2) 0 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.cv-experience-list {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.cv-role-card {
+  border-left: 2px solid var(--border-strong);
+}
+
+.cv-role-card .card-title {
+  margin-top: 10px;
+}
+
+.cv-list {
+  margin: var(--space-2) 0 0;
+  padding-left: 1.1rem;
+  display: grid;
+  gap: 8px;
+}
+
+.cv-list li {
+  color: var(--text-secondary);
+}
+
+.cv-list--tight li {
+  margin: 0;
+}
+
+.cv-skills-grid {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.cv-bottom-grid {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .contact-panel {
   text-align: center;
   padding: var(--space-6) var(--space-4);
@@ -1458,6 +1533,14 @@ html.js [data-reveal].is-visible {
   .detail-metric-grid {
     grid-template-columns: 1fr;
   }
+
+  .cv-highlights {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .cv-skills-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 900px) {
@@ -1512,7 +1595,10 @@ html.js [data-reveal].is-visible {
 
   .cards-grid,
   .notes-grid,
-  .blog-grid {
+  .blog-grid,
+  .cv-highlights,
+  .cv-skills-grid,
+  .cv-bottom-grid {
     grid-template-columns: 1fr;
   }
 

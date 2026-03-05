@@ -120,7 +120,7 @@ title: "Richard Cheam"
   </div>
 </section>
 
-<section id="experience" class="section-block" data-reveal>
+<!-- <section id="experience" class="section-block" data-reveal>
   <header class="section-head">
     <p class="section-eyebrow">Experience / Skills</p>
     <h2>Research-grade thinking, product-grade delivery</h2>
@@ -147,7 +147,7 @@ title: "Richard Cheam"
       </div>
     </article>
   </div>
-</section>
+</section> -->
 
 <section id="contact" class="section-block" data-reveal>
   <article class="premium-card contact-panel" data-reveal>
