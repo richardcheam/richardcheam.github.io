@@ -560,7 +560,7 @@ body.intro-complete .scroll-progress {
   align-items: center;
   overflow: hidden;
   isolation: isolate;
-  border: 1px solid rgba(255, 255, 255, 0.9);
+  border: none;
   background:
     radial-gradient(54% 56% at 8% 16%, rgba(88, 148, 238, 0.22), rgba(88, 148, 238, 0) 72%),
     radial-gradient(52% 54% at 92% 14%, rgba(172, 92, 230, 0.2), rgba(172, 92, 230, 0) 72%),
@@ -594,7 +594,7 @@ body.intro-complete .scroll-progress {
   inset: -26% -18% -10%;
   pointer-events: none;
   z-index: 0;
-  filter: blur(52px) saturate(138%);
+  filter: blur(52px) saturate(131%) contrast(103%);
   opacity: 0.54;
   transform: translate3d(var(--hero-parallax-x), var(--hero-parallax-y), 0);
   transition: transform 760ms cubic-bezier(0.22, 1, 0.36, 1);
@@ -742,7 +742,7 @@ body.intro-complete .scroll-progress {
 }
 
 html[data-theme="dark"] .hero {
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: none;
   background:
     radial-gradient(130% 90% at 2% 8%, rgba(41, 95, 211, 0.3), transparent 50%),
     radial-gradient(110% 88% at 96% 10%, rgba(109, 36, 160, 0.28), transparent 46%),
@@ -752,7 +752,7 @@ html[data-theme="dark"] .hero {
 }
 
 html[data-theme="dark"] .hero__glow {
-  filter: blur(58px) saturate(132%);
+  filter: blur(58px) saturate(125%) contrast(103%);
   opacity: 0.5;
 }
 
@@ -999,6 +999,9 @@ html[data-theme="dark"] .hero::before {
 }
 
 .contact-links a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   text-decoration: none;
   padding: 10px 16px;
   border-radius: 999px;
@@ -1007,6 +1010,31 @@ html[data-theme="dark"] .hero::before {
   font-size: 15px;
   font-weight: 550;
   transition: transform 220ms var(--ease-out), border-color 220ms var(--ease-out);
+}
+
+.contact-links .contact-icon-link {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border-radius: 999px;
+}
+
+.contact-icon {
+  width: 20px;
+  height: 20px;
+  fill: currentColor;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .contact-links a:hover,

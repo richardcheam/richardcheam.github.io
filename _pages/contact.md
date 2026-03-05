@@ -15,9 +15,24 @@ permalink: /contact/
 <section class="section-block" data-reveal>
   <article class="premium-card contact-panel" data-reveal>
     <div class="contact-links">
-      <a href="mailto:richard.cheam@etu.u-paris.fr">richard.cheam@etu.u-paris.fr</a>
-      <a href="https://github.com/richardcheam" target="_blank" rel="noopener noreferrer">github.com/richardcheam</a>
-      <a href="https://www.linkedin.com/in/richard-cheam" target="_blank" rel="noopener noreferrer">linkedin.com/in/richard-cheam</a>
+      <a class="contact-icon-link" href="mailto:richard.cheam@etu.u-paris.fr" aria-label="Email">
+        <svg class="contact-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M3 6.75A1.75 1.75 0 0 1 4.75 5h14.5A1.75 1.75 0 0 1 21 6.75v10.5A1.75 1.75 0 0 1 19.25 19H4.75A1.75 1.75 0 0 1 3 17.25V6.75Zm1.4-.15L12 11.62l7.6-5.02a.5.5 0 0 0-.35-.1H4.75a.5.5 0 0 0-.35.1Zm15.1 1.43-7.08 4.68a.75.75 0 0 1-.84 0L4.5 8.03v9.22c0 .14.11.25.25.25h14.5a.25.25 0 0 0 .25-.25V8.03Z"/>
+        </svg>
+        <span class="sr-only">Email</span>
+      </a>
+      <a class="contact-icon-link" href="https://github.com/richardcheam" target="_blank" rel="noopener noreferrer" aria-label="GitHub">
+        <svg class="contact-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 .75a11.25 11.25 0 0 0-3.56 21.92c.56.1.77-.24.77-.54v-1.9c-3.14.69-3.8-1.35-3.8-1.35a2.99 2.99 0 0 0-1.25-1.64c-1.02-.7.08-.69.08-.69a2.37 2.37 0 0 1 1.72 1.16 2.43 2.43 0 0 0 3.32.95 2.44 2.44 0 0 1 .73-1.53c-2.5-.28-5.12-1.25-5.12-5.56a4.36 4.36 0 0 1 1.16-3.03 4.06 4.06 0 0 1 .11-2.99s.94-.3 3.08 1.16a10.7 10.7 0 0 1 5.6 0c2.14-1.46 3.08-1.16 3.08-1.16.45.95.49 2.07.11 2.99a4.35 4.35 0 0 1 1.16 3.03c0 4.32-2.63 5.28-5.14 5.55a2.73 2.73 0 0 1 .77 2.12v3.14c0 .3.2.65.78.54A11.25 11.25 0 0 0 12 .75Z"/>
+        </svg>
+        <span class="sr-only">GitHub</span>
+      </a>
+      <a class="contact-icon-link" href="https://www.linkedin.com/in/richard-cheam" target="_blank" rel="noopener noreferrer" aria-label="LinkedIn">
+        <svg class="contact-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M5.27 3.75a1.52 1.52 0 1 0 0 3.04 1.52 1.52 0 0 0 0-3.04ZM3.96 8.4h2.63V20.2H3.96V8.4Zm6.01 0h2.52v1.6h.04c.35-.67 1.2-1.37 2.47-1.37 2.64 0 3.13 1.74 3.13 4v7.56h-2.63v-6.7c0-1.6-.03-3.66-2.23-3.66-2.23 0-2.57 1.74-2.57 3.54v6.82H9.97V8.4Z"/>
+        </svg>
+        <span class="sr-only">LinkedIn</span>
+      </a>
       <a href="https://maps.google.com/?q=Paris,France" target="_blank" rel="noopener noreferrer">Paris, France</a>
     </div>
   </article>
