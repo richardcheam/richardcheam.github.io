@@ -1323,30 +1323,16 @@ html.js [data-reveal] {
   opacity: 0;
   transform: translateY(26px) scale(0.992);
   filter: blur(7px);
-  clip-path: inset(0 0 16% 0);
-  -webkit-mask-image: linear-gradient(180deg, transparent 0%, #000 24%, #000 100%);
-  mask-image: linear-gradient(180deg, transparent 0%, #000 24%, #000 100%);
-  -webkit-mask-size: 100% 220%;
-  mask-size: 100% 220%;
-  -webkit-mask-position: 0 100%;
-  mask-position: 0 100%;
-  will-change: transform, opacity, filter, clip-path, mask-position;
 }
 
 html.js [data-reveal].is-visible {
   opacity: 1;
   transform: translateY(0) scale(1);
   filter: blur(0);
-  clip-path: inset(0 0 0 0);
-  -webkit-mask-position: 0 0;
-  mask-position: 0 0;
   transition:
     opacity 360ms var(--ease-out),
     transform 560ms var(--ease-out),
-    filter 460ms var(--ease-out),
-    clip-path 760ms var(--ease-out),
-    -webkit-mask-position 760ms var(--ease-out),
-    mask-position 760ms var(--ease-out);
+    filter 460ms var(--ease-out);
   transition-delay: calc(var(--reveal-index, 0) * 62ms);
 }
 
@@ -1460,13 +1446,6 @@ html.js [data-reveal].is-visible {
     opacity: 1;
     transform: none;
     filter: none;
-    clip-path: none;
-    -webkit-mask-image: none;
-    mask-image: none;
-    -webkit-mask-size: auto;
-    mask-size: auto;
-    -webkit-mask-position: 0 0;
-    mask-position: 0 0;
     transition: none;
   }
 
