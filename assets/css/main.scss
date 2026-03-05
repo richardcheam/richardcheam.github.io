@@ -1040,6 +1040,18 @@ html[data-theme="dark"] .hero::before {
   flex-wrap: wrap;
 }
 
+.cv-target-block {
+  margin-top: var(--space-5);
+}
+
+.cv-target-card {
+  max-width: 860px;
+}
+
+.cv-target-card .card-title {
+  margin-top: 8px;
+}
+
 .cv-experience-list {
   display: grid;
   gap: var(--space-3);

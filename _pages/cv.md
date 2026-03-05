@@ -9,12 +9,15 @@ permalink: /cv/
   <h2>Richard Cheam</h2>
   <p class="section-description">
     AI Engineer apprentice with experience in applied machine learning and research across speech, NLP/LLMs, and computer vision.
-    Open to Data Scientist and ML/AI Engineer opportunities.
   </p>
-  <div class="cv-actions">
-    <a class="btn btn--primary" href="{{ '/projects/' | relative_url }}">View Projects</a>
-    <a class="btn btn--inverse" href="{{ '/contact/' | relative_url }}">Contact</a>
-  </div>
+</section>
+
+<section class="section-block cv-target-block" data-reveal>
+  <article class="premium-card cv-target-card" data-reveal>
+    <p class="section-eyebrow">Target Role</p>
+    <h3 class="card-title">Data Scientist / ML-AI Engineer</h3>
+    <p class="card-summary">Start from Oct 2026 · Location: Paris (open to relocation) · Full-time CDI/CDD</p>
+  </article>
 </section>
 
 <section class="section-block" data-reveal>
@@ -27,9 +30,9 @@ permalink: /cv/
       <p class="card-meta">Sep 2025 - Present · Renault</p>
       <h3 class="card-title">AI Engineer Apprentice</h3>
       <ul class="cv-list">
-        <li>Developed and deployed a real-time streaming speech model for low-latency speech-to-speech inference.</li>
-        <li>Contributed to podcast generation and recommendation development workflows.</li>
-        <li>Training and fine-tuning speech models with production constraints.</li>
+        <li>Built and deployed a real-time speech-to-speech pipeline using streaming inference, sustaining low-latency behavior across 1 production speech workflow.</li>
+        <li>Implemented podcast generation and recommendation features in a second AI workstream, covering 2 product-facing audio workflows.</li>
+        <li>Fine-tuned speech models under deployment constraints, improving model readiness over 6+ months of continuous iteration.</li>
       </ul>
     </article>
 
@@ -37,8 +40,8 @@ permalink: /cv/
       <p class="card-meta">May 2025 - Sep 2025 · Laboratoire IBISC</p>
       <h3 class="card-title">AI Research Intern</h3>
       <ul class="cv-list">
-        <li>Ran large-scale benchmarks for Google's VeLO on multi-objective optimization with LibMOON solvers.</li>
-        <li>Integrated VeLO in Pareto HyperNetwork (PHN), improving baseline performance.</li>
+        <li>Designed a VeLO benchmarking pipeline with LibMOON solvers, delivering a 5-month large-scale evaluation framework for multi-objective optimization.</li>
+        <li>Integrated VeLO into the PHN framework, combining 2 optimization components to improve baseline performance.</li>
       </ul>
     </article>
 
@@ -46,8 +49,8 @@ permalink: /cv/
       <p class="card-meta">Jun 2024 - Aug 2024 · ENSIIE</p>
       <h3 class="card-title">Data Science Research Intern</h3>
       <ul class="cv-list">
-        <li>Structured and cleaned 18 years of ELSA longitudinal survey data into reusable modules.</li>
-        <li>Built a reproducible frailty index pipeline (57 health variables) and trajectory analysis for 8,000+ participants.</li>
+        <li>Built reusable preprocessing modules for ELSA longitudinal data, structuring and cleaning 18 years of survey waves into analysis-ready datasets.</li>
+        <li>Implemented a frailty-index and trajectory-analysis pipeline (57 variables, 8,000+ participants), producing reproducible cohort insights in a 3-month internship.</li>
       </ul>
     </article>
 
@@ -55,7 +58,7 @@ permalink: /cv/
       <p class="card-meta">May 2023 - Jul 2023 · Paris Partners Softwares</p>
       <h3 class="card-title">Full Stack Web Application Developer</h3>
       <ul class="cv-list">
-        <li>Built a role-based project monitoring platform to improve visibility and delivery speed.</li>
+        <li>Developed a role-based project monitoring platform, delivering 1 production web application in 3 months to improve project visibility and turnaround.</li>
       </ul>
     </article>
   </div>
