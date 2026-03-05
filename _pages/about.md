@@ -13,7 +13,7 @@ title: "Richard Cheam"
     <h1 class="hero__name" data-reveal>Richard Cheam</h1>
     <!-- <p class="hero__tagline" data-reveal>Building practical AI systems with clean research-to-product execution.</p> -->
     <p class="hero__support" data-reveal>
-      Engineer's and Master's degree in Data Science &amp; AI. Currently at Renault.
+      Currently at Renault. Engineer's and Master's degree in Data Science &amp; AI. 
     </p>
     <div class="hero__actions" data-reveal>
       <a class="btn btn--primary" href="#projects">View Projects</a>
