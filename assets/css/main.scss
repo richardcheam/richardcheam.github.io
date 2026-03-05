@@ -560,18 +560,20 @@ body.intro-complete .scroll-progress {
   align-items: center;
   overflow: hidden;
   isolation: isolate;
-  border: 1px solid rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.9);
   background:
-    radial-gradient(54% 56% at 8% 16%, rgba(111, 170, 255, 0.56), rgba(111, 170, 255, 0) 72%),
-    radial-gradient(52% 54% at 92% 14%, rgba(198, 112, 255, 0.52), rgba(198, 112, 255, 0) 72%),
-    radial-gradient(58% 58% at 52% 90%, rgba(255, 134, 194, 0.48), rgba(255, 134, 194, 0) 72%),
-    radial-gradient(48% 52% at 24% 80%, rgba(255, 116, 132, 0.44), rgba(255, 116, 132, 0) 72%),
-    radial-gradient(64% 68% at 72% 70%, rgba(255, 255, 255, 0.66), rgba(255, 255, 255, 0) 74%),
-    linear-gradient(122deg, #ffffff 0%, #f6f1ff 34%, #ffeef8 64%, #eef5ff 100%);
+    radial-gradient(54% 56% at 8% 16%, rgba(111, 170, 255, 0.24), rgba(111, 170, 255, 0) 72%),
+    radial-gradient(52% 54% at 92% 14%, rgba(198, 112, 255, 0.22), rgba(198, 112, 255, 0) 72%),
+    radial-gradient(58% 58% at 52% 90%, rgba(255, 134, 194, 0.2), rgba(255, 134, 194, 0) 72%),
+    radial-gradient(48% 52% at 24% 80%, rgba(255, 116, 132, 0.18), rgba(255, 116, 132, 0) 72%),
+    radial-gradient(64% 68% at 72% 70%, rgba(255, 255, 255, 0.8), rgba(255, 255, 255, 0) 74%),
+    linear-gradient(122deg, #ffffff 0%, #fcf8ff 34%, #fff8fc 64%, #f7fbff 100%);
   background-size: 170% 170%, 180% 180%, 180% 180%, 170% 170%, 200% 200%, 260% 260%;
   background-position: 10% 12%, 88% 8%, 50% 92%, 22% 78%, 72% 68%, 0% 50%;
   animation: heroBaseFlow 8s linear infinite;
-  box-shadow: 0 22px 46px -34px rgba(92, 62, 145, 0.22);
+  box-shadow:
+    0 22px 46px -34px rgba(92, 62, 145, 0.16),
+    inset 0 0 120px rgba(255, 255, 255, 0.24);
 }
 
 .hero-container {
@@ -589,11 +591,11 @@ body.intro-complete .scroll-progress {
 
 .hero__glow {
   position: absolute;
-  inset: -22% -16% -8%;
+  inset: -26% -18% -10%;
   pointer-events: none;
   z-index: 0;
   filter: blur(52px) saturate(138%);
-  opacity: 0.78;
+  opacity: 0.6;
   transform: translate3d(var(--hero-parallax-x), var(--hero-parallax-y), 0);
   transition: transform 760ms cubic-bezier(0.22, 1, 0.36, 1);
   will-change: transform;
@@ -646,18 +648,17 @@ body.intro-complete .scroll-progress {
     radial-gradient(70% 58% at 80% 28%, rgba(203, 118, 255, 0.19), rgba(203, 118, 255, 0) 74%),
     radial-gradient(86% 68% at 50% 84%, rgba(255, 128, 192, 0.18), rgba(255, 128, 192, 0) 74%),
     radial-gradient(66% 60% at 58% 56%, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0) 76%);
-  opacity: 0.54;
+  opacity: 0.42;
   animation: heroAmbientPulse 6.8s ease-in-out infinite;
 }
 
 .hero::after {
   content: "";
   position: absolute;
-  left: 12%;
-  right: 12%;
-  bottom: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.22), transparent);
+  inset: 0;
+  background:
+    radial-gradient(130% 90% at 50% 50%, rgba(255, 255, 255, 0) 56%, rgba(255, 255, 255, 0.45) 100%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.36), rgba(255, 255, 255, 0) 16%, rgba(255, 255, 255, 0) 84%, rgba(255, 255, 255, 0.38));
   pointer-events: none;
   z-index: 1;
 }
