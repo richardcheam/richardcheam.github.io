@@ -562,12 +562,12 @@ body.intro-complete .scroll-progress {
   isolation: isolate;
   border: 1px solid rgba(255, 255, 255, 0.9);
   background:
-    radial-gradient(54% 56% at 8% 16%, rgba(111, 170, 255, 0.24), rgba(111, 170, 255, 0) 72%),
-    radial-gradient(52% 54% at 92% 14%, rgba(198, 112, 255, 0.22), rgba(198, 112, 255, 0) 72%),
-    radial-gradient(58% 58% at 52% 90%, rgba(255, 134, 194, 0.2), rgba(255, 134, 194, 0) 72%),
-    radial-gradient(48% 52% at 24% 80%, rgba(255, 116, 132, 0.18), rgba(255, 116, 132, 0) 72%),
-    radial-gradient(64% 68% at 72% 70%, rgba(255, 255, 255, 0.8), rgba(255, 255, 255, 0) 74%),
-    linear-gradient(122deg, #ffffff 0%, #fcf8ff 34%, #fff8fc 64%, #f7fbff 100%);
+    radial-gradient(54% 56% at 8% 16%, rgba(88, 148, 238, 0.22), rgba(88, 148, 238, 0) 72%),
+    radial-gradient(52% 54% at 92% 14%, rgba(172, 92, 230, 0.2), rgba(172, 92, 230, 0) 72%),
+    radial-gradient(58% 58% at 52% 90%, rgba(236, 108, 174, 0.18), rgba(236, 108, 174, 0) 72%),
+    radial-gradient(48% 52% at 24% 80%, rgba(232, 92, 110, 0.16), rgba(232, 92, 110, 0) 72%),
+    radial-gradient(64% 68% at 72% 70%, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0) 74%),
+    linear-gradient(122deg, #ffffff 0%, #fbf6ff 34%, #fff6fb 64%, #f5faff 100%);
   background-size: 170% 170%, 180% 180%, 180% 180%, 170% 170%, 200% 200%, 260% 260%;
   background-position: 10% 12%, 88% 8%, 50% 92%, 22% 78%, 72% 68%, 0% 50%;
   animation: heroBaseFlow 8s linear infinite;
@@ -595,7 +595,7 @@ body.intro-complete .scroll-progress {
   pointer-events: none;
   z-index: 0;
   filter: blur(52px) saturate(138%);
-  opacity: 0.6;
+  opacity: 0.54;
   transform: translate3d(var(--hero-parallax-x), var(--hero-parallax-y), 0);
   transition: transform 760ms cubic-bezier(0.22, 1, 0.36, 1);
   will-change: transform;
@@ -612,12 +612,12 @@ body.intro-complete .scroll-progress {
 
 .hero__glow::before {
   background:
-    radial-gradient(42% 44% at 16% 24%, rgba(96, 164, 255, 0.72) 0%, rgba(96, 164, 255, 0) 74%),
-    radial-gradient(40% 40% at 84% 20%, rgba(193, 118, 255, 0.66) 0%, rgba(193, 118, 255, 0) 74%),
-    radial-gradient(46% 44% at 62% 82%, rgba(255, 125, 196, 0.62) 0%, rgba(255, 125, 196, 0) 76%),
-    radial-gradient(44% 42% at 28% 78%, rgba(255, 106, 126, 0.56) 0%, rgba(255, 106, 126, 0) 74%),
-    radial-gradient(58% 54% at 74% 70%, rgba(255, 255, 255, 0.82) 0%, rgba(255, 255, 255, 0) 78%),
-    linear-gradient(120deg, rgba(129, 176, 255, 0.28), rgba(200, 124, 255, 0.26), rgba(255, 133, 200, 0.24), rgba(255, 255, 255, 0.24));
+    radial-gradient(42% 44% at 16% 24%, rgba(78, 145, 240, 0.64) 0%, rgba(78, 145, 240, 0) 74%),
+    radial-gradient(40% 40% at 84% 20%, rgba(170, 98, 232, 0.6) 0%, rgba(170, 98, 232, 0) 74%),
+    radial-gradient(46% 44% at 62% 82%, rgba(240, 108, 182, 0.56) 0%, rgba(240, 108, 182, 0) 76%),
+    radial-gradient(44% 42% at 28% 78%, rgba(236, 92, 114, 0.5) 0%, rgba(236, 92, 114, 0) 74%),
+    radial-gradient(58% 54% at 74% 70%, rgba(255, 255, 255, 0.74) 0%, rgba(255, 255, 255, 0) 78%),
+    linear-gradient(120deg, rgba(106, 158, 242, 0.25), rgba(182, 108, 240, 0.23), rgba(238, 118, 186, 0.22), rgba(255, 255, 255, 0.22));
   background-size: 250% 250%;
   background-position: 34% 46%;
   animation: heroGradientDrift 6.8s ease-in-out infinite, heroGradientFlow 7.8s linear infinite;
@@ -626,12 +626,12 @@ body.intro-complete .scroll-progress {
 .hero__glow::after {
   inset: 6% -4% -10%;
   background:
-    radial-gradient(38% 40% at 24% 66%, rgba(86, 155, 255, 0.58) 0%, rgba(86, 155, 255, 0) 72%),
-    radial-gradient(38% 38% at 74% 64%, rgba(188, 106, 255, 0.54) 0%, rgba(188, 106, 255, 0) 74%),
-    radial-gradient(36% 36% at 52% 14%, rgba(255, 112, 188, 0.5) 0%, rgba(255, 112, 188, 0) 74%),
-    radial-gradient(34% 34% at 42% 90%, rgba(255, 102, 118, 0.46) 0%, rgba(255, 102, 118, 0) 76%),
-    radial-gradient(52% 52% at 68% 28%, rgba(255, 255, 255, 0.7) 0%, rgba(255, 255, 255, 0) 76%),
-    linear-gradient(136deg, rgba(95, 165, 250, 0.22), rgba(194, 112, 255, 0.2), rgba(244, 114, 182, 0.2), rgba(255, 255, 255, 0.2));
+    radial-gradient(38% 40% at 24% 66%, rgba(72, 142, 244, 0.52) 0%, rgba(72, 142, 244, 0) 72%),
+    radial-gradient(38% 38% at 74% 64%, rgba(168, 92, 236, 0.48) 0%, rgba(168, 92, 236, 0) 74%),
+    radial-gradient(36% 36% at 52% 14%, rgba(238, 96, 176, 0.45) 0%, rgba(238, 96, 176, 0) 74%),
+    radial-gradient(34% 34% at 42% 90%, rgba(232, 88, 106, 0.41) 0%, rgba(232, 88, 106, 0) 76%),
+    radial-gradient(52% 52% at 68% 28%, rgba(255, 255, 255, 0.62) 0%, rgba(255, 255, 255, 0) 76%),
+    linear-gradient(136deg, rgba(80, 150, 238, 0.2), rgba(176, 96, 238, 0.18), rgba(236, 98, 172, 0.18), rgba(255, 255, 255, 0.18));
   background-size: 230% 230%;
   background-position: 62% 54%;
   animation: heroGradientDriftAlt 7.4s ease-in-out infinite, heroGradientFlowAlt 8.6s linear infinite;
@@ -644,11 +644,11 @@ body.intro-complete .scroll-progress {
   z-index: 1;
   pointer-events: none;
   background:
-    radial-gradient(80% 64% at 20% 30%, rgba(98, 156, 255, 0.2), rgba(98, 156, 255, 0) 72%),
-    radial-gradient(70% 58% at 80% 28%, rgba(203, 118, 255, 0.19), rgba(203, 118, 255, 0) 74%),
-    radial-gradient(86% 68% at 50% 84%, rgba(255, 128, 192, 0.18), rgba(255, 128, 192, 0) 74%),
-    radial-gradient(66% 60% at 58% 56%, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0) 76%);
-  opacity: 0.42;
+    radial-gradient(80% 64% at 20% 30%, rgba(80, 142, 242, 0.18), rgba(80, 142, 242, 0) 72%),
+    radial-gradient(70% 58% at 80% 28%, rgba(178, 96, 238, 0.17), rgba(178, 96, 238, 0) 74%),
+    radial-gradient(86% 68% at 50% 84%, rgba(236, 106, 178, 0.16), rgba(236, 106, 178, 0) 74%),
+    radial-gradient(66% 60% at 58% 56%, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0) 76%);
+  opacity: 0.38;
   animation: heroAmbientPulse 6.8s ease-in-out infinite;
 }
 
@@ -657,8 +657,8 @@ body.intro-complete .scroll-progress {
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(130% 90% at 50% 50%, rgba(255, 255, 255, 0) 56%, rgba(255, 255, 255, 0.45) 100%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.36), rgba(255, 255, 255, 0) 16%, rgba(255, 255, 255, 0) 84%, rgba(255, 255, 255, 0.38));
+    radial-gradient(130% 90% at 50% 50%, rgba(255, 255, 255, 0) 56%, rgba(255, 255, 255, 0.5) 100%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0) 16%, rgba(255, 255, 255, 0) 84%, rgba(255, 255, 255, 0.42));
   pointer-events: none;
   z-index: 1;
 }
