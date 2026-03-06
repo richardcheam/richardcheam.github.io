@@ -471,13 +471,6 @@ body.intro-complete .scroll-progress {
   box-shadow: 0 10px 18px -16px rgba(0, 0, 0, 0.35);
 }
 
-.mega-primary-link--root::before {
-  content: "\2192";
-  margin-right: 8px;
-  opacity: 0.72;
-  transform: translateY(-0.5px);
-}
-
 .mega-primary-link--root:hover,
 .mega-primary-link--root:focus-visible {
   opacity: 1;
