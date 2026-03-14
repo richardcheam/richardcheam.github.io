@@ -8,7 +8,7 @@ permalink: /cv/
   <p class="section-eyebrow">Curriculum Vitae</p>
   <h2>Richard CHEAM</h2>
   <p class="section-description">
-    AI Engineer apprentice with experience in applied machine learning and research across speech, NLP/LLMs, and computer vision.
+    AI Engineer apprentice with experience in applied machine learning and research across speech, NLP/LLMs, and computer vision. I am open to a wide range of AI applications and motivated in roles that allow me to contribute to research, applied development, or both.
   </p>
 </section>
 
