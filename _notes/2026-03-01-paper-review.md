@@ -9,7 +9,7 @@ excerpt: "Useful ideas from research papers."
 <p><a class="notes-backlink" href="{{ '/notes/fundamentals/' | relative_url }}">Back to Fundamentals</a></p>
 <p class="note-meta">Fundamentals • {{ page.date | date: "%d %b %Y" }} • ~4 min read</p>
 
-A compact personal template to extract reusable value from any paper without over-reading.
+<!-- A compact personal template to extract reusable value from any paper without over-reading.
 
 ## 10-Minute Pass
 
@@ -41,7 +41,7 @@ A compact personal template to extract reusable value from any paper without ove
   <li>Always leave with one concrete experiment.</li>
   <li>Track one risk before implementation.</li>
 </ul>
-</div>
+</div> -->
 
 ## Related Notes
 

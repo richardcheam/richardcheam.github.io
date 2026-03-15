@@ -9,7 +9,7 @@ excerpt: "Working notes on latent dynamics, planning, and model-based control."
 <p><a class="notes-backlink" href="{{ '/notes/' | relative_url }}">Back to Notes</a></p>
 <p class="note-meta">World Models • {{ page.date | date: "%d %b %Y" }} • ~4 min read</p>
 
-Practical checklist for comparing latent dynamics models under planning constraints.
+<!-- Practical checklist for comparing latent dynamics models under planning constraints.
 
 ## Comparison Protocol
 
@@ -39,7 +39,7 @@ Practical checklist for comparing latent dynamics models under planning constrai
   <li>Long-horizon robustness matters more than single-step metrics.</li>
   <li>Failure trajectories provide the most actionable signal.</li>
 </ul>
-</div>
+</div> -->
 
 ## Related Notes
 
