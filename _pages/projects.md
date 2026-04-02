@@ -14,6 +14,18 @@ permalink: /projects/
 
 <section class="cards-grid" aria-label="Project cards">
   <article class="premium-card project-card" data-reveal>
+    <p class="card-meta">Computer Vision · April 2026</p>
+    <h3 class="card-title">XAI Vision Transfer</h3>
+    <p class="card-summary">Explainable architecture study comparing CNN, ViT, and DHVT across CIFAR-10, EuroSAT, and Brain Tumor MRI under scratch, linear-probe, and full-fine-tune settings.</p>
+    <div class="project-stack">
+      <span class="tag">PyTorch</span>
+      <span class="tag">XAI</span>
+      <span class="tag">Transfer Learning</span>
+    </div>
+    <a class="card-link" href="{{ '/projects/xai-vision-transfer/' | relative_url }}">Open project</a>
+  </article>
+
+  <article class="premium-card project-card" data-reveal>
     <p class="card-meta">NLP · March 2025</p>
     <h3 class="card-title">IMDb Sentiment with Mixture of Experts</h3>
     <p class="card-summary">Transformer benchmarking with custom routing to evaluate expert specialization quality and engineering reproducibility.</p>
