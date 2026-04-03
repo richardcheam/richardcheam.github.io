@@ -48,16 +48,4 @@ permalink: /projects/
     </div>
     <a class="card-link" href="{{ '/projects/mnist-ssl/' | relative_url }}">Open project</a>
   </article>
-
-  <article class="premium-card project-card" data-reveal>
-    <p class="card-meta">Speech Systems · Ongoing</p>
-    <h3 class="card-title">Streaming Speech Reliability Toolkit</h3>
-    <p class="card-summary">Operational notes and benchmark patterns for low-latency speech inference, monitoring, and trace-based debugging.</p>
-    <div class="project-stack">
-      <span class="tag">ASR</span>
-      <span class="tag">Latency</span>
-      <span class="tag">Evaluation</span>
-    </div>
-    <a class="card-link" href="{{ '/notes/2026-03-01-speech-ai/' | relative_url }}">Read related note</a>
-  </article>
 </section>
