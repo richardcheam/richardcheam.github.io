@@ -9,7 +9,7 @@ permalink: /projects/
   <!-- <h2>Selected AI and software works</h2>
   <p class="section-description">
     Each project is presented with a clear problem statement, implementation details, and a practical outcome or product surface. -->
-  </p>
+  <!-- </p> -->
 </section>
 
 <section class="cards-grid" aria-label="Project cards">

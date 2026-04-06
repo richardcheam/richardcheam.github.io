@@ -10,7 +10,7 @@ permalink: /paper-reviews/
   <p class="section-eyebrow">Paper Reviews</p>
   <h2>Research takeaways worth keeping</h2>
   <p class="section-description">
-    A separate place for article summaries, reading templates, and reusable research ideas that are worth revisiting.
+    A place for scientific article summaries for myself and any learner.
   </p>
 </section>
 

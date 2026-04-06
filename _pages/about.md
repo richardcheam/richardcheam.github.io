@@ -84,17 +84,6 @@ title: "Richard Cheam"
       <a class="card-link" href="{{ '/projects/mnist-ssl/' | relative_url }}">View project</a>
     </article>
 
-    <article class="premium-card project-card" data-reveal>
-      <p class="card-meta">Speech Systems · Ongoing</p>
-      <h3 class="card-title">Streaming Speech Reliability Toolkit</h3>
-      <p class="card-summary">Latency-oriented evaluation setup for real-time speech pipelines with reproducible traces and release checklists.</p>
-      <div class="project-stack">
-        <span class="tag">ASR</span>
-        <span class="tag">Latency</span>
-        <span class="tag">Observability</span>
-      </div>
-      <a class="card-link" href="{{ '/blog/speech-ai/' | relative_url }}">View summary</a>
-    </article>
   </div>
 </section>
 
