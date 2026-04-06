@@ -6,13 +6,25 @@ permalink: /projects/
 
 <section class="page-intro" data-reveal>
   <p class="section-eyebrow">Projects</p>
-  <h2>Selected ML / AI works</h2>
+  <h2>Selected AI and software works</h2>
   <p class="section-description">
-    Each project is presented with a clear problem statement, implementation details, and measurable outcomes.
+    Each project is presented with a clear problem statement, implementation details, and a practical outcome or product surface.
   </p>
 </section>
 
 <section class="cards-grid" aria-label="Project cards">
+  <article class="premium-card project-card" data-reveal>
+    <p class="card-meta">Interactive Systems · April 2026</p>
+    <h3 class="card-title">Enigmatica</h3>
+    <p class="card-summary">Chapter-based cipher puzzle game that turns manga decoding mechanics into reusable Python systems and a public playable web experience.</p>
+    <div class="project-stack">
+      <span class="tag">Python</span>
+      <span class="tag">Ciphers</span>
+      <span class="tag">GitHub Pages</span>
+    </div>
+    <a class="card-link" href="{{ '/projects/enigmatica/' | relative_url }}">Open project</a>
+  </article>
+
   <article class="premium-card project-card" data-reveal>
     <p class="card-meta">Computer Vision · April 2026</p>
     <h3 class="card-title">XAI Vision Transfer</h3>

@@ -31,10 +31,22 @@ title: "Richard Cheam"
 <section id="projects" class="section-block" data-reveal>
   <header class="section-head">
     <p class="section-eyebrow">Featured Projects</p>
-    <h2>Project Card</h2>
-    <p class="section-description">My personal and academic projects.</p>
+    <h2>Selected Projects</h2>
+    <p class="section-description">AI systems, research prototypes, and product-minded builds.</p>
   </header>
   <div class="cards-grid">
+    <article class="premium-card project-card" data-reveal>
+      <p class="card-meta">Interactive Systems · April 2026</p>
+      <h3 class="card-title">Enigmatica</h3>
+      <p class="card-summary">Chapter-based cipher puzzle game inspired by manga decoding challenges, built with reusable Python mechanics and a public GitHub Pages interface.</p>
+      <div class="project-stack">
+        <span class="tag">Python</span>
+        <span class="tag">Puzzle Design</span>
+        <span class="tag">GitHub Pages</span>
+      </div>
+      <a class="card-link" href="{{ '/projects/enigmatica/' | relative_url }}">View project</a>
+    </article>
+
     <article class="premium-card project-card" data-reveal>
       <p class="card-meta">Computer Vision · April 2026</p>
       <h3 class="card-title">XAI Vision Transfer</h3>
