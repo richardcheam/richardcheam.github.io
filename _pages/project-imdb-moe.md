@@ -2,14 +2,14 @@
 layout: default
 title: "Customer Feedback Intelligence"
 permalink: /projects/imdb-moe/
-demo_url: ""
+demo_url: "https://ric912-customer-feedback-intelligence-demo.hf.space"
 github_url: "https://github.com/richardcheam/customer-feedback-intelligence"
 ---
 
 <div class="detail-shell" data-detail-tabs>
   <p data-reveal><a class="project-backlink" href="{{ '/projects/' | relative_url }}">Back to Projects</a></p>
   <p class="minimal-kicker" data-reveal>NLP · April 2026</p>
-  <p class="minimal-intro" data-reveal>Rebuilt an earlier IMDb sentiment project into a customer-feedback intelligence system with benchmarking, transfer checks, and a full-batch triage dashboard.</p>
+  <p class="minimal-intro" data-reveal>Rebuilt an earlier IMDb sentiment project into a customer-feedback intelligence system with benchmarking, transfer checks, and a public full-batch triage dashboard on Hugging Face Spaces.</p>
 
   <div class="detail-chips" aria-label="Project highlights" data-reveal>
     <span class="detail-chip detail-chip--role"><span class="detail-chip__label">Role:</span> <span class="detail-chip__value">ML / Product Engineer</span></span>
@@ -38,7 +38,7 @@ github_url: "https://github.com/richardcheam/customer-feedback-intelligence"
     <div class="project-points">
       <p><strong>Reproducible benchmark:</strong> built a clean IMDb pipeline with deterministic sampling, TF-IDF + Logistic Regression as the active saved baseline, and a RoBERTa fine-tuning path for later higher-capacity runs.</p>
       <p><strong>Transfer checks:</strong> evaluated the IMDb-trained model on Amazon polarity reviews and on a fixed local 200-example customer-feedback evaluation set to see how far the benchmark generalizes without retraining.</p>
-      <p><strong>Dashboard product surface:</strong> added a Gradio interface that accepts pasted text or uploads, preserves metadata like `channel` and `product`, scores the whole batch, and exports the filtered results as CSV.</p>
+      <p><strong>Dashboard product surface:</strong> added a Gradio interface that accepts pasted text or uploads, preserves metadata like `channel` and `product`, scores the whole batch, exports the filtered results as CSV, and is now deployed publicly on Hugging Face Spaces.</p>
       <p><strong>Triage and summarization:</strong> layered confidence, uncertainty, manual-review gating, priority scoring, and exploratory theme clustering on top of raw sentiment predictions so the tool feels useful for analysts instead of just model inspection.</p>
     </div>
   </section>
@@ -58,15 +58,15 @@ github_url: "https://github.com/richardcheam/customer-feedback-intelligence"
       </article>
       <article class="detail-metric">
         <p class="detail-metric__label">Product Surface</p>
-        <h3>Full-Batch Dashboard</h3>
-        <p>Upload, triage, cluster, filter, and export customer-feedback batches instead of only scoring one review at a time.</p>
+        <h3>Public Demo Live</h3>
+        <p>Full-batch customer-feedback dashboard is deployed publicly on Hugging Face Spaces rather than staying as a local-only Gradio app.</p>
       </article>
     </div>
 
     <div class="project-points" style="margin-top: 1rem;">
       <p><strong>Project evolution:</strong> this started from an older IMDb sentiment and MoE direction, but I intentionally rebuilt it into a cleaner product-facing story centered on reusable inference and customer-feedback analysis.</p>
       <p><strong>What the current results mean:</strong> IMDb is strong enough to produce a useful starting sentiment model, while the Amazon and local-customer-feedback checks make the cross-domain limits explicit instead of hiding them.</p>
-      <p><strong>Why it matters:</strong> the project now connects benchmarking, transfer evaluation, and a usable dashboard surface in one coherent workflow rather than stopping at model training.</p>
+      <p><strong>Why it matters:</strong> the project now connects benchmarking, transfer evaluation, and a usable public dashboard surface in one coherent workflow rather than stopping at model training.</p>
     </div>
   </section>
 

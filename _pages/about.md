@@ -62,11 +62,11 @@ title: "Richard Cheam"
     <article class="premium-card project-card" data-reveal>
       <p class="card-meta">NLP · April 2026</p>
       <h3 class="card-title">Customer Feedback Intelligence</h3>
-      <p class="card-summary">Rebuilt an IMDb sentiment project into a customer-feedback dashboard with benchmarked inference, transfer checks, triage, and exportable batch analysis.</p>
+      <p class="card-summary">Rebuilt an IMDb sentiment project into a public customer-feedback dashboard with benchmarked inference, transfer checks, triage, and exportable batch analysis.</p>
       <div class="project-stack">
         <span class="tag">NLP</span>
         <span class="tag">scikit-learn</span>
-        <span class="tag">Gradio</span>
+        <span class="tag">Hugging Face Spaces</span>
       </div>
       <a class="card-link" href="{{ '/projects/imdb-moe/' | relative_url }}">View project</a>
     </article>
