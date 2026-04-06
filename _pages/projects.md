@@ -38,13 +38,13 @@ permalink: /projects/
   </article>
 
   <article class="premium-card project-card" data-reveal>
-    <p class="card-meta">NLP · March 2025</p>
-    <h3 class="card-title">IMDb Sentiment with Mixture of Experts</h3>
-    <p class="card-summary">Transformer benchmarking with custom routing to evaluate expert specialization quality and engineering reproducibility.</p>
+    <p class="card-meta">NLP · April 2026</p>
+    <h3 class="card-title">Customer Feedback Intelligence</h3>
+    <p class="card-summary">IMDb benchmark rebuilt into a customer-feedback intelligence workflow with transfer evaluation, dashboard triage, metadata-aware batch analysis, and export.</p>
     <div class="project-stack">
-      <span class="tag">PyTorch</span>
-      <span class="tag">Hugging Face</span>
-      <span class="tag">MoE</span>
+      <span class="tag">NLP</span>
+      <span class="tag">scikit-learn</span>
+      <span class="tag">Gradio</span>
     </div>
     <a class="card-link" href="{{ '/projects/imdb-moe/' | relative_url }}">Open project</a>
   </article>

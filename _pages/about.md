@@ -60,13 +60,13 @@ title: "Richard Cheam"
     </article>
 
     <article class="premium-card project-card" data-reveal>
-      <p class="card-meta">NLP · March 2025</p>
-      <h3 class="card-title">IMDb Sentiment with Mixture of Experts</h3>
-      <p class="card-summary">Benchmarked transformer baselines against a custom expert-routing architecture for robust sentiment classification.</p>
+      <p class="card-meta">NLP · April 2026</p>
+      <h3 class="card-title">Customer Feedback Intelligence</h3>
+      <p class="card-summary">Rebuilt an IMDb sentiment project into a customer-feedback dashboard with benchmarked inference, transfer checks, triage, and exportable batch analysis.</p>
       <div class="project-stack">
-        <span class="tag">PyTorch</span>
-        <span class="tag">Hugging Face</span>
-        <span class="tag">MoE</span>
+        <span class="tag">NLP</span>
+        <span class="tag">scikit-learn</span>
+        <span class="tag">Gradio</span>
       </div>
       <a class="card-link" href="{{ '/projects/imdb-moe/' | relative_url }}">View project</a>
     </article>
