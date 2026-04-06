@@ -4,7 +4,8 @@ permalink: /
 title: "Richard Cheam"
 ---
 
-{% assign sorted_notes = site.notes | sort: "date" | reverse %}
+{% assign sorted_blog_posts = site.blog | sort: "date" | reverse %}
+{% assign sorted_paper_reviews = site.paper_reviews | sort: "date" | reverse %}
 
 <section id="hero" class="hero section-block">
   <div class="hero__glow" aria-hidden="true"></div>
@@ -92,53 +93,53 @@ title: "Richard Cheam"
         <span class="tag">Latency</span>
         <span class="tag">Observability</span>
       </div>
-      <a class="card-link" href="{{ '/notes/2026-03-01-speech-ai/' | relative_url }}">View summary</a>
+      <a class="card-link" href="{{ '/blog/speech-ai/' | relative_url }}">View summary</a>
     </article>
-  </div>
-</section>
-
-<section id="notes" class="section-block" data-reveal>
-  <header class="section-head">
-    <p class="section-eyebrow">Technical Notes</p>
-    <h2>Paper summaries and concept cards</h2>
-    <p class="section-description">Review section for papers and concepts and I have read for myself to revisit.</p>
-  </header>
-  <div class="notes-grid">
-    {% for note in sorted_notes limit:4 %}
-      {% assign note_key = note.category | default: "note" | slugify %}
-      {% assign category_label = "Note" %}
-      {% for cat in site.data.notes_categories %}
-        {% if cat.key == note_key %}
-          {% assign category_label = cat.label %}
-        {% endif %}
-      {% endfor %}
-      <article class="premium-card" data-reveal>
-        <p class="card-meta">{{ category_label }}</p>
-        <h3 class="card-title">{{ note.title }}</h3>
-        <p class="card-summary">{{ note.excerpt | default: "Practical summary with key intuition and implementation notes." | strip_html | truncate: 125 }}</p>
-        <div class="card-tags">
-          <span class="tag">{{ category_label }}</span>
-          <span class="tag">AI</span>
-        </div>
-        <a class="card-link" href="{{ note.url | relative_url }}">Read summary</a>
-      </article>
-    {% endfor %}
   </div>
 </section>
 
 <section id="blog" class="section-block" data-reveal>
   <header class="section-head">
     <p class="section-eyebrow">Blog</p>
-    <h2>Long-term recall</h2>
-    <p class="section-description">Clear explanations written for future-me (since I tend to forget) and helpful for anyone learning.</p>
+    <h2>Technical blog posts and explainers</h2>
+    <p class="section-description">Short posts I use to revisit concepts, architectures, and practical implementation ideas.</p>
   </header>
   <div class="blog-grid">
-    {% for note in sorted_notes limit:3 offset:1 %}
+    {% for post in sorted_blog_posts limit:4 %}
+      {% assign post_key = post.category | default: "post" | slugify %}
+      {% assign category_label = "Blog Post" %}
+      {% for cat in site.data.blog_categories %}
+        {% if cat.key == post_key %}
+          {% assign category_label = cat.label %}
+        {% endif %}
+      {% endfor %}
       <article class="premium-card" data-reveal>
-        <p class="card-meta">Technical post{% if note.date %} · {{ note.date | date: "%d %b %Y" }}{% endif %}</p>
-        <h3 class="card-title">{{ note.title }}</h3>
-        <p class="card-summary">{{ note.excerpt | default: "Short practical write-up with definitions, tradeoffs, and implementation reminders." | strip_html | truncate: 138 }}</p>
-        <a class="card-link" href="{{ note.url | relative_url }}">Read more</a>
+        <p class="card-meta">{{ category_label }}{% if post.date %} · {{ post.date | date: "%d %b %Y" }}{% endif %}</p>
+        <h3 class="card-title">{{ post.title }}</h3>
+        <p class="card-summary">{{ post.excerpt | default: "Practical summary with key intuition and implementation ideas." | strip_html | truncate: 125 }}</p>
+        <div class="card-tags">
+          <span class="tag">{{ category_label }}</span>
+          <span class="tag">AI</span>
+        </div>
+        <a class="card-link" href="{{ post.url | relative_url }}">Read post</a>
+      </article>
+    {% endfor %}
+  </div>
+</section>
+
+<section id="paper-reviews" class="section-block" data-reveal>
+  <header class="section-head">
+    <p class="section-eyebrow">Paper Reviews</p>
+    <h2>Research takeaways worth revisiting</h2>
+    <p class="section-description">A dedicated place for article summaries, kept separate from technical blog posts.</p>
+  </header>
+  <div class="notes-grid">
+    {% for review in sorted_paper_reviews limit:3 %}
+      <article class="premium-card" data-reveal>
+        <p class="card-meta">Paper Review{% if review.date %} · {{ review.date | date: "%d %b %Y" }}{% endif %}</p>
+        <h3 class="card-title">{{ review.title }}</h3>
+        <p class="card-summary">{{ review.excerpt | default: "Concise research summary with reusable takeaways." | strip_html | truncate: 138 }}</p>
+        <a class="card-link" href="{{ review.url | relative_url }}">Read review</a>
       </article>
     {% endfor %}
   </div>

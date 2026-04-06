@@ -2,12 +2,20 @@
 title: "World Model"
 date: 2026-03-01
 category: "world-models"
-excerpt: "Working notes on latent dynamics, planning, and model-based control."
+excerpt: "A concise post on latent dynamics, planning, and model-based control."
 ---
 
+{% assign post_key = page.category | default: "" | slugify %}
+{% assign post_label = "Blog Post" %}
+{% for cat in site.data.blog_categories %}
+  {% if cat.key == post_key %}
+    {% assign post_label = cat.label %}
+  {% endif %}
+{% endfor %}
+
 <article class="note-article">
-<p><a class="notes-backlink" href="{{ '/notes/' | relative_url }}">Back to Notes</a></p>
-<p class="note-meta">World Models • {{ page.date | date: "%d %b %Y" }} • ~4 min read</p>
+<p><a class="notes-backlink" href="{{ '/blog/' | relative_url }}">Back to Blog</a></p>
+<p class="note-meta">{{ post_label }} • {{ page.date | date: "%d %b %Y" }} • ~4 min read</p>
 
 <!-- Practical checklist for comparing latent dynamics models under planning constraints.
 
@@ -45,8 +53,8 @@ excerpt: "Working notes on latent dynamics, planning, and model-based control."
 
 <div class="note-related">
 <ul>
-  <li><a href="{{ '/notes/2026-03-01-paper-review/' | relative_url }}">Paper Review</a></li>
-  <li><a href="{{ '/notes/2026-03-01-speech-ai/' | relative_url }}">Speech AI</a></li>
+  <li><a href="{{ '/paper-reviews/paper-review/' | relative_url }}">Paper Review</a></li>
+  <li><a href="{{ '/blog/speech-ai/' | relative_url }}">Speech AI</a></li>
 </ul>
 </div>
 </article>

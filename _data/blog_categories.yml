@@ -1,9 +1,9 @@
-# Ordered category registry for the Notes page.
-# key must match `category` in each note after slugify.
+# Ordered category registry for the Blog page.
+# key must match `category` in each post after slugify.
 
 # - key: fundamentals
 #   label: Fundamentals
-#   summary: Core concepts, intuition, and review notes.
+#   summary: Core concepts, intuition, and review posts.
 
 # - key: classical-ml
 #   label: Classical ML
@@ -15,6 +15,10 @@
 - key: speech
   label: Speech
   summary: ASR, TTS, streaming inference, and speech pipelines.
+
+- key: world-models
+  label: World Models
+  summary: Latent dynamics, simulation, planning, and model-based reasoning.
 
 - key: nlp
   label: NLP
@@ -31,10 +35,6 @@
 # - key: multimodal
 #   label: Multimodal
 #   summary: Methods combining text, vision, speech, and structured data.
-
-# - key: world-models
-#   label: World Models
-#   summary: Latent dynamics, simulation, planning, and model-based reasoning.
 
 # - key: bayesian
 #   label: Bayesian & Probabilistic

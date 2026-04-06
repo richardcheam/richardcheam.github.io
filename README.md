@@ -7,9 +7,10 @@ A minimal Jekyll website for GitHub Pages.
 - `_config.yml`: site-level settings (title, URL, timezone, plugins)
 - `_layouts/default.html`: the only layout (HTML structure + nav + theme toggle)
 - `_data/navigation.yml`: top navigation links
-- `_data/notes_categories.yml`: ordered list of Notes categories
-- `_pages/`: page content (`about`, `projects`, `notes`, `cv`, `contact`, `404`)
-- `_notes/`: knowledge notes (public learning entries)
+- `_data/blog_categories.yml`: ordered list of Blog categories
+- `_pages/`: page content (`about`, `projects`, `blog`, `paper-reviews`, `cv`, `contact`, `404`)
+- `_blog/`: technical blog posts and personal learning writing
+- `_paper_reviews/`: research paper summaries and review templates
 - `assets/css/main.scss`: all styling (including light/dark mode)
 - `images/`: static images (`profile.png`)
 
@@ -33,12 +34,13 @@ Your content here.
 
 1. Update text in `_pages/about.md`
 2. Replace project descriptions in `_pages/projects.md`
-3. Add/edit notes in `_notes/`
-4. Add/reorder category blocks in `_data/notes_categories.yml`
-5. Update experience/skills in `_pages/cv.md`
-6. Update links in `_pages/contact.md`
-7. Adjust menu links in `_data/navigation.yml`
-8. Tweak styles/colors in `assets/css/main.scss`
+3. Add/edit technical posts in `_blog/`
+4. Add/edit paper reviews in `_paper_reviews/`
+5. Add/reorder category blocks in `_data/blog_categories.yml`
+6. Update experience/skills in `_pages/cv.md`
+7. Update links in `_pages/contact.md`
+8. Adjust menu links in `_data/navigation.yml`
+9. Tweak styles/colors in `assets/css/main.scss`
 
 ## Light and dark mode
 

@@ -1,6 +1,6 @@
 locale: en-US
 title: RICHARD CHEAM
-description: My portfolio and knowledge hub.
+description: My portfolio, technical blog, and paper review hub.
 url: https://richardcheam.github.io
 baseurl: ""
 timezone: Europe/Paris
@@ -9,9 +9,12 @@ markdown: kramdown
 permalink: pretty
 
 collections:
-  notes:
+  blog:
     output: true
-    permalink: /notes/:path/
+    permalink: /blog/:path/
+  paper_reviews:
+    output: true
+    permalink: /paper-reviews/:path/
 
 plugins:
   - jekyll-feed
@@ -35,7 +38,12 @@ defaults:
     values:
       layout: default
   - scope:
-      path: "_notes"
-      type: notes
+      path: "_blog"
+      type: blog
+    values:
+      layout: default
+  - scope:
+      path: "_paper_reviews"
+      type: paper_reviews
     values:
       layout: default

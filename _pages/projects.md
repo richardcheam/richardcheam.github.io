@@ -6,9 +6,9 @@ permalink: /projects/
 
 <section class="page-intro" data-reveal>
   <p class="section-eyebrow">Projects</p>
-  <h2>Selected AI and software works</h2>
+  <!-- <h2>Selected AI and software works</h2>
   <p class="section-description">
-    Each project is presented with a clear problem statement, implementation details, and a practical outcome or product surface.
+    Each project is presented with a clear problem statement, implementation details, and a practical outcome or product surface. -->
   </p>
 </section>
 

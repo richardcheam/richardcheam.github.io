@@ -456,8 +456,8 @@
         <a class="site-title" href="{{ '/' | relative_url }}">Home</a>
         <nav class="site-nav" aria-label="Primary">
           <a class="site-nav__item" href="{{ '/projects/' | relative_url }}" data-mega-target="projects" aria-haspopup="true" aria-expanded="false">Projects</a>
-          <a class="site-nav__item" href="{{ '/notes/' | relative_url }}" data-mega-target="notes" aria-haspopup="true" aria-expanded="false">Technical Notes</a>
           <a class="site-nav__item" href="{{ '/blog/' | relative_url }}" data-mega-target="blog" aria-haspopup="true" aria-expanded="false">Blog</a>
+          <a class="site-nav__item" href="{{ '/paper-reviews/' | relative_url }}" data-mega-target="paper-reviews" aria-haspopup="true" aria-expanded="false">Paper Reviews</a>
           <a class="site-nav__item" href="{{ '/cv/' | relative_url }}">About Me</a>
         </nav>
       </div>
@@ -468,25 +468,33 @@
             <a class="mega-primary-link" href="{{ '/projects/xai-vision-transfer/' | relative_url }}">XAI Vision Transfer</a>
             <a class="mega-primary-link" href="{{ '/projects/imdb-moe/' | relative_url }}">Customer Feedback Intelligence</a>
             <a class="mega-primary-link" href="{{ '/projects/mnist-ssl/' | relative_url }}">SSL and Semi-supervised Learning on MNIST</a>
-            <a class="mega-primary-link" href="{{ '/notes/2026-03-01-speech-ai/' | relative_url }}">Streaming Speech Reliability Toolkit</a>
-          </div>
-        </section>
-
-        <section class="mega-panel mega-panel--single" data-mega-panel="notes">
-          <div class="mega-col mega-col--stack">
-            <a class="mega-primary-link" href="{{ '/notes/fundamentals/' | relative_url }}">Fundamentals</a>
-            {% for cat in site.data.notes_categories %}
-              <a class="mega-primary-link" href="{{ '/notes/' | relative_url }}?category={{ cat.key | uri_escape }}#notes-search-input">{{ cat.label }}</a>
-            {% endfor %}
           </div>
         </section>
 
         <section class="mega-panel mega-panel--single" data-mega-panel="blog">
-          <div class="mega-col mega-col--list">
+          <div class="mega-col mega-col--stack">
             <a class="mega-primary-link mega-primary-link--root" href="{{ '/blog/' | relative_url }}">All Blog Posts</a>
-            {% assign blog_notes = site.notes | sort: "date" | reverse %}
-            {% for note in blog_notes %}
-              <a class="mega-primary-link" href="{{ note.url | relative_url }}">{{ note.title }}</a>
+            {% for cat in site.data.blog_categories %}
+              {% assign cat_count = 0 %}
+              {% for post in site.blog %}
+                {% assign post_key = post.category | default: "" | slugify %}
+                {% if post_key == cat.key %}
+                  {% assign cat_count = cat_count | plus: 1 %}
+                {% endif %}
+              {% endfor %}
+              {% if cat_count > 0 %}
+                <a class="mega-primary-link" href="{{ '/blog/' | relative_url }}?category={{ cat.key | uri_escape }}#blog-search-input">{{ cat.label }}</a>
+              {% endif %}
+            {% endfor %}
+          </div>
+        </section>
+
+        <section class="mega-panel mega-panel--single" data-mega-panel="paper-reviews">
+          <div class="mega-col mega-col--list">
+            <a class="mega-primary-link mega-primary-link--root" href="{{ '/paper-reviews/' | relative_url }}">All Paper Reviews</a>
+            {% assign paper_reviews = site.paper_reviews | sort: "date" | reverse %}
+            {% for review in paper_reviews %}
+              <a class="mega-primary-link" href="{{ review.url | relative_url }}">{{ review.title }}</a>
             {% endfor %}
           </div>
         </section>

@@ -2,12 +2,20 @@
 title: "Speech AI"
 date: 2026-02-20
 category: "speech"
-excerpt: "Streaming speech architectures and deployment notes."
+excerpt: "Streaming speech architectures, latency tradeoffs, and deployment patterns."
 ---
 
+{% assign post_key = page.category | default: "" | slugify %}
+{% assign post_label = "Blog Post" %}
+{% for cat in site.data.blog_categories %}
+  {% if cat.key == post_key %}
+    {% assign post_label = cat.label %}
+  {% endif %}
+{% endfor %}
+
 <article class="note-article">
-<p><a class="notes-backlink" href="{{ '/notes/' | relative_url }}">Back to Notes</a></p>
-<p class="note-meta">Speech • {{ page.date | date: "%d %b %Y" }} • ~3 min read</p>
+<p><a class="notes-backlink" href="{{ '/blog/' | relative_url }}">Back to Blog</a></p>
+<p class="note-meta">{{ post_label }} • {{ page.date | date: "%d %b %Y" }} • ~3 min read</p>
 
 <!-- Operational reminders for low-latency streaming speech systems.
 
@@ -41,8 +49,8 @@ excerpt: "Streaming speech architectures and deployment notes."
 
 <div class="note-related">
 <ul>
-  <li><a href="{{ '/notes/2026-03-01-world-model/' | relative_url }}">World Model</a></li>
-  <li><a href="{{ '/notes/2026-03-01-paper-review/' | relative_url }}">Paper Review</a></li>
+  <li><a href="{{ '/blog/world-model/' | relative_url }}">World Model</a></li>
+  <li><a href="{{ '/paper-reviews/paper-review/' | relative_url }}">Paper Review</a></li>
 </ul>
 </div>
 </article>

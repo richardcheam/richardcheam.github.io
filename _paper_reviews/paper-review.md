@@ -1,13 +1,12 @@
 ---
 title: "Paper Review"
 date: 2025-11-30
-category: "fundamentals"
-excerpt: "Useful ideas from research papers."
+excerpt: "A compact article summary template for extracting reusable ideas from papers."
 ---
 
 <article class="note-article">
-<p><a class="notes-backlink" href="{{ '/notes/fundamentals/' | relative_url }}">Back to Fundamentals</a></p>
-<p class="note-meta">Fundamentals • {{ page.date | date: "%d %b %Y" }} • ~4 min read</p>
+<p><a class="notes-backlink" href="{{ '/paper-reviews/' | relative_url }}">Back to Paper Reviews</a></p>
+<p class="note-meta">Paper Review • {{ page.date | date: "%d %b %Y" }} • ~4 min read</p>
 
 <!-- A compact personal template to extract reusable value from any paper without over-reading.
 
@@ -43,12 +42,12 @@ excerpt: "Useful ideas from research papers."
 </ul>
 </div> -->
 
-## Related Notes
+## Related Posts
 
 <div class="note-related">
 <ul>
-  <li><a href="{{ '/notes/2026-03-01-world-model/' | relative_url }}">World Model</a></li>
-  <li><a href="{{ '/notes/2026-03-01-speech-ai/' | relative_url }}">Speech AI</a></li>
+  <li><a href="{{ '/blog/world-model/' | relative_url }}">World Model</a></li>
+  <li><a href="{{ '/blog/speech-ai/' | relative_url }}">Speech AI</a></li>
 </ul>
 </div>
 </article>
