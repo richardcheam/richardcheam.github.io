@@ -37,6 +37,18 @@ title: "Richard Cheam"
   </header>
   <div class="cards-grid">
     <article class="premium-card project-card" data-reveal>
+      <p class="card-meta">LLM Inference · September 2026</p>
+      <h3 class="card-title">Inference Engineering</h3>
+      <p class="card-summary">Public field guide to LLM inference engineering: ten question-led chapters and 16 interactive figures computed from tested functions over pinned sources.</p>
+      <div class="project-stack">
+        <span class="tag">LLM Inference</span>
+        <span class="tag">React</span>
+        <span class="tag">Playwright</span>
+      </div>
+      <a class="card-link" href="{{ '/projects/inference-engineering/' | relative_url }}">View project</a>
+    </article>
+
+    <article class="premium-card project-card" data-reveal>
       <p class="card-meta">Interactive Systems · April 2026</p>
       <h3 class="card-title">Enigmatica</h3>
       <p class="card-summary">Chapter-based cipher puzzle game inspired by manga decoding challenges, built with reusable Python mechanics and a public GitHub Pages interface.</p>

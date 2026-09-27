@@ -14,6 +14,18 @@ permalink: /projects/
 
 <section class="cards-grid" aria-label="Project cards">
   <article class="premium-card project-card" data-reveal>
+    <p class="card-meta">LLM Inference · September 2026</p>
+    <h3 class="card-title">Inference Engineering</h3>
+    <p class="card-summary">Public field guide to LLM inference: ten question-led chapters and 16 interactive figures computed from tested functions over pinned sources.</p>
+    <div class="project-stack">
+      <span class="tag">LLM Inference</span>
+      <span class="tag">React</span>
+      <span class="tag">Playwright</span>
+    </div>
+    <a class="card-link" href="{{ '/projects/inference-engineering/' | relative_url }}">Open project</a>
+  </article>
+
+  <article class="premium-card project-card" data-reveal>
     <p class="card-meta">Interactive Systems · April 2026</p>
     <h3 class="card-title">Enigmatica</h3>
     <p class="card-summary">Chapter-based cipher puzzle game that turns manga decoding mechanics into reusable Python systems and a public playable web experience.</p>
