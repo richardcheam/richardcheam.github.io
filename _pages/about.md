@@ -45,7 +45,7 @@ title: "Richard Cheam"
         <span class="tag">React</span>
         <span class="tag">Playwright</span>
       </div>
-      <a class="card-link" href="{{ '/projects/inference-engineering/' | relative_url }}">View project</a>
+      <a class="card-link" href="https://richardcheam.github.io/inference-engineering/">View project</a>
     </article>
 
     <article class="premium-card project-card" data-reveal>
