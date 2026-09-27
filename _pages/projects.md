@@ -26,6 +26,18 @@ permalink: /projects/
   </article>
 
   <article class="premium-card project-card" data-reveal>
+    <p class="card-meta">Self-Supervised Learning · August 2026</p>
+    <h3 class="card-title">Embedding Diagnostics</h3>
+    <p class="card-summary">Controlled study of which label-free diagnostics detect a degenerated self-supervised embedding, on CIFAR-10 and BDD100K driving scenarios.</p>
+    <div class="project-stack">
+      <span class="tag">PyTorch</span>
+      <span class="tag">Self-Supervised</span>
+      <span class="tag">BDD100K</span>
+    </div>
+    <a class="card-link" href="{{ '/projects/embedding-diagnostics/' | relative_url }}">Open project</a>
+  </article>
+
+  <article class="premium-card project-card" data-reveal>
     <p class="card-meta">Interactive Systems · April 2026</p>
     <h3 class="card-title">Enigmatica</h3>
     <p class="card-summary">Chapter-based cipher puzzle game that turns manga decoding mechanics into reusable Python systems and a public playable web experience.</p>
