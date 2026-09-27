@@ -1,0 +1,40 @@
+# Registry for the Paper Reviews section.
+# `type` and each `topic` in a review's front matter must match a key below.
+# Topics only show as filter chips when at least one entry uses them.
+
+types:
+  - key: paper
+    label: Paper
+    long_label: Paper review
+
+  - key: tech-report
+    label: Tech report
+    long_label: Technical report
+
+topics:
+  - key: architecture
+    label: Architecture
+
+  - key: attention
+    label: Attention
+
+  - key: moe
+    label: MoE
+
+  - key: training
+    label: Training
+
+  - key: rl
+    label: RL
+
+  - key: inference
+    label: Inference
+
+  - key: serving
+    label: Serving
+
+  - key: kernels
+    label: Kernels
+
+  - key: evaluation
+    label: Evaluation

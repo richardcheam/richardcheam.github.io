@@ -7,6 +7,11 @@
     <meta name="description" content="{{ page.excerpt | default: site.description | strip_html | strip_newlines | escape }}">
     <meta name="theme-color" content="#ffffff">
     <link rel="stylesheet" href="{{ '/assets/css/main.css' | relative_url }}">
+    {% if page.math %}
+      <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.18.9/dist/katex.min.css">
+      <script defer src="https://cdn.jsdelivr.net/npm/katex@0.18.9/dist/katex.min.js"></script>
+      <script defer src="https://cdn.jsdelivr.net/npm/katex@0.18.9/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.querySelector('[data-review-content]') || document.body, { throwOnError: false });"></script>
+    {% endif %}
     <script>
       (function () {
         var root = document.documentElement;
@@ -213,7 +218,7 @@
               if (window.matchMedia("(max-width: 1024px)").matches) return 2;
               return 3;
             }
-            if (grid.classList.contains("notes-grid") || grid.classList.contains("blog-grid")) {
+            if (grid.classList.contains("notes-grid") || grid.classList.contains("blog-grid") || grid.classList.contains("review-grid")) {
               return window.matchMedia("(max-width: 760px)").matches ? 1 : 2;
             }
             return 1;
@@ -221,7 +226,7 @@
 
           function applyCardStagger() {
             var staggerGrids = Array.prototype.slice.call(
-              document.querySelectorAll(".cards-grid, .notes-grid, .blog-grid, .notes-list, .blog-list, .concept-list")
+              document.querySelectorAll(".cards-grid, .notes-grid, .blog-grid, .review-grid, .notes-list, .blog-list, .concept-list")
             );
 
             staggerGrids.forEach(function (grid) {
@@ -342,17 +347,140 @@
           var filterCards = Array.prototype.slice.call(document.querySelectorAll("[data-filter-card]"));
           var filterEmpty = document.querySelector("[data-filter-empty]");
 
-          if (filterCards.length > 0) {
-            var initialFilter = "";
-            try {
-              var params = new URLSearchParams(window.location.search);
-              initialFilter = (params.get("category") || params.get("q") || "").trim().toLowerCase();
-            } catch (e) {
-              initialFilter = "";
+          var reviewContent = document.querySelector("[data-review-content]");
+          var reviewToc = document.querySelector("[data-review-toc]");
+          if (reviewContent) {
+            Array.prototype.slice.call(reviewContent.querySelectorAll("table")).forEach(function (table) {
+              if (table.parentElement && table.parentElement.classList.contains("table-wrap")) return;
+              var wrap = document.createElement("div");
+              wrap.className = "table-wrap";
+              wrap.setAttribute("role", "region");
+              wrap.setAttribute("tabindex", "0");
+              wrap.setAttribute("aria-label", table.getAttribute("aria-label") || "Table");
+              table.parentNode.insertBefore(wrap, table);
+              wrap.appendChild(table);
+            });
+          }
+
+          if (reviewContent && reviewToc) {
+            var tocHeadings = Array.prototype.slice.call(reviewContent.querySelectorAll("h2[id], h3[id]"));
+            var tocList = reviewToc.querySelector("[data-review-toc-list]");
+            var tocDetails = reviewToc.querySelector("[data-review-toc-details]");
+            var tocSummary = tocDetails && tocDetails.querySelector("summary");
+            var tocWide = window.matchMedia ? window.matchMedia("(min-width: 1025px)") : null;
+            var tocLinks = [];
+            var sectionNumber = 0;
+
+            if (tocHeadings.length > 1 && tocList && tocDetails) {
+              tocHeadings.forEach(function (heading) {
+                var isSection = heading.tagName === "H2";
+                var item = document.createElement("li");
+                var link = document.createElement("a");
+                item.className = isSection ? "review-toc__item" : "review-toc__item review-toc__item--sub";
+                link.href = "#" + heading.id;
+                if (isSection) {
+                  sectionNumber += 1;
+                  var number = (sectionNumber < 10 ? "0" : "") + sectionNumber;
+                  heading.setAttribute("data-section-number", number);
+                  var numberEl = document.createElement("span");
+                  numberEl.className = "review-toc__number";
+                  numberEl.setAttribute("aria-hidden", "true");
+                  numberEl.textContent = number;
+                  link.appendChild(numberEl);
+                }
+                link.appendChild(document.createTextNode(heading.textContent));
+                item.appendChild(link);
+                tocList.appendChild(item);
+                tocLinks.push(link);
+
+                link.addEventListener("click", function (event) {
+                  if (!tocWide || tocWide.matches) return;
+                  // Collapse first so the page height settles before scrolling.
+                  event.preventDefault();
+                  tocDetails.open = false;
+                  window.requestAnimationFrame(function () {
+                    heading.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "start" });
+                    if (window.history && window.history.replaceState) {
+                      window.history.replaceState(null, "", "#" + heading.id);
+                    }
+                  });
+                });
+              });
+
+              reviewToc.hidden = false;
+
+              function syncTocMode() {
+                tocDetails.open = !!(tocWide && tocWide.matches);
+              }
+
+              syncTocMode();
+              if (tocWide) {
+                if (tocWide.addEventListener) tocWide.addEventListener("change", syncTocMode);
+                else if (tocWide.addListener) tocWide.addListener(syncTocMode);
+              }
+
+              if (tocSummary) {
+                tocSummary.addEventListener("click", function (event) {
+                  if (tocWide && tocWide.matches) event.preventDefault();
+                });
+              }
+
+              var activeTocIndex = -1;
+              var tocRaf = null;
+
+              function updateActiveToc() {
+                tocRaf = null;
+                var offset = 140;
+                var current = 0;
+                tocHeadings.forEach(function (heading, index) {
+                  if (heading.getBoundingClientRect().top - offset <= 0) current = index;
+                });
+                if (current === activeTocIndex) return;
+                activeTocIndex = current;
+                tocLinks.forEach(function (link, index) {
+                  var isActive = index === current;
+                  link.classList.toggle("is-active", isActive);
+                  if (isActive) link.setAttribute("aria-current", "location");
+                  else link.removeAttribute("aria-current");
+                });
+              }
+
+              updateActiveToc();
+              window.addEventListener("scroll", function () {
+                if (!tocRaf) tocRaf = window.requestAnimationFrame(updateActiveToc);
+              }, { passive: true });
             }
+          }
+
+          if (filterCards.length > 0) {
+            var filterParams = null;
+            try {
+              filterParams = new URLSearchParams(window.location.search);
+            } catch (e) {
+              filterParams = null;
+            }
+
+            var initialFilter = filterParams ? (filterParams.get("category") || filterParams.get("q") || "").trim().toLowerCase() : "";
+            var facetLinks = Array.prototype.slice.call(document.querySelectorAll("[data-facet-link]"));
+            var filterCount = document.querySelector("[data-filter-count]");
+            var facetState = {};
+
+            facetLinks.forEach(function (link) {
+              var facet = link.getAttribute("data-facet");
+              facetState[facet] = filterParams ? (filterParams.get(facet) || "").trim().toLowerCase() : "";
+            });
 
             if (filterInput && initialFilter) {
               filterInput.value = initialFilter;
+            }
+
+            function syncFacetLinks() {
+              facetLinks.forEach(function (link) {
+                var isActive = facetState[link.getAttribute("data-facet")] === (link.getAttribute("data-facet-value") || "");
+                link.classList.toggle("is-active", isActive);
+                if (isActive) link.setAttribute("aria-current", "true");
+                else link.removeAttribute("aria-current");
+              });
             }
 
             function applyFilter(queryValue) {
@@ -363,15 +491,44 @@
 
               filterCards.forEach(function (card) {
                 var haystack = (card.getAttribute("data-filter-text") || "").toLowerCase();
-                var show = query === "" || haystack.indexOf(query) !== -1;
+                var facets = " " + (card.getAttribute("data-filter-facets") || "") + " ";
+                var facetMatch = Object.keys(facetState).every(function (facet) {
+                  return !facetState[facet] || facets.indexOf(" " + facet + ":" + facetState[facet] + " ") !== -1;
+                });
+                var show = facetMatch && (query === "" || haystack.indexOf(query) !== -1);
                 card.hidden = !show;
                 if (show) matches += 1;
               });
 
               if (filterEmpty) {
-                filterEmpty.hidden = query === "" || matches > 0;
+                filterEmpty.hidden = matches > 0;
+              }
+
+              if (filterCount) {
+                var noun = filterCards.length === 1 ? "entry" : "entries";
+                filterCount.textContent = matches === filterCards.length
+                  ? filterCards.length + " " + noun
+                  : matches + " of " + filterCards.length + " " + noun;
               }
             }
+
+            facetLinks.forEach(function (link) {
+              link.addEventListener("click", function (event) {
+                event.preventDefault();
+                facetState[link.getAttribute("data-facet")] = link.getAttribute("data-facet-value") || "";
+                syncFacetLinks();
+                applyFilter();
+
+                if (window.history && window.history.replaceState) {
+                  var nextParams = new URLSearchParams();
+                  Object.keys(facetState).forEach(function (facet) {
+                    if (facetState[facet]) nextParams.set(facet, facetState[facet]);
+                  });
+                  var search = nextParams.toString();
+                  window.history.replaceState(null, "", window.location.pathname + (search ? "?" + search : "") + window.location.hash);
+                }
+              });
+            });
 
             if (filterInput) {
               filterInput.addEventListener("input", function () {
@@ -379,6 +536,7 @@
               });
             }
 
+            syncFacetLinks();
             applyFilter(initialFilter);
           }
 
@@ -491,21 +649,38 @@
           </div>
         </section>
 
-        <section class="mega-panel mega-panel--single" data-mega-panel="paper-reviews">
+        <section class="mega-panel mega-panel--reviews" data-mega-panel="paper-reviews">
+          {% assign mega_reviews = site.paper_reviews | sort: "date" | reverse %}
+          {% assign mega_reports = mega_reviews | where: "type", "tech-report" %}
+          {% assign mega_papers = mega_reviews | where_exp: "r", "r.type != 'tech-report'" %}
           <div class="mega-col mega-col--list">
             <a class="mega-primary-link mega-primary-link--root" href="{{ '/paper-reviews/' | relative_url }}">All Paper Reviews</a>
-            {% assign paper_reviews = site.paper_reviews | sort: "date" | reverse %}
-            {% for review in paper_reviews %}
-              <a class="mega-primary-link" href="{{ review.url | relative_url }}">{{ review.title }}</a>
-            {% endfor %}
           </div>
+          {% if mega_reports.size > 0 %}
+            <div class="mega-col">
+              <h3>Technical reports</h3>
+              {% for review in mega_reports limit:4 %}
+                <a href="{{ review.url | relative_url }}">{{ review.title }}</a>
+              {% endfor %}
+              {% if mega_reports.size > 4 %}<a class="mega-col__more" href="{{ '/paper-reviews/' | relative_url }}?type=tech-report#reviews-library">All {{ mega_reports.size }} reports</a>{% endif %}
+            </div>
+          {% endif %}
+          {% if mega_papers.size > 0 %}
+            <div class="mega-col">
+              <h3>Papers</h3>
+              {% for review in mega_papers limit:4 %}
+                <a href="{{ review.url | relative_url }}">{{ review.title }}</a>
+              {% endfor %}
+              {% if mega_papers.size > 4 %}<a class="mega-col__more" href="{{ '/paper-reviews/' | relative_url }}?type=paper#reviews-library">All {{ mega_papers.size }} papers</a>{% endif %}
+            </div>
+          {% endif %}
         </section>
 
       </div>
     </header>
 
     <main class="site-main">
-      {% if page.url != '/' and page.title %}
+      {% if page.url != '/' and page.title and page.layout != 'paper-review' %}
         <header class="page-heading" data-reveal>
           <h1>{{ page.title }}</h1>
         </header>

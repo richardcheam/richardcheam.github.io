@@ -1,0 +1,25 @@
+{%- assign r = include.review -%}
+{%- assign r_type = r.type | default: "paper" -%}
+{%- assign r_topics = r.topic | join: "," | split: "," -%}
+{%- assign r_tags = r.tags | join: "," | split: "," -%}
+{%- capture r_type_label -%}{% include review-type.html key=r_type %}{%- endcapture -%}
+{%- capture r_topic_labels -%}{% include review-topics.html doc=r %}{%- endcapture -%}
+{%- comment -%} Related cards skip read time: another entry's content may not be rendered yet at that point. {%- endcomment -%}
+{%- unless include.compact -%}{%- capture r_minutes -%}{% include review-read-time.html doc=r text=r.content %}{%- endcapture -%}{%- endunless -%}
+{%- capture r_facets -%}type:{{ r_type }}{% for t in r_topics %} topic:{{ t }}{% endfor %}{%- endcapture -%}
+<a class="review-card{% if include.featured %} review-card--featured{% endif %}"
+   {% if include.filterable %}data-reveal data-filter-card data-filter-facets="{{ r_facets | strip }}" data-filter-text="{{ r.title | downcase | escape }} {{ r_type_label | downcase }} {{ r.org | downcase | escape }} {{ r.authors | downcase | escape }} {{ r_topic_labels | downcase }} {{ r_topics | join: ' ' }} {{ r_tags | join: ' ' | downcase | escape }} {{ r.excerpt | strip_html | downcase | escape }}"{% endif %}
+   href="{{ r.url | relative_url }}">
+  <p class="review-card__top">
+    <span class="type-badge type-badge--{{ r_type }}">{{ r_type_label }}</span>
+    {% if r_topic_labels != "" %}<span class="review-card__topics">{{ r_topic_labels }}</span>{% endif %}
+  </p>
+  <h3 class="review-card__title">{{ r.title }}</h3>
+  {% unless include.compact %}
+    <p class="review-card__summary">{{ r.excerpt | strip_html | truncate: 170 }}</p>
+  {% endunless %}
+  <p class="review-card__foot">
+    <span>{% if r.org %}{{ r.org }} · {% endif %}{{ r.date | date: "%d %b %Y" }}</span>
+    {% unless include.compact %}<span>{{ r_minutes }} min</span>{% endunless %}
+  </p>
+</a>

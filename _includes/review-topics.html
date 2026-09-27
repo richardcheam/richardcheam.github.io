@@ -1,0 +1,10 @@
+{%- comment -%} Topic labels for a review, joined by `sep`. Accepts a string or a list. {%- endcomment -%}
+{%- assign _keys = include.doc.topic | join: "," | split: "," -%}
+{%- assign _sep = include.sep | default: " · " -%}
+{%- for k in _keys -%}
+  {%- assign _label = k -%}
+  {%- for t in site.data.paper_review_topics.topics -%}
+    {%- if t.key == k -%}{%- assign _label = t.label -%}{%- endif -%}
+  {%- endfor -%}
+  {{- _label -}}{%- unless forloop.last -%}{{ _sep }}{%- endunless -%}
+{%- endfor -%}

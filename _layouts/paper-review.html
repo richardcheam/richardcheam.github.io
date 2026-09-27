@@ -1,0 +1,143 @@
+---
+layout: default
+---
+{%- assign review_type = page.type | default: "paper" -%}
+{%- capture type_label -%}{% include review-type.html key=review_type %}{%- endcapture -%}
+{%- capture type_long_label -%}{% include review-type.html key=review_type long=true %}{%- endcapture -%}
+{%- capture topic_labels -%}{% include review-topics.html doc=page sep=", " %}{%- endcapture -%}
+{%- capture minutes -%}{% include review-read-time.html doc=page text=content %}{%- endcapture -%}
+{%- assign page_topics = page.topic | join: "," | split: "," -%}
+{%- assign page_tags = page.tags | join: "," | split: "," -%}
+
+{%- if page.series -%}
+  {%- assign series_docs = site.paper_reviews | where: "series", page.series | sort: "series_order" -%}
+  {%- for doc in series_docs -%}
+    {%- if doc.url == page.url -%}
+      {%- assign series_position = forloop.index -%}
+      {%- assign series_prev_index = forloop.index0 | minus: 1 -%}
+      {%- assign series_next_index = forloop.index0 | plus: 1 -%}
+    {%- endif -%}
+  {%- endfor -%}
+  {%- if series_prev_index >= 0 -%}{%- assign series_prev = series_docs[series_prev_index] -%}{%- endif -%}
+  {%- if series_next_index < series_docs.size -%}{%- assign series_next = series_docs[series_next_index] -%}{%- endif -%}
+{%- endif -%}
+
+<article class="review">
+  <div class="review-back">
+    <a class="notes-backlink" href="{{ '/paper-reviews/' | relative_url }}">Back to Paper Reviews</a>
+  </div>
+
+  <header class="review-head" data-reveal>
+    <p class="review-head__kicker">
+      <span class="type-badge type-badge--{{ review_type }}">{{ type_long_label }}</span>
+      {% if page.org %}<span>{{ page.org }}</span>{% endif %}
+    </p>
+    <h1 class="review-head__title">{{ page.title }}</h1>
+    {% if page.excerpt %}<p class="review-head__dek">{{ page.excerpt | strip_html | strip }}</p>{% endif %}
+    {% if page.source_url or page.links %}
+      <div class="review-head__actions">
+        {% if page.source_url %}
+          {%- capture default_source_label -%}{% if review_type == "tech-report" %}Read the report{% else %}Read the paper{% endif %}{%- endcapture -%}
+          <a class="btn btn--primary" href="{{ page.source_url }}" target="_blank" rel="noopener noreferrer">{{ page.source_label | default: default_source_label }}<span class="btn__ext" aria-hidden="true">&#8599;</span><span class="sr-only"> (opens in a new tab)</span></a>
+        {% endif %}
+        {% for link in page.links %}
+          <a class="btn btn--ghost" href="{{ link.url }}" target="_blank" rel="noopener noreferrer">{{ link.label }}<span class="btn__ext" aria-hidden="true">&#8599;</span><span class="sr-only"> (opens in a new tab)</span></a>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </header>
+
+  <aside class="review-rail" aria-label="About this review">
+    <dl class="review-label">
+      {% if page.authors %}<div><dt>Authors</dt><dd>{{ page.authors }}</dd></div>{% endif %}
+      {% if page.source_date %}<div><dt>Published</dt><dd><time datetime="{{ page.source_date | date_to_xmlschema }}">{{ page.source_date | date: "%d %b %Y" }}</time></dd></div>{% endif %}
+      <div><dt>Reviewed</dt><dd><time datetime="{{ page.date | date_to_xmlschema }}">{{ page.date | date: "%d %b %Y" }}</time></dd></div>
+      <div><dt>Reading</dt><dd>{{ minutes }} min</dd></div>
+      {% if topic_labels != "" %}<div><dt>Topics</dt><dd>{{ topic_labels }}</dd></div>{% endif %}
+      {% if page.series %}<div><dt>Series</dt><dd>{{ page.series_title | default: page.series }}, {{ series_position }} of {{ series_docs.size }}</dd></div>{% endif %}
+      {% if page_tags.size > 0 %}
+        <div>
+          <dt>Tags</dt>
+          <dd class="review-label__tags">{% for tag in page_tags %}<span class="tag">{{ tag }}</span>{% endfor %}</dd>
+        </div>
+      {% endif %}
+    </dl>
+
+    <nav class="review-toc" aria-label="On this page" data-review-toc hidden>
+      <details class="review-toc__details" data-review-toc-details>
+        <summary class="review-toc__summary">On this page</summary>
+        <ol class="review-toc__list" data-review-toc-list></ol>
+      </details>
+    </nav>
+  </aside>
+
+  <div class="review-body">
+    {% if page.tldr %}
+      <section class="review-tldr" aria-labelledby="review-tldr-title" data-reveal>
+        <h2 class="review-panel-title" id="review-tldr-title">In short</h2>
+        <ol class="review-tldr__list">
+          {% for point in page.tldr %}
+            <li>{{ point | markdownify | remove: "<p>" | remove: "</p>" | strip }}</li>
+          {% endfor %}
+        </ol>
+      </section>
+    {% endif %}
+
+    {% if page.glance %}
+      <section class="review-glance" aria-labelledby="review-glance-title" data-reveal>
+        <h2 class="review-panel-title" id="review-glance-title">At a glance</h2>
+        <dl class="review-glance__grid">
+          {% for item in page.glance %}
+            <div><dt>{{ item.label }}</dt><dd>{{ item.value }}</dd></div>
+          {% endfor %}
+        </dl>
+      </section>
+    {% endif %}
+
+    <div class="review-prose" data-review-content>
+      {{ content }}
+    </div>
+
+    {% if series_prev or series_next %}
+      <nav class="review-series" aria-label="{{ page.series_title | default: 'Series' }}">
+        {% if series_prev %}
+          <a class="review-series__link review-series__link--prev" href="{{ series_prev.url | relative_url }}">
+            <span class="review-series__dir">Previous in series</span>
+            <span class="review-series__title">{{ series_prev.title }}</span>
+          </a>
+        {% endif %}
+        {% if series_next %}
+          <a class="review-series__link review-series__link--next" href="{{ series_next.url | relative_url }}">
+            <span class="review-series__dir">Next in series</span>
+            <span class="review-series__title">{{ series_next.title }}</span>
+          </a>
+        {% endif %}
+      </nav>
+    {% endif %}
+
+    {%- assign related_count = 0 -%}
+    {%- capture related_cards -%}
+      {%- assign candidates = site.paper_reviews | sort: "date" | reverse -%}
+      {%- for doc in candidates -%}
+        {%- if related_count >= 3 -%}{%- break -%}{%- endif -%}
+        {%- if doc.url == page.url -%}{%- continue -%}{%- endif -%}
+        {%- if page.series and doc.series == page.series -%}{%- continue -%}{%- endif -%}
+        {%- assign doc_topics = doc.topic | join: "," | split: "," -%}
+        {%- assign shares_topic = false -%}
+        {%- for t in doc_topics -%}
+          {%- if page_topics contains t -%}{%- assign shares_topic = true -%}{%- endif -%}
+        {%- endfor -%}
+        {%- if shares_topic -%}
+          {%- assign related_count = related_count | plus: 1 -%}
+          {% include review-card.html review=doc compact=true %}
+        {%- endif -%}
+      {%- endfor -%}
+    {%- endcapture -%}
+    {% if related_count > 0 %}
+      <section class="review-related" aria-labelledby="review-related-title">
+        <h2 class="review-panel-title" id="review-related-title">Related</h2>
+        <div class="review-related__list">{{ related_cards }}</div>
+      </section>
+    {% endif %}
+  </div>
+</article>

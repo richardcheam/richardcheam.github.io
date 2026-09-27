@@ -137,7 +137,7 @@ title: "Richard Cheam"
   <div class="notes-grid">
     {% for review in sorted_paper_reviews limit:3 %}
       <article class="premium-card" data-reveal>
-        <p class="card-meta">Paper Review{% if review.date %} · {{ review.date | date: "%d %b %Y" }}{% endif %}</p>
+        <p class="card-meta">{% include review-type.html key=review.type long=true %}{% if review.date %} · {{ review.date | date: "%d %b %Y" }}{% endif %}</p>
         <h3 class="card-title">{{ review.title }}</h3>
         <p class="card-summary">{{ review.excerpt | default: "Concise research summary with reusable takeaways." | strip_html | truncate: 138 }}</p>
         <a class="card-link" href="{{ review.url | relative_url }}">Read review</a>

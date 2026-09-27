@@ -1,0 +1,11 @@
+{%- comment -%}
+  Minutes to read. Uses `read_time` from front matter when set,
+  otherwise words / 220 from the rendered text passed as `text`.
+{%- endcomment -%}
+{%- if include.doc.read_time -%}
+  {{- include.doc.read_time -}}
+{%- else -%}
+  {%- assign _words = include.text | strip_html | number_of_words -%}
+  {%- assign _minutes = _words | divided_by: 220.0 | ceil -%}
+  {%- if _minutes < 1 -%}1{%- else -%}{{- _minutes -}}{%- endif -%}
+{%- endif -%}

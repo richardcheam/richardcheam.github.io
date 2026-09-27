@@ -1,0 +1,9 @@
+{%- comment -%} Label for a review type key. Pass `key` and optionally `long`. {%- endcomment -%}
+{%- assign _type_key = include.key | default: "paper" -%}
+{%- assign _type_label = _type_key -%}
+{%- for t in site.data.paper_review_topics.types -%}
+  {%- if t.key == _type_key -%}
+    {%- if include.long -%}{%- assign _type_label = t.long_label -%}{%- else -%}{%- assign _type_label = t.label -%}{%- endif -%}
+  {%- endif -%}
+{%- endfor -%}
+{{- _type_label -}}
