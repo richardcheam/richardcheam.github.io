@@ -16,3 +16,4 @@ package-lock.json
 
 # Personal design inventory (never published)
 harness/
+vendor/
