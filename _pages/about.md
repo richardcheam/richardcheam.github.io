@@ -37,6 +37,18 @@ title: "Richard Cheam"
   </header>
   <div class="cards-grid">
     <article class="premium-card project-card" data-reveal>
+      <p class="card-meta">Workflow Evaluation · September 2026</p>
+      <h3 class="card-title">DecisionOps</h3>
+      <p class="card-summary">Offline evaluation of learned and fixed policies in a bounded diagnostic workflow, with replayable traces and a standalone report viewer.</p>
+      <div class="project-stack">
+        <span class="tag">Python</span>
+        <span class="tag">GLiClass</span>
+        <span class="tag">Laya</span>
+      </div>
+      <a class="card-link" href="{{ '/projects/decisionops/' | relative_url }}">View project</a>
+    </article>
+
+    <article class="premium-card project-card" data-reveal>
       <p class="card-meta">LLM Inference · September 2026</p>
       <h3 class="card-title">Inference Engineering</h3>
       <p class="card-summary">Public field guide to LLM inference engineering: ten question-led chapters and 16 interactive figures computed from tested functions over pinned sources.</p>
