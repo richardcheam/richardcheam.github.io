@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% if page.url == '/' %}{{ site.title }}{% else %}{{ page.title }} | {{ site.title }}{% endif %}</title>
     <meta name="description" content="{{ page.excerpt | default: site.description | strip_html | strip_newlines | escape }}">
-    <meta name="theme-color" content="{% if page.url contains '/blog/' %}#f8f6ef{% else %}#ffffff{% endif %}">
+    <meta name="theme-color" content="#ffffff">
     <link rel="stylesheet" href="{{ '/assets/css/main.css' | relative_url }}">
     {% if page.math %}
       <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.18.9/dist/katex.min.css">
@@ -36,14 +36,13 @@
           var introScreen = document.getElementById("intro-screen");
           var body = document.body;
           var isHome = body.getAttribute("data-page") === "/";
-          var isBlog = (body.getAttribute("data-page") || "").indexOf("/blog/") === 0;
 
           var themeOrder = ["light"];
           var themeNames = {
             light: "Light"
           };
           var themeMetaColors = {
-            light: isBlog ? "#f8f6ef" : "#ffffff"
+            light: "#ffffff"
           };
 
           function getTheme() {

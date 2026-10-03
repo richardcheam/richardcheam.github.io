@@ -1,10 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 240" role="img" aria-labelledby="title desc">
   <title id="title">Conceptual output timeline</title><desc id="desc">Submission to first output is time to first token. The later span is post-first-output time. Streaming chunks may contain more than one token.</desc>
-  <rect width="780" height="240" fill="#f8f6ef"/>
-  <text x="24" y="35" fill="#25443d" font-size="13" font-family="monospace">CONCEPTUAL · REQUEST TIMING</text>
-  <line x1="55" y1="113" x2="725" y2="113" stroke="#172923" stroke-width="2"/>
-  <g fill="#172923"><circle cx="55" cy="113" r="6"/><circle cx="350" cy="113" r="6"/><circle cx="526" cy="113" r="6"/><circle cx="725" cy="113" r="6"/></g>
-  <g fill="#172923" font-size="15" font-family="sans-serif"><text x="55" y="89">Submit</text><text x="320" y="89">First output</text><text x="482" y="89">Later chunk</text><text x="693" y="89">End</text></g>
-  <path d="M55 145 V160 H350 V145 M350 182 V197 H725 V182" fill="none" stroke="#9b5a43" stroke-width="2"/>
-  <g fill="#6d3e31" font-size="15" font-family="sans-serif"><text x="135" y="180">TTFT</text><text x="449" y="219">Post-first-output time</text></g>
+  <rect width="780" height="240" fill="#fafafa"/>
+  <text x="24" y="35" fill="#594578" font-size="13" font-family="monospace">CONCEPTUAL · REQUEST TIMING</text>
+  <line x1="55" y1="113" x2="725" y2="113" stroke="#111111" stroke-width="2"/>
+  <g fill="#111111"><circle cx="55" cy="113" r="6"/><circle cx="350" cy="113" r="6"/><circle cx="526" cy="113" r="6"/><circle cx="725" cy="113" r="6"/></g>
+  <g fill="#111111" font-size="15" font-family="sans-serif"><text x="55" y="89">Submit</text><text x="320" y="89">First output</text><text x="482" y="89">Later chunk</text><text x="693" y="89">End</text></g>
+  <path d="M55 145 V160 H350 V145 M350 182 V197 H725 V182" fill="none" stroke="#754a94" stroke-width="2"/>
+  <g fill="#594578" font-size="15" font-family="sans-serif"><text x="135" y="180">TTFT</text><text x="449" y="219">Post-first-output time</text></g>
 </svg>

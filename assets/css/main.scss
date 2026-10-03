@@ -2734,24 +2734,7 @@ html[data-theme="dark"] .hero::before {
   border-top: 1px solid var(--border);
 }
 
-/* GH200 publication: one paper canvas, two reading measures. */
-body[data-page^="/blog/"] {
-  color-scheme: light;
-  --bg: #f8f6ef;
-  --surface: #f8f6ef;
-  --surface-strong: #f1f0e8;
-  --text: #172923;
-  --text-secondary: #3f5149;
-  --border: #b9c4bd;
-  --border-strong: #6b8174;
-  --focus-ring: #8c4f38;
-  --header-bg: rgba(248, 246, 239, 0.96);
-  --code-bg: #efeee7;
-  --callout-definition: #426a5a;
-  --callout-pitfall: #9b5a43;
-  --callout-inference: #426a5a;
-  background-image: none;
-}
+/* GH200 publication uses the site's homepage canvas and color tokens. */
 
 body[data-page^="/blog/"] .scroll-progress { display: none; }
 html.js body[data-page^="/blog/"] [data-reveal],
@@ -2856,7 +2839,7 @@ body[data-page^="/blog/"] .page-heading[data-reveal].is-visible {
 }
 
 .blog-series-number {
-  color: #426a5a;
+  color: #594578;
   font-size: 1.1rem;
 }
 
@@ -2908,7 +2891,7 @@ body[data-page^="/blog/"] .page-heading[data-reveal].is-visible {
 }
 
 .blog-kicker {
-  color: #426a5a;
+  color: #594578;
   text-transform: uppercase;
   margin: 0 0 1.5rem;
 }
@@ -3006,7 +2989,7 @@ body[data-page^="/blog/"] .page-heading[data-reveal].is-visible {
   border-radius: 0;
   padding: 0;
   background: none;
-  color: #426a5a;
+  color: #594578;
 }
 
 .note-evidence {
@@ -3023,7 +3006,7 @@ body[data-page^="/blog/"] .page-heading[data-reveal].is-visible {
   display: inline-block;
   min-width: 9rem;
   margin-right: 0.5rem;
-  color: #426a5a;
+  color: #594578;
   font-family: var(--font-mono);
   font-size: 0.76rem;
   text-transform: uppercase;
@@ -3067,13 +3050,13 @@ body[data-page^="/blog/"] .page-heading[data-reveal].is-visible {
 }
 .blog-wait-figure {
   padding: 1.5rem 0 2rem;
-  border-top: 2px solid #9b5a43;
+  border-top: 2px solid #754a94;
   border-bottom: 1px solid var(--border);
 }
-.blog-wait-figure .figure-label { margin: 0; color: #713f30; }
+.blog-wait-figure .figure-label { margin: 0; color: #594578; }
 .wait-number {
   margin: 0.4rem 0;
-  color: #172923;
+  color: var(--text);
   font-family: var(--font-mono);
   font-size: clamp(4rem, 11vw, 8rem);
   line-height: 1.1;
@@ -3096,7 +3079,7 @@ body[data-page^="/blog/"] .page-heading[data-reveal].is-visible {
 .note-related { margin-bottom: 3rem; }
 
 body[data-page^="/blog/"] :focus-visible {
-  outline: 2px solid #8c4f38;
+  outline: 2px solid #594578;
   outline-offset: 3px;
 }
 

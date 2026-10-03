@@ -1,11 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 245" role="img" aria-labelledby="title desc">
   <title id="title">Startup phases and rank-specific tuning records</title><desc id="desc">Backend representation is prepared before graph and KV reservations. A genuine tuning cache needs 42 records for each of two expert-parallel ranks, not a copy with edited keys.</desc>
-  <rect width="780" height="245" fill="#f8f6ef"/>
-  <text x="24" y="35" fill="#25443d" font-size="13" font-family="monospace">CONCEPTUAL PHASES · HISTORICAL PROFILE</text>
-  <line x1="24" y1="55" x2="756" y2="55" stroke="#b9c4bd"/>
-  <g fill="#172923" font-size="16" font-family="sans-serif"><text x="30" y="96">Checkpoint</text><text x="223" y="96">Backend prep</text><text x="506" y="96">Later: graph / KV</text></g>
-  <path d="M120 103 H205 M350 103 H484" stroke="#516c60" stroke-width="2"/>
-  <rect x="30" y="145" width="338" height="38" fill="#dce9df"/><rect x="412" y="145" width="338" height="38" fill="#dce9df"/>
-  <g fill="#172923" font-size="16" font-family="monospace"><text x="47" y="170">EP rank 0 · 42 records</text><text x="429" y="170">EP rank 1 · 42 records</text></g>
-  <text x="30" y="221" fill="#6d3e31" font-size="14" font-family="sans-serif">One rank's cache cannot certify the other rank's tactics.</text>
+  <rect width="780" height="245" fill="#fafafa"/>
+  <text x="24" y="35" fill="#594578" font-size="13" font-family="monospace">CONCEPTUAL PHASES · HISTORICAL PROFILE</text>
+  <line x1="24" y1="55" x2="756" y2="55" stroke="#d5d5dc"/>
+  <g fill="#111111" font-size="16" font-family="sans-serif"><text x="30" y="96">Checkpoint</text><text x="223" y="96">Backend prep</text><text x="506" y="96">Later: graph / KV</text></g>
+  <path d="M120 103 H205 M350 103 H484" stroke="#5f5f66" stroke-width="2"/>
+  <rect x="30" y="145" width="338" height="38" fill="#ece8f7"/><rect x="412" y="145" width="338" height="38" fill="#ece8f7"/>
+  <g fill="#111111" font-size="16" font-family="monospace"><text x="47" y="170">EP rank 0 · 42 records</text><text x="429" y="170">EP rank 1 · 42 records</text></g>
+  <text x="30" y="221" fill="#594578" font-size="14" font-family="sans-serif">One rank's cache cannot certify the other rank's tactics.</text>
 </svg>
