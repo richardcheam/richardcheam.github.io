@@ -1,19 +1,20 @@
 ---
-title: "How I corrected misleading inference benchmarks"
+title: "Benchmark numbers that misled me—and how I corrected them"
 date: 2026-10-03
 category: "evaluation"
-series_order: 4
+series_order: 2
 excerpt: "I reconciled token counts, prompt lengths, cache reuse, and unfinished requests before comparing GH200 serving runs."
 question: "Which counters and workloads made a benchmark number look faster than the serving experience?"
 my_work: "I rechecked token-versus-chunk accounting, prompt lengths, prefix reuse, denominators, and incomplete outcomes."
 result: "One long-input run reported 111.22 output tokens/s and 14,346.87 total tokens/s from the same requests."
 evidence_limit: "Some recovered run families remain separate; the original raw files for one derived comparison were unavailable."
+lesson: "Define token counts, workload, cache state, and observation interval before comparing rates."
 ---
 
 <article class="note-article" markdown="1">
 
 <p><a class="notes-backlink" href="{{ '/blog/' | relative_url }}">Back to Blog</a></p>
-<p class="note-meta">Evaluation &amp; Benchmarking • Field note 04 • {{ page.date | date: "%d %b %Y" }} • 7 min read</p>
+<p class="note-meta">Evaluation &amp; Benchmarking • Field note 02 • {{ page.date | date: "%d %b %Y" }} • 7 min read</p>
 
 {% include blog-at-a-glance.html %}
 
@@ -93,8 +94,8 @@ This discipline does not make a benchmark less impressive. It makes the result r
 
 ## Continue the series
 
-- Previous: [Validating CPU-KV offload under pressure]({{ '/blog/kv-offload-correctness/' | relative_url }})
-- Next: [Making model startup reproducible on GH200]({{ '/blog/startup-artifacts-runtime-contract/' | relative_url }})
+- Previous: [When Linux file cache occupies GPU memory]({{ '/blog/grace-hopper-file-cache/' | relative_url }})
+- Next: [NUMA locality: configuration versus proof]({{ '/blog/gh200-locality-evidence/' | relative_url }})
 
 </div>
 

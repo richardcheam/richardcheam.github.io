@@ -1,5 +1,5 @@
 ---
-title: "Keeping an inference service alive and recoverable"
+title: "Keeping an inference service alive"
 date: 2026-10-03
 category: "inference-engineering"
 series_order: 7
@@ -8,6 +8,7 @@ question: "Who owns inference when workers stop responding but the container rem
 my_work: "I traced process and readiness boundaries and separated recovery behavior from workload admission."
 result: "The parent-monitor pipe closed while the container stayed alive; later controls addressed ownership and pending-work cleanup."
 evidence_limit: "The original signal sender and first exiting process were not established."
+lesson: "Container liveness, model readiness, and workload ownership need separate checks."
 ---
 
 <article class="note-article" markdown="1">
@@ -71,8 +72,8 @@ This is the operational end of the GH200 field notes. Memory placement, correct 
 
 ## Continue the series
 
-- Previous: [What a long-context stress test revealed]({{ '/blog/throughput-versus-usable-latency/' | relative_url }})
-- Start again: [Diagnosing HBM use after model loading]({{ '/blog/grace-hopper-file-cache/' | relative_url }})
+- Previous: [High throughput, minutes of waiting]({{ '/blog/throughput-versus-usable-latency/' | relative_url }})
+- Start again: [When Linux file cache occupies GPU memory]({{ '/blog/grace-hopper-file-cache/' | relative_url }})
 
 </div>
 

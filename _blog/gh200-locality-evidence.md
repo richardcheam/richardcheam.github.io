@@ -1,19 +1,20 @@
 ---
-title: "Testing memory locality on dual GH200"
+title: "NUMA locality: configuration versus proof"
 date: 2026-10-03
 category: "inference-engineering"
-series_order: 2
+series_order: 3
 excerpt: "I mapped the two Grace Hopper locality domains, checked worker placement, and tested NUMA restrictions. The remaining KV-buffer locality claim needs its own measurement."
 question: "Did a local-first CPU-KV policy put the actual buffer pages near the owning GPU?"
 my_work: "I mapped the two Grace Hopper pairs, inspected worker placement, and tested memory-policy boundaries."
 result: "One profile showed about 99.4% and 99.6% worker-side placement on the intended Grace domains."
 evidence_limit: "Those worker totals do not prove KV-buffer residency, transfer locality, or a NUMA-caused speedup."
+lesson: "A local-first policy and worker placement do not prove KV-buffer residency or a NUMA speedup."
 ---
 
 <article class="note-article" markdown="1">
 
 <p><a class="notes-backlink" href="{{ '/blog/' | relative_url }}">Back to Blog</a></p>
-<p class="note-meta">Inference Engineering • Field note 02 • {{ page.date | date: "%d %b %Y" }} • 6 min read</p>
+<p class="note-meta">Inference Engineering • Field note 03 • {{ page.date | date: "%d %b %Y" }} • 6 min read</p>
 
 {% include blog-at-a-glance.html %}
 
@@ -76,8 +77,8 @@ That boundary is useful. It tells the next engineer exactly which measurement wo
 
 ## Continue the series
 
-- Previous: [Diagnosing HBM use after model loading]({{ '/blog/grace-hopper-file-cache/' | relative_url }})
-- Next: [Validating CPU-KV offload under pressure]({{ '/blog/kv-offload-correctness/' | relative_url }})
+- Previous: [Benchmark numbers that misled me—and how I corrected them]({{ '/blog/benchmark-denominators/' | relative_url }})
+- Next: [Making KV offload correct]({{ '/blog/kv-offload-correctness/' | relative_url }})
 - [Inference Engineering project](https://richardcheam.github.io/inference-engineering/)
 
 </div>

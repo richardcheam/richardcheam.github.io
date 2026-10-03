@@ -1,19 +1,20 @@
 ---
-title: "Validating CPU-KV offload under pressure"
+title: "Making KV offload correct"
 date: 2026-10-03
 category: "inference-engineering"
-series_order: 3
+series_order: 4
 excerpt: "I adapted a CPU-KV path, checked reload output and actual movement, and investigated allocator rollback and transfer drain under pressure."
 question: "Could offloaded KV survive eviction and reload under pressure without corrupting allocator state?"
 my_work: "I adapted a CPU-KV path, investigated grouped allocation and idle-state failures, and ran exact-token pressure checks."
 result: "One 128 GiB total CPU-KV profile completed 120/120 requests with 90 stores, 10 loads, and no pending transfers at the end."
 evidence_limit: "These are reported historical profile results; they do not establish a speedup or complete SuperInfer parity."
+lesson: "Correct KV offload requires output consistency, actual movement, allocator rollback, and transfer quiescence."
 ---
 
 <article class="note-article" markdown="1">
 
 <p><a class="notes-backlink" href="{{ '/blog/' | relative_url }}">Back to Blog</a></p>
-<p class="note-meta">Inference Engineering • Field note 03 • {{ page.date | date: "%d %b %Y" }} • 7 min read</p>
+<p class="note-meta">Inference Engineering • Field note 04 • {{ page.date | date: "%d %b %Y" }} • 7 min read</p>
 
 {% include blog-at-a-glance.html %}
 
@@ -67,8 +68,8 @@ This is the practical standard I would carry to another offload design: prove ou
 
 ## Continue the series
 
-- Previous: [Testing memory locality on dual GH200]({{ '/blog/gh200-locality-evidence/' | relative_url }})
-- Next: [How I corrected misleading inference benchmarks]({{ '/blog/benchmark-denominators/' | relative_url }})
+- Previous: [NUMA locality: configuration versus proof]({{ '/blog/gh200-locality-evidence/' | relative_url }})
+- Next: [Why a model fits with one backend and fails with another]({{ '/blog/startup-artifacts-runtime-contract/' | relative_url }})
 
 </div>
 

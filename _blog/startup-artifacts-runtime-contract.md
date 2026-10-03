@@ -1,5 +1,5 @@
 ---
-title: "Making model startup reproducible on GH200"
+title: "Why a model fits with one backend and fails with another"
 date: 2026-10-03
 category: "inference-engineering"
 series_order: 5
@@ -8,6 +8,7 @@ question: "Why did one backend fail before KV allocation, and why did a saved tu
 my_work: "I investigated weight representations and rank-specific autotune persistence in the historical MiMo serving profile."
 result: "The selected path loaded at about 83 GiB per rank; complete tuning persistence yielded 84 records across two ranks."
 evidence_limit: "These are version-specific, report-backed results, not a measured startup speedup or a current upstream recommendation."
+lesson: "Backend representation and rank-complete startup artifacts determine whether a serving profile fits and restarts correctly."
 ---
 
 <article class="note-article" markdown="1">
@@ -63,8 +64,8 @@ I can attribute the historical cache completeness repair and backend selection t
 
 ## Continue the series
 
-- Previous: [How I corrected misleading inference benchmarks]({{ '/blog/benchmark-denominators/' | relative_url }})
-- Next: [What a long-context stress test revealed]({{ '/blog/throughput-versus-usable-latency/' | relative_url }})
+- Previous: [Making KV offload correct]({{ '/blog/kv-offload-correctness/' | relative_url }})
+- Next: [High throughput, minutes of waiting]({{ '/blog/throughput-versus-usable-latency/' | relative_url }})
 
 </div>
 

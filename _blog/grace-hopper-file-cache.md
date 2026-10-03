@@ -1,5 +1,5 @@
 ---
-title: "Diagnosing HBM use after model loading"
+title: "When Linux file cache occupies GPU memory"
 date: 2026-10-03
 category: "inference-engineering"
 series_order: 1
@@ -8,6 +8,7 @@ question: "Why did HBM appear full after the model checkpoint loaded?"
 my_work: "I compared HBM file pages with the engine's KV-capacity check, then tested targeted advice for checkpoint files."
 result: "The failed launch reported −4.43 GiB available for KV; a later early-profile launch reported 118.59 GiB."
 evidence_limit: "This explains one startup capacity failure, not every retained-HBM incident or a general GH200 KV budget."
+lesson: "Distinguish file-backed checkpoint pages from live tensors before diagnosing an HBM shortage."
 ---
 
 <article class="note-article" markdown="1">
@@ -70,8 +71,7 @@ The general lesson from my investigation is a measurement habit, not a claim tha
 
 ## Continue the series
 
-- Next: [Testing memory locality on dual GH200]({{ '/blog/gh200-locality-evidence/' | relative_url }})
-- [How I corrected misleading inference benchmarks]({{ '/blog/benchmark-denominators/' | relative_url }})
+- Next: [Benchmark numbers that misled me—and how I corrected them]({{ '/blog/benchmark-denominators/' | relative_url }})
 - [Inference Engineering project](https://richardcheam.github.io/inference-engineering/)
 
 </div>

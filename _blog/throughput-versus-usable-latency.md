@@ -1,5 +1,5 @@
 ---
-title: "What a long-context stress test revealed"
+title: "High throughput, minutes of waiting"
 date: 2026-10-03
 category: "inference-engineering"
 series_order: 6
@@ -8,6 +8,7 @@ question: "Could a server keep completing long requests while interactive latenc
 my_work: "I measured a sustained long-context soak and reconciled KV capacity, waiting requests, throughput, and outcomes."
 result: "The archive recorded 2,252 completed successes and 1,267.90 output tokens/s, with 550.876 s median first-token wait."
 evidence_limit: "Thirty-eight in-flight outcomes remained unknown; reported latency covers completed requests only."
+lesson: "Aggregate throughput and completion counts must be reported alongside first-token latency and unresolved outcomes."
 ---
 
 <article class="note-article" markdown="1">
@@ -60,8 +61,8 @@ The practical next step would be to measure queue time and prefill separately, t
 
 ## Continue the series
 
-- Previous: [Making model startup reproducible on GH200]({{ '/blog/startup-artifacts-runtime-contract/' | relative_url }})
-- Next: [Keeping an inference service alive and recoverable]({{ '/blog/inference-workload-lifecycle/' | relative_url }})
+- Previous: [Why a model fits with one backend and fails with another]({{ '/blog/startup-artifacts-runtime-contract/' | relative_url }})
+- Next: [Keeping an inference service alive]({{ '/blog/inference-workload-lifecycle/' | relative_url }})
 
 </div>
 

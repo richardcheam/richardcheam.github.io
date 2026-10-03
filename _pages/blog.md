@@ -8,12 +8,12 @@ permalink: /blog/
 
 <section class="page-intro" data-reveal>
   <p class="section-eyebrow">My engineering work · Seven field notes</p>
-  <h2>Building and testing LLM inference on dual GH200</h2>
+  <h2>Inference Engineering: Lessons from Dual GH200</h2>
   <p class="section-description">
     I deployed, adapted, debugged, and benchmarked large-model serving on a dual-GH200 system. These posts explain the problems I investigated, the results I measured, and where the evidence stops.
   </p>
   <p class="section-description">
-    Start with the memory investigation, then follow the series through KV offload, benchmarking, startup, long-context load, and service recovery. Each post opens with a short summary before the technical detail.
+    New to the series? Start with <a href="{{ '/blog/grace-hopper-file-cache/' | relative_url }}">1. Linux file cache and GPU memory</a>, <a href="{{ '/blog/benchmark-denominators/' | relative_url }}">2. misleading benchmark numbers</a>, and <a href="{{ '/blog/throughput-versus-usable-latency/' | relative_url }}">6. throughput and waiting time</a>. Then explore the deeper implementation notes in order below.
   </p>
 </section>
 
