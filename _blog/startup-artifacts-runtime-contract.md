@@ -27,6 +27,8 @@ The historical MiMo v2.6 backend investigation recorded three distinct outcomes 
 
 These are report-backed observations from a pinned historical image, not a current backend leaderboard. They also do not isolate the gain from a single flag. The practical diagnostic is to record *where* the allocation fails—load, packing, profiling, graph capture, or KV reservation—before adjusting a budget for a later phase.
 
+A separate GLM quantized-and-speculative track reinforced the boundary between weights and request state. Its planning record reported about **338,624 GPU KV tokens** under one tensor-parallel configuration: fitting quantized weights did not remove the KV budget for long requests. The exact model revision, engine build, and output/request counts were not recovered well enough to make its recalled throughput figure a benchmark result, so I use this track only for the capacity lesson.
+
 ## A rank-specific cache must be complete
 
 The next problem involved expert-parallel autotuning. A persisted cache with **42** genuine records covered one rank, but a second rank needed its own keys. Rank zero could find a tuned entry while rank one missed or fell back. The local workaround generated and persisted genuine records for both ranks—**84 total, 42 per rank**—before a cache-only real startup. The report recorded cache hits on both ranks in that historical profile.
