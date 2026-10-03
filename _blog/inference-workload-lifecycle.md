@@ -1,15 +1,21 @@
 ---
-title: "An inference workload needs an explicit lifecycle owner"
+title: "Keeping an inference service alive and recoverable"
 date: 2026-10-03
 category: "inference-engineering"
 series_order: 7
-excerpt: "Container health, inference readiness, and route readiness can disagree. A serving system needs one clear owner for startup, shutdown, recovery, and pending work."
+excerpt: "I investigated why workers stopped while their container stayed alive, then separated process ownership, model readiness, and workload admission."
+question: "Who owns inference when workers stop responding but the container remains alive?"
+my_work: "I traced process and readiness boundaries and separated recovery behavior from workload admission."
+result: "The parent-monitor pipe closed while the container stayed alive; later controls addressed ownership and pending-work cleanup."
+evidence_limit: "The original signal sender and first exiting process were not established."
 ---
 
 <article class="note-article" markdown="1">
 
 <p><a class="notes-backlink" href="{{ '/blog/' | relative_url }}">Back to Blog</a></p>
 <p class="note-meta">Inference Engineering • Field note 07 • {{ page.date | date: "%d %b %Y" }} • 6 min read</p>
+
+{% include blog-at-a-glance.html %}
 
 One recurring serving investigation began with an uncomfortable mismatch: inference workers stopped responding while their container remained alive. A worker log showed the parent-monitor pipe closing, but the surviving records did not identify the first process to exit or the sender of any signal. Calling it a crash, an OOM, or a scheduled termination would have been more certain than the evidence allowed.
 
@@ -65,8 +71,8 @@ This is the operational end of the GH200 field notes. Memory placement, correct 
 
 ## Continue the series
 
-- Previous: [A server can keep working while answers become unusably slow]({{ '/blog/throughput-versus-usable-latency/' | relative_url }})
-- Start again: [When Linux file cache occupies GPU memory on Grace Hopper]({{ '/blog/grace-hopper-file-cache/' | relative_url }})
+- Previous: [What a long-context stress test revealed]({{ '/blog/throughput-versus-usable-latency/' | relative_url }})
+- Start again: [Diagnosing HBM use after model loading]({{ '/blog/grace-hopper-file-cache/' | relative_url }})
 
 </div>
 

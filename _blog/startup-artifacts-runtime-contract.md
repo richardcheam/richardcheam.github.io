@@ -1,15 +1,21 @@
 ---
-title: "Startup artifacts are part of the runtime contract"
+title: "Making model startup reproducible on GH200"
 date: 2026-10-03
 category: "inference-engineering"
 series_order: 5
-excerpt: "A model can fail before KV allocation, and a persisted autotune cache can be incomplete for one rank. Startup optimization has to preserve the serving profile."
+excerpt: "I compared weight-backend footprints and fixed a rank-incomplete autotune cache so a historical serving profile could start with validated artifacts."
+question: "Why did one backend fail before KV allocation, and why did a saved tuning cache miss a rank?"
+my_work: "I investigated weight representations and rank-specific autotune persistence in the historical MiMo serving profile."
+result: "The selected path loaded at about 83 GiB per rank; complete tuning persistence yielded 84 records across two ranks."
+evidence_limit: "These are version-specific, report-backed results, not a measured startup speedup or a current upstream recommendation."
 ---
 
 <article class="note-article" markdown="1">
 
 <p><a class="notes-backlink" href="{{ '/blog/' | relative_url }}">Back to Blog</a></p>
 <p class="note-meta">Inference Engineering • Field note 05 • {{ page.date | date: "%d %b %Y" }} • 7 min read</p>
+
+{% include blog-at-a-glance.html %}
 
 On GH200, a quantized checkpoint that looked small enough on disk still failed while its serving backend prepared weights. In another startup path, a cache existed but lacked the tuned records for one expert-parallel rank. Both incidents changed how I think about “startup”: **the files, generated artifacts, and chosen backend representation are part of the runtime profile, not a one-time prelude.**
 
@@ -57,8 +63,8 @@ I can attribute the historical cache completeness repair and backend selection t
 
 ## Continue the series
 
-- Previous: [Benchmark numbers need a denominator and a workload]({{ '/blog/benchmark-denominators/' | relative_url }})
-- Next: [A server can keep working while answers become unusably slow]({{ '/blog/throughput-versus-usable-latency/' | relative_url }})
+- Previous: [How I corrected misleading inference benchmarks]({{ '/blog/benchmark-denominators/' | relative_url }})
+- Next: [What a long-context stress test revealed]({{ '/blog/throughput-versus-usable-latency/' | relative_url }})
 
 </div>
 

@@ -1,15 +1,21 @@
 ---
-title: "Locality is a claim you must measure"
+title: "Testing memory locality on dual GH200"
 date: 2026-10-03
 category: "inference-engineering"
 series_order: 2
-excerpt: "On a multi-GH200 system, a local-first policy describes intent. Proving where KV buffers live, which path accesses them, and whether locality improves performance takes separate evidence."
+excerpt: "I mapped the two Grace Hopper locality domains, checked worker placement, and tested NUMA restrictions. The remaining KV-buffer locality claim needs its own measurement."
+question: "Did a local-first CPU-KV policy put the actual buffer pages near the owning GPU?"
+my_work: "I mapped the two Grace Hopper pairs, inspected worker placement, and tested memory-policy boundaries."
+result: "One profile showed about 99.4% and 99.6% worker-side placement on the intended Grace domains."
+evidence_limit: "Those worker totals do not prove KV-buffer residency, transfer locality, or a NUMA-caused speedup."
 ---
 
 <article class="note-article" markdown="1">
 
 <p><a class="notes-backlink" href="{{ '/blog/' | relative_url }}">Back to Blog</a></p>
 <p class="note-meta">Inference Engineering • Field note 02 • {{ page.date | date: "%d %b %Y" }} • 6 min read</p>
+
+{% include blog-at-a-glance.html %}
 
 When I adapted a CPU-side KV offload path for a system with two Grace Hopper pairs, “put each GPU's buffers near its own Grace CPU” sounded like a complete design. It was only a policy. The harder question was whether the intended pages actually landed there and whether the GPU's real transfer path used them.
 
@@ -70,8 +76,8 @@ That boundary is useful. It tells the next engineer exactly which measurement wo
 
 ## Continue the series
 
-- Previous: [When Linux file cache occupies GPU memory on Grace Hopper]({{ '/blog/grace-hopper-file-cache/' | relative_url }})
-- Next: [Correct KV offload needs more than a successful response]({{ '/blog/kv-offload-correctness/' | relative_url }})
+- Previous: [Diagnosing HBM use after model loading]({{ '/blog/grace-hopper-file-cache/' | relative_url }})
+- Next: [Validating CPU-KV offload under pressure]({{ '/blog/kv-offload-correctness/' | relative_url }})
 - [Inference Engineering project](https://richardcheam.github.io/inference-engineering/)
 
 </div>

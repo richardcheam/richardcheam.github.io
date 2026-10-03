@@ -7,18 +7,60 @@ permalink: /blog/
 {% assign sorted_posts = site.blog | sort: "series_order" %}
 
 <section class="page-intro" data-reveal>
-  <p class="section-eyebrow">Blog</p>
-  <h2>Field notes on inference engineering</h2>
+  <p class="section-eyebrow">My engineering work · Seven field notes</p>
+  <h2>Building and testing LLM inference on dual GH200</h2>
   <p class="section-description">
-    Seven Grace Hopper field notes from my inference engineering work: memory placement, KV correctness, benchmark evidence, startup, sustained load, and service lifecycle. Read them in order, or choose a topic below.
+    I deployed, adapted, debugged, and benchmarked large-model serving on a dual-GH200 system. These posts explain the problems I investigated, the results I measured, and where the evidence stops.
+  </p>
+  <p class="section-description">
+    Start with the memory investigation, then follow the series through KV offload, benchmarking, startup, long-context load, and service recovery. Each post opens with a short summary before the technical detail.
   </p>
 </section>
 
 <section class="section-block" data-reveal>
   <header class="section-head">
-    <p class="section-eyebrow">Categories</p>
-    <h2>Topic map</h2>
-    <p class="section-description">Blog posts are grouped by topic for quick review.</p>
+    <p class="section-eyebrow">The GH200 series</p>
+    <h2>Read the field notes</h2>
+    <p class="section-description">Each note starts with a question from the work and the result that changed my understanding.</p>
+  </header>
+
+  {% if sorted_posts.size > 0 %}
+    <div class="filter-wrap" data-reveal>
+      <input class="filter-input" id="blog-search-input" data-filter-input type="search" placeholder="Find a field note (e.g. memory, startup, latency)" aria-label="Search field notes">
+      <p class="filter-empty" data-filter-empty hidden>No blog posts match that keyword.</p>
+    </div>
+
+    <section class="blog-list" aria-label="Blog entries">
+      {% for post in sorted_posts %}
+        {% assign post_key = post.category | default: "post" | slugify %}
+        {% assign category_label = "Blog Post" %}
+        {% for cat in site.data.blog_categories %}
+          {% if cat.key == post_key %}
+            {% assign category_label = cat.label %}
+          {% endif %}
+        {% endfor %}
+
+        <a class="blog-card" data-reveal data-filter-card data-filter-text="{{ post.title | downcase }} {{ category_label | downcase }} {{ post_key }} {{ post_key | replace: '-', ' ' }} {{ post.excerpt | strip_html | downcase }} {{ post.question | downcase }} {{ post.result | downcase }}" href="{{ post.url | relative_url }}">
+          <p class="card-meta">{% if post.series_order %}Field note {{ post.series_order }} · {% endif %}{{ category_label }}{% if post.date %} · {{ post.date | date: "%d %b %Y" }}{% endif %}</p>
+          <h3 class="card-title">{{ post.title }}</h3>
+          <p class="card-summary"><strong>Question:</strong> {{ post.question }}</p>
+          <p class="card-summary"><strong>Result:</strong> {{ post.result }}</p>
+          <span class="inline-link">Read more</span>
+        </a>
+      {% endfor %}
+    </section>
+  {% else %}
+    <article class="premium-card" data-reveal>
+      <h3 class="card-title">No blog posts yet</h3>
+      <p class="card-summary">Add a markdown file in <code>_blog/</code> to publish a new post.</p>
+    </article>
+  {% endif %}
+</section>
+
+<section class="section-block" data-reveal>
+  <header class="section-head">
+    <p class="section-eyebrow">Browse by topic</p>
+    <h2>Topics in this series</h2>
   </header>
   <div class="cards-grid">
     {% for cat in site.data.blog_categories %}
@@ -39,43 +81,4 @@ permalink: /blog/
       {% endif %}
     {% endfor %}
   </div>
-</section>
-
-<section class="section-block" data-reveal>
-  <header class="section-head">
-    <p class="section-eyebrow">Library</p>
-    <h2>Browse blog posts</h2>
-    <p class="section-description">Search by topic, category, or keyword.</p>
-  </header>
-
-  {% if sorted_posts.size > 0 %}
-    <div class="filter-wrap" data-reveal>
-      <input class="filter-input" id="blog-search-input" data-filter-input type="search" placeholder="Search blog posts (e.g. memory, throughput, benchmarking)">
-      <p class="filter-empty" data-filter-empty hidden>No blog posts match that keyword.</p>
-    </div>
-
-    <section class="blog-list" aria-label="Blog entries">
-      {% for post in sorted_posts %}
-        {% assign post_key = post.category | default: "post" | slugify %}
-        {% assign category_label = "Blog Post" %}
-        {% for cat in site.data.blog_categories %}
-          {% if cat.key == post_key %}
-            {% assign category_label = cat.label %}
-          {% endif %}
-        {% endfor %}
-
-        <a class="blog-card" data-reveal data-filter-card data-filter-text="{{ post.title | downcase }} {{ category_label | downcase }} {{ post_key }} {{ post_key | replace: '-', ' ' }} {{ post.excerpt | strip_html | downcase }}" href="{{ post.url | relative_url }}">
-          <p class="card-meta">{% if post.series_order %}Field note {{ post.series_order }} · {% endif %}{{ category_label }}{% if post.date %} · {{ post.date | date: "%d %b %Y" }}{% endif %}</p>
-          <h3 class="card-title">{{ post.title }}</h3>
-          <p class="card-summary">{{ post.excerpt | strip_html | truncate: 180 }}</p>
-          <span class="inline-link">Read more</span>
-        </a>
-      {% endfor %}
-    </section>
-  {% else %}
-    <article class="premium-card" data-reveal>
-      <h3 class="card-title">No blog posts yet</h3>
-      <p class="card-summary">Add a markdown file in <code>_blog/</code> to publish a new post.</p>
-    </article>
-  {% endif %}
 </section>

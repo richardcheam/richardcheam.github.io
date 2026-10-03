@@ -1,15 +1,21 @@
 ---
-title: "Benchmark numbers need a denominator and a workload"
+title: "How I corrected misleading inference benchmarks"
 date: 2026-10-03
 category: "evaluation"
 series_order: 4
-excerpt: "A token rate is only meaningful when the counted tokens, elapsed interval, request mix, cache state, and unfinished work are defined."
+excerpt: "I reconciled token counts, prompt lengths, cache reuse, and unfinished requests before comparing GH200 serving runs."
+question: "Which counters and workloads made a benchmark number look faster than the serving experience?"
+my_work: "I rechecked token-versus-chunk accounting, prompt lengths, prefix reuse, denominators, and incomplete outcomes."
+result: "One long-input run reported 111.22 output tokens/s and 14,346.87 total tokens/s from the same requests."
+evidence_limit: "Some recovered run families remain separate; the original raw files for one derived comparison were unavailable."
 ---
 
 <article class="note-article" markdown="1">
 
 <p><a class="notes-backlink" href="{{ '/blog/' | relative_url }}">Back to Blog</a></p>
 <p class="note-meta">Evaluation &amp; Benchmarking • Field note 04 • {{ page.date | date: "%d %b %Y" }} • 7 min read</p>
+
+{% include blog-at-a-glance.html %}
 
 An inference benchmark can produce a precise number and still answer the wrong question. I learned to read every “tokens per second” headline as an unfinished sentence: **which tokens, over which time interval, for which requests?**
 
@@ -87,8 +93,8 @@ This discipline does not make a benchmark less impressive. It makes the result r
 
 ## Continue the series
 
-- Previous: [Correct KV offload needs more than a successful response]({{ '/blog/kv-offload-correctness/' | relative_url }})
-- Next: [Startup artifacts are part of the runtime contract]({{ '/blog/startup-artifacts-runtime-contract/' | relative_url }})
+- Previous: [Validating CPU-KV offload under pressure]({{ '/blog/kv-offload-correctness/' | relative_url }})
+- Next: [Making model startup reproducible on GH200]({{ '/blog/startup-artifacts-runtime-contract/' | relative_url }})
 
 </div>
 

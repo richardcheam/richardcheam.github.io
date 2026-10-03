@@ -1,15 +1,21 @@
 ---
-title: "A server can keep working while answers become unusably slow"
+title: "What a long-context stress test revealed"
 date: 2026-10-03
 category: "inference-engineering"
 series_order: 6
-excerpt: "A long-context GH200 soak sustained output and completed thousands of requests, yet median first-token wait reached minutes. Capacity and user experience had different limits."
+excerpt: "I stress-tested long-context MiMo serving: 2,252 requests completed, but the median first-token wait for those completions exceeded nine minutes."
+question: "Could a server keep completing long requests while interactive latency became unusable?"
+my_work: "I measured a sustained long-context soak and reconciled KV capacity, waiting requests, throughput, and outcomes."
+result: "The archive recorded 2,252 completed successes and 1,267.90 output tokens/s, with 550.876 s median first-token wait."
+evidence_limit: "Thirty-eight in-flight outcomes remained unknown; reported latency covers completed requests only."
 ---
 
 <article class="note-article" markdown="1">
 
 <p><a class="notes-backlink" href="{{ '/blog/' | relative_url }}">Back to Blog</a></p>
 <p class="note-meta">Inference Engineering • Field note 06 • {{ page.date | date: "%d %b %Y" }} • 8 min read</p>
+
+{% include blog-at-a-glance.html %}
 
 The sharpest lesson from my GH200 serving tests was that a server can keep producing tokens while becoming unusably slow for an interactive caller. In an archived long-context soak, the service recorded **2,252 completed successes** and **1,267.90 output tokens/s**, yet the **median time to first token for completed requests was 550.876 seconds**—more than nine minutes. A throughput headline alone would have hidden the queue.
 
@@ -54,8 +60,8 @@ The practical next step would be to measure queue time and prefill separately, t
 
 ## Continue the series
 
-- Previous: [Startup artifacts are part of the runtime contract]({{ '/blog/startup-artifacts-runtime-contract/' | relative_url }})
-- Next: [An inference workload needs an explicit lifecycle owner]({{ '/blog/inference-workload-lifecycle/' | relative_url }})
+- Previous: [Making model startup reproducible on GH200]({{ '/blog/startup-artifacts-runtime-contract/' | relative_url }})
+- Next: [Keeping an inference service alive and recoverable]({{ '/blog/inference-workload-lifecycle/' | relative_url }})
 
 </div>
 

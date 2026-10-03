@@ -1,15 +1,21 @@
 ---
-title: "Correct KV offload needs more than a successful response"
+title: "Validating CPU-KV offload under pressure"
 date: 2026-10-03
 category: "inference-engineering"
 series_order: 3
-excerpt: "Moving attention state between HBM and Grace memory requires correct ownership, rollback, reload, and transfer completion—not just a client response."
+excerpt: "I adapted a CPU-KV path, checked reload output and actual movement, and investigated allocator rollback and transfer drain under pressure."
+question: "Could offloaded KV survive eviction and reload under pressure without corrupting allocator state?"
+my_work: "I adapted a CPU-KV path, investigated grouped allocation and idle-state failures, and ran exact-token pressure checks."
+result: "One 128 GiB total CPU-KV profile completed 120/120 requests with 90 stores, 10 loads, and no pending transfers at the end."
+evidence_limit: "These are reported historical profile results; they do not establish a speedup or complete SuperInfer parity."
 ---
 
 <article class="note-article" markdown="1">
 
 <p><a class="notes-backlink" href="{{ '/blog/' | relative_url }}">Back to Blog</a></p>
 <p class="note-meta">Inference Engineering • Field note 03 • {{ page.date | date: "%d %b %Y" }} • 7 min read</p>
+
+{% include blog-at-a-glance.html %}
 
 In my GH200 work, adding CPU capacity for KV state was only the beginning. A successful answer could conceal a broken allocation ledger, a reload path that was never exercised, or an asynchronous device-to-host copy still running after the last response. The result I wanted was stronger: **correct output under actual KV movement, with no pending work or corrupted ownership at the end.**
 
@@ -61,8 +67,8 @@ This is the practical standard I would carry to another offload design: prove ou
 
 ## Continue the series
 
-- Previous: [Locality is a claim you must measure]({{ '/blog/gh200-locality-evidence/' | relative_url }})
-- Next: [Benchmark numbers need a denominator and a workload]({{ '/blog/benchmark-denominators/' | relative_url }})
+- Previous: [Testing memory locality on dual GH200]({{ '/blog/gh200-locality-evidence/' | relative_url }})
+- Next: [How I corrected misleading inference benchmarks]({{ '/blog/benchmark-denominators/' | relative_url }})
 
 </div>
 

@@ -1,15 +1,21 @@
 ---
-title: "When Linux file cache occupies GPU memory on Grace Hopper"
+title: "Diagnosing HBM use after model loading"
 date: 2026-10-03
 category: "inference-engineering"
 series_order: 1
-excerpt: "A model can be loaded while its checkpoint still occupies file cache. On some Grace Hopper configurations, those pages compete with GPU memory capacity."
+excerpt: "I traced a failed GH200 model startup to checkpoint file pages occupying HBM and measured the KV capacity recovered after targeted cache advice."
+question: "Why did HBM appear full after the model checkpoint loaded?"
+my_work: "I compared HBM file pages with the engine's KV-capacity check, then tested targeted advice for checkpoint files."
+result: "The failed launch reported −4.43 GiB available for KV; a later early-profile launch reported 118.59 GiB."
+evidence_limit: "This explains one startup capacity failure, not every retained-HBM incident or a general GH200 KV budget."
 ---
 
 <article class="note-article" markdown="1">
 
 <p><a class="notes-backlink" href="{{ '/blog/' | relative_url }}">Back to Blog</a></p>
 <p class="note-meta">Inference Engineering • Field note 01 • {{ page.date | date: "%d %b %Y" }} • 6 min read</p>
+
+{% include blog-at-a-glance.html %}
 
 While investigating a model server that appeared short of GPU memory after loading its checkpoint, I initially treated every occupied byte as part of the live model. The useful question was narrower: **what owned each page, what backed it, and where was it physically resident?**
 
@@ -64,8 +70,8 @@ The general lesson from my investigation is a measurement habit, not a claim tha
 
 ## Continue the series
 
-- Next: [Locality is a claim you must measure]({{ '/blog/gh200-locality-evidence/' | relative_url }})
-- [Benchmark numbers need a denominator and a workload]({{ '/blog/benchmark-denominators/' | relative_url }})
+- Next: [Testing memory locality on dual GH200]({{ '/blog/gh200-locality-evidence/' | relative_url }})
+- [How I corrected misleading inference benchmarks]({{ '/blog/benchmark-denominators/' | relative_url }})
 - [Inference Engineering project](https://richardcheam.github.io/inference-engineering/)
 
 </div>
