@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% if page.url == '/' %}{{ site.title }}{% else %}{{ page.title }} | {{ site.title }}{% endif %}</title>
     <meta name="description" content="{{ page.excerpt | default: site.description | strip_html | strip_newlines | escape }}">
-    <meta name="theme-color" content="#ffffff">
+    <meta name="theme-color" content="{% if page.url contains '/blog/' %}#f8f6ef{% else %}#ffffff{% endif %}">
     <link rel="stylesheet" href="{{ '/assets/css/main.css' | relative_url }}">
     {% if page.math %}
       <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.18.9/dist/katex.min.css">
@@ -36,13 +36,14 @@
           var introScreen = document.getElementById("intro-screen");
           var body = document.body;
           var isHome = body.getAttribute("data-page") === "/";
+          var isBlog = (body.getAttribute("data-page") || "").indexOf("/blog/") === 0;
 
           var themeOrder = ["light"];
           var themeNames = {
             light: "Light"
           };
           var themeMetaColors = {
-            light: "#ffffff"
+            light: isBlog ? "#f8f6ef" : "#ffffff"
           };
 
           function getTheme() {
@@ -540,6 +541,63 @@
             applyFilter(initialFilter);
           }
 
+          var blogContents = document.querySelector("[data-blog-contents]");
+          var blogArticle = document.querySelector(".note-article");
+          if (blogContents && blogArticle) {
+            var contentsList = blogContents.querySelector("[data-blog-contents-list]");
+            var contentsTrigger = blogContents.querySelector("summary");
+            var contentsClose = blogContents.querySelector("[data-blog-contents-close]");
+            var articleHeadings = Array.prototype.slice.call(blogArticle.querySelectorAll("h2")).filter(function (heading) {
+              return !heading.closest(".note-related");
+            });
+            articleHeadings.forEach(function (heading, index) {
+              if (!heading.id) heading.id = "section-" + (index + 1);
+              var item = document.createElement("li");
+              var link = document.createElement("a");
+              link.href = "#" + heading.id;
+              link.textContent = heading.textContent;
+              link.addEventListener("click", function () {
+                blogContents.open = false;
+                heading.setAttribute("tabindex", "-1");
+                window.setTimeout(function () { heading.focus({ preventScroll: true }); }, 0);
+              });
+              item.appendChild(link);
+              contentsList.appendChild(item);
+            });
+            blogContents.hidden = articleHeadings.length === 0;
+            contentsClose.addEventListener("click", function () {
+              blogContents.open = false;
+              contentsTrigger.focus();
+            });
+            document.addEventListener("keydown", function (event) {
+              if (event.key === "Escape" && blogContents.open) {
+                blogContents.open = false;
+                contentsTrigger.focus();
+              }
+            });
+            blogContents.addEventListener("focusout", function (event) {
+              if (blogContents.open && event.relatedTarget && !blogContents.contains(event.relatedTarget)) {
+                blogContents.open = false;
+              }
+            });
+            document.addEventListener("click", function (event) {
+              if (blogContents.open && !blogContents.contains(event.target)) blogContents.open = false;
+            });
+            function syncScrollableArtifacts() {
+              Array.prototype.forEach.call(blogArticle.querySelectorAll("table, pre"), function (artifact) {
+                if (artifact.scrollWidth > artifact.clientWidth + 1) {
+                  artifact.tabIndex = 0;
+                  artifact.setAttribute("aria-label", artifact.tagName === "TABLE" ? "Scrollable evidence table" : "Scrollable code excerpt");
+                } else {
+                  artifact.removeAttribute("tabindex");
+                  artifact.removeAttribute("aria-label");
+                }
+              });
+            }
+            syncScrollableArtifacts();
+            window.addEventListener("resize", syncScrollableArtifacts);
+          }
+
           function finishIntro() {
             body.classList.remove("intro-pending");
             body.classList.remove("intro-started");
@@ -683,8 +741,16 @@
 
     <main class="site-main">
       {% if page.url != '/' and page.title and page.layout != 'paper-review' %}
-        <header class="page-heading" data-reveal>
+        <header class="page-heading{% if page.collection == 'blog' %} blog-heading{% endif %}" data-reveal>
+          {% if page.collection == 'blog' %}<p class="blog-kicker"><a href="{{ '/blog/' | relative_url }}">Inference Engineering: Lessons from Dual GH200</a> <span aria-hidden="true">/</span> {{ page.series_order | prepend: '0' }}</p>{% endif %}
           <h1>{{ page.title }}</h1>
+          {% if page.collection == 'blog' %}
+            <p class="blog-byline">Field note {{ page.series_order }} <span aria-hidden="true">·</span> {{ page.date | date: '%d %b %Y' }} <span aria-hidden="true">·</span> {{ page.read_time | default: '7 min' }} read</p>
+            <details class="blog-contents" data-blog-contents hidden>
+              <summary>Contents</summary>
+              <nav aria-label="In this article"><button type="button" class="blog-contents-close" data-blog-contents-close>Close contents</button><p class="figure-label">In this article</p><ol data-blog-contents-list></ol></nav>
+            </details>
+          {% endif %}
         </header>
       {% endif %}
       {{ content }}

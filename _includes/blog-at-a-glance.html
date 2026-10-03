@@ -1,10 +1,4 @@
-<section class="note-glance" aria-label="At a glance">
-  <p class="section-eyebrow">At a glance</p>
-  <dl>
-    <div><dt>Question</dt><dd>{{ page.question | escape }}</dd></div>
-    <div><dt>My work</dt><dd>{{ page.my_work | escape }}</dd></div>
-    <div><dt>Result</dt><dd>{{ page.result | escape }}</dd></div>
-    <div><dt>Lesson</dt><dd>{{ page.lesson | escape }}</dd></div>
-    <div><dt>Evidence limit</dt><dd>{{ page.evidence_limit | escape }}</dd></div>
-  </dl>
-</section>
+<aside class="note-evidence" aria-label="Reading guide">
+  <p><strong>The lesson</strong> {{ page.lesson | escape }}</p>
+  <p><strong>Evidence boundary</strong> {{ page.evidence_limit | escape }}</p>
+</aside>

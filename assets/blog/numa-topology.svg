@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 295" role="img" aria-labelledby="title desc">
+  <title id="title">The two Grace Hopper locality pairs</title><desc id="desc">Each Grace memory domain is paired with a Hopper GPU and its HBM. Worker execution, allocation preference and actual KV page residency are different observations.</desc>
+  <rect width="780" height="295" fill="#f8f6ef"/>
+  <text x="24" y="35" fill="#25443d" font-size="13" font-family="monospace">CONCEPTUAL TOPOLOGY · TWO PAIRS</text>
+  <line x1="24" y1="54" x2="756" y2="54" stroke="#b9c4bd"/>
+  <g fill="none" stroke="#516c60" stroke-width="2"><rect x="30" y="80" width="335" height="128"/><rect x="415" y="80" width="335" height="128"/><line x1="192" y1="122" x2="220" y2="122"/><line x1="577" y1="122" x2="605" y2="122"/></g>
+  <g fill="#172923" font-size="19" font-family="sans-serif"><text x="50" y="130">Grace 0</text><text x="233" y="130">Hopper 0</text><text x="435" y="130">Grace 1</text><text x="618" y="130">Hopper 1</text></g>
+  <g fill="#516c60" font-size="13" font-family="monospace"><text x="50" y="162">CPU + host RAM</text><text x="233" y="162">HBM</text><text x="435" y="162">CPU + host RAM</text><text x="618" y="162">HBM</text></g>
+  <text x="30" y="250" fill="#6d3e31" font-size="16" font-family="sans-serif">Configured placement ≠ measured residency or transfer path</text>
+  <text x="30" y="273" fill="#516c60" font-size="13" font-family="sans-serif">Pairing is documented; KV-buffer page locations and path were not established.</text>
+</svg>

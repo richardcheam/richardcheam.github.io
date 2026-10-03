@@ -1,7 +1,8 @@
 ---
-title: "Keeping an inference service alive"
+title: "When the container stays alive but inference stops"
 date: 2026-10-03
 category: "inference-engineering"
+read_time: "4 min"
 series_order: 7
 excerpt: "I investigated why workers stopped while their container stayed alive, then separated process ownership, model readiness, and workload admission."
 question: "Who owns inference when workers stop responding but the container remains alive?"
@@ -13,37 +14,28 @@ lesson: "Container liveness, model readiness, and workload ownership need separa
 
 <article class="note-article" markdown="1">
 
-<p><a class="notes-backlink" href="{{ '/blog/' | relative_url }}">Back to Blog</a></p>
-<p class="note-meta">Inference Engineering • Field note 07 • {{ page.date | date: "%d %b %Y" }} • 6 min read</p>
+Inference workers stopped responding while their container remained alive. A worker log showed the parent-monitor pipe closing, but the surviving records did not identify the first process to exit or any signal sender. The incident showed why container liveness was an incomplete measure of model service.
+
+<figure class="blog-figure blog-figure--wide" tabindex="0">
+  <img src="{{ '/assets/blog/service-lifecycle.svg' | relative_url }}" alt="Observed state: container alive, inference workers unresponsive, parent-monitor pipe closed. The first exiting process and cause remain unknown." loading="lazy">
+  <figcaption><strong>Figure 1 · What the surviving record establishes.</strong> Reconstructed set of observations, not a precise timestamped trace. The ordering and cause of the underlying exits remain unresolved. Source: canonical pack, lifecycle incident / SRC-11.</figcaption>
+</figure>
 
 {% include blog-at-a-glance.html %}
-
-One recurring serving investigation began with an uncomfortable mismatch: inference workers stopped responding while their container remained alive. A worker log showed the parent-monitor pipe closing, but the surviving records did not identify the first process to exit or the sender of any signal. Calling it a crash, an OOM, or a scheduled termination would have been more certain than the evidence allowed.
 
 The useful engineering result was a clearer model of ownership. A container, launcher, API process, engine workers, and request gateway can each have a different lifetime and health signal. If no one component owns the full inference workload, a green container can coexist with an unavailable model.
 
 ## Draw the process boundary before diagnosing the exit
 
-In the historical case, the container's continued existence ruled out a simple whole-container exit. Parent-pipe EOF supported a narrower observation: the worker lost its parent connection or the pipe closed. It did not reveal *why*. The runbook compared clocks, process ancestry, and available historical events; it proposed prospective signal and exit tracing because retrospective records were insufficient.
+In the historical case, the container's continued existence ruled out a simple whole-container exit. Parent-pipe end-of-file (EOF) supported a narrower observation: the worker lost its parent connection or the pipe closed. It did not reveal *why*. The runbook compared clocks, process ancestry, and available historical events; it proposed prospective signal and exit tracing because retrospective records were insufficient.
 
-```text
-container or supervisor
-        │ owns
-        ▼
-launcher / API parent
-        │ owns
-        ▼
-engine and GPU workers
-        │ serve
-        ▼
-model requests and pending transfers
-```
+The ownership chain was container or supervisor → launcher and API parent → engine and GPU workers → requests and pending transfers. Each edge needed a start, exit, and recovery owner. This is a conceptual chain, not the private deployment layout.
 
-That conceptual tree is not the private deployment layout. Its purpose is to ask, at each edge, who starts the child, notices it exited, stops its descendants, and decides whether to restart it. A detached process can fail without changing the status of the container's main process. Recovery that watches only the outermost level will miss that state.
+A detached process can fail without changing the status of the container's main process. Recovery that watches only the outermost level will miss that state. The later supervision and cleanup measures addressed detection and recovery; they do not establish the trigger of the original shutdown.
 
 ## Readiness must name what is ready
 
-An open HTTP port establishes that something answers HTTP. It does not prove the intended model loaded, its workers are healthy, or a request through the intended route can complete. Similarly, a gateway accepting an identity token establishes neither authorization for every route nor spare capacity in the backend.
+An open HTTP port establishes that something answers HTTP. It does not prove the intended model loaded, its workers are healthy, or a request through the intended route can complete. A front end accepting a request also does not establish spare capacity in the serving engine.
 
 The separation I use is:
 

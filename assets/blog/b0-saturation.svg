@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 360" role="img" aria-labelledby="title desc">
+  <title id="title">B0 output throughput and median first-token latency at 16 and 32 outstanding clients</title><desc id="desc">At C16 and C32 output throughput was 1018.93 and 1021.06 tokens per second. Median first-token latency was 0.177 and 7.788 seconds. The two panels have separate units and scales.</desc>
+  <rect width="780" height="360" fill="#f8f6ef"/>
+  <text x="24" y="33" fill="#25443d" font-size="13" font-family="monospace">B0 · 128 INPUT / 512 OUTPUT TARGET · RECONSTRUCTED FROM REPORT</text>
+  <line x1="24" y1="52" x2="756" y2="52" stroke="#b9c4bd"/>
+  <text x="30" y="87" fill="#172923" font-size="17" font-family="sans-serif">Output rate</text><text x="30" y="108" fill="#516c60" font-size="13" font-family="sans-serif">tokens/s · axis 0–1,100</text>
+  <text x="407" y="87" fill="#172923" font-size="17" font-family="sans-serif">Median TTFT</text><text x="407" y="108" fill="#516c60" font-size="13" font-family="sans-serif">seconds · axis 0–8</text>
+  <line x1="91" y1="140" x2="91" y2="282" stroke="#516c60"/><line x1="463" y1="140" x2="463" y2="282" stroke="#516c60"/>
+  <g fill="#172923" font-size="14" font-family="monospace"><text x="30" y="176">C16</text><text x="30" y="246">C32</text><text x="407" y="176">C16</text><text x="407" y="246">C32</text></g>
+  <rect x="91" y="153" width="263" height="28" fill="#3e6b5b"/><rect x="91" y="223" width="264" height="28" fill="#3e6b5b"/>
+  <rect x="463" y="153" width="7" height="28" fill="#9b5a43"/><rect x="463" y="223" width="263" height="28" fill="#9b5a43"/>
+  <g fill="#172923" font-size="14" font-family="monospace"><text x="91" y="202">1,018.93</text><text x="91" y="272">1,021.06</text><text x="463" y="202">0.177</text><text x="625" y="272">7.788</text></g>
+  <line x1="24" y1="303" x2="756" y2="303" stroke="#b9c4bd"/>
+  <text x="30" y="332" fill="#516c60" font-size="14" font-family="sans-serif">Throughput barely changed; first-output wait rose sharply at C32.</text>
+</svg>

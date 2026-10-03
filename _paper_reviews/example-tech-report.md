@@ -1,5 +1,6 @@
 ---
 title: "Layout Example: A Sparse MoE Technical Report"
+published: false
 date: 2026-09-27
 excerpt: "A placeholder explainer that exercises every part of the review layout: spec card, wide tables, an SVG diagram, code, config and math. The model and every number in it are invented."
 type: tech-report

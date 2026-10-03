@@ -2,6 +2,7 @@
 title: "Making KV offload correct"
 date: 2026-10-03
 category: "inference-engineering"
+read_time: "6 min"
 series_order: 4
 excerpt: "I adapted a CPU-KV path, checked reload output and actual movement, and investigated allocator rollback and transfer drain under pressure."
 question: "Could offloaded KV survive eviction and reload under pressure without corrupting allocator state?"
@@ -13,14 +14,11 @@ lesson: "Correct KV offload requires output consistency, actual movement, alloca
 
 <article class="note-article" markdown="1">
 
-<p><a class="notes-backlink" href="{{ '/blog/' | relative_url }}">Back to Blog</a></p>
-<p class="note-meta">Inference Engineering • Field note 04 • {{ page.date | date: "%d %b %Y" }} • 7 min read</p>
+A CPU pool increased space for key-value (KV) state, but it also created a new ownership problem. A request could appear successful while an earlier grouped allocation had left the free list inconsistent, or while a device-to-host transfer was still pending. I needed separate evidence for output, movement, and a safe final state.
 
 {% include blog-at-a-glance.html %}
 
-In my GH200 work, adding CPU capacity for KV state was only the beginning. A successful answer could conceal a broken allocation ledger, a reload path that was never exercised, or an asynchronous device-to-host copy still running after the last response. The result I wanted was stronger: **correct output under actual KV movement, with no pending work or corrupted ownership at the end.**
-
-The offload path I adapted drew on SuperInfer's scheduling ideas and integrated them into a newer vLLM serving stack. SuperInfer and vLLM supplied the original concepts and interfaces. My work was adaptation, debugging, and validation on a dual-GH200 setup; it was not a reimplementation of every paper mechanism.
+The offload path I adapted drew on [SuperInfer's published design](https://supercomputing-system-ai-lab.github.io/projects/superinfer/) and integrated it into a newer [vLLM serving stack](https://github.com/vllm-project/vllm). Those projects supplied the original ideas and interfaces. My recorded work was adaptation, debugging, and validation on dual GH200, not a reimplementation of every paper mechanism.
 
 ## Three proofs, not one
 
@@ -36,19 +34,27 @@ In a deterministic reload check, four exact **131,072-token** inputs were run th
 
 In one reasoning-tree pressure profile with a **128 GiB total CPU-KV pool**, **24 clients**, **327,680-token inputs**, and five rounds, **120 of 120 requests completed**. The report recorded **90 stores, 10 loads**, full logical KV occupancy during pressure, and **zero pending transfers at the end**. A separate, more aggressive two-round profile used **524,288-token inputs** and completed **48 of 48**, with **26 stores, two loads**, about **72.0 GB device-to-host** and **3.0 GB host-to-device** traffic. Those are reported historical results for that profile, not a universal GH200 capacity or throughput figure.
 
+| Accepted 128 GiB reasoning-tree pressure profile | Reported observation |
+| --- | ---: |
+| Input and load | 327,680 tokens · C24 · five rounds |
+| Completed requests | 120 / 120 |
+| KV movement | 90 stores · 10 loads |
+| Pending transfers at end | 0 |
+
+This table is one historical profile, not the more aggressive 524,288-token run or the later v0.26 integration track. Source: canonical pack, FACT-KV-001/002 and SRC-06/08.
+
 ## A grouped allocation is a transaction
 
 The allocator failure I had to reason about was not a simple “out of blocks” return. A request could need several KV groups. If an early group updated a request table and free list, then a later group failed, the system could retain only part of the new state. A later assertion might appear far from the first incorrect mutation.
 
 The invariant is straightforward: either every required group acquires its blocks and the request owns them, or the attempted allocation leaves the allocator as it was. That includes request tables, block references, free-list membership, and counters.
 
-```text
-inspect all required groups
-          │
-          ├─ enough capacity ──► commit every group
-          │
-          └─ failure ──────────► restore every touched owner and count
-```
+<figure class="blog-figure blog-figure--wide" tabindex="0">
+  <img src="{{ '/assets/blog/kv-transaction.svg' | relative_url }}" alt="Conceptual grouped allocation: reserve every group before committing request ownership; on failure, roll back every touched table, free-list entry, reference and count." loading="lazy">
+  <figcaption><strong>Figure 1 · All groups or none.</strong> Conceptual ownership invariant from the reported allocator repair, not a diagram of an audited code path. Transfer dependencies must finish before a block is released or reused. Source: canonical pack, FAIL-GH200 allocator record / SRC-07.</figcaption>
+</figure>
+
+For example, suppose a request needs groups A and B. A conceptual failure sequence is: take A from the free list, add A to the request table, then fail to obtain B. Returning “out of capacity” at that point leaves A owned and the counters changed. A correct rollback removes A from the request table, restores its free-list membership and references, and returns the counters to their prior values. The surviving records describe preflight and rollback repairs; they do not preserve this exact sequence as the historical reproducer.
 
 The historical reliability record describes preflight and rollback repairs, duplicate-safe freeing, and free-list bookkeeping fixes. The original patch and reproducer were not freshly audited for this article, so I treat that as a reported repair, then use the accepted pressure runs as functional evidence. A timeout around the failing request would not have restored partial allocator state.
 
@@ -69,7 +75,7 @@ This is the practical standard I would carry to another offload design: prove ou
 ## Continue the series
 
 - Previous: [NUMA locality: configuration versus proof]({{ '/blog/gh200-locality-evidence/' | relative_url }})
-- Next: [Why a model fits with one backend and fails with another]({{ '/blog/startup-artifacts-runtime-contract/' | relative_url }})
+- Next: [Why model startup needs a fitting backend and complete artifacts]({{ '/blog/startup-artifacts-runtime-contract/' | relative_url }})
 
 </div>
 

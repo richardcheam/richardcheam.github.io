@@ -1,7 +1,8 @@
 ---
-title: "Why a model fits with one backend and fails with another"
+title: "Why model startup needs a fitting backend and complete artifacts"
 date: 2026-10-03
 category: "inference-engineering"
+read_time: "5 min"
 series_order: 5
 excerpt: "I compared weight-backend footprints and fixed a rank-incomplete autotune cache so a historical serving profile could start with validated artifacts."
 question: "Why did one backend fail before KV allocation, and why did a saved tuning cache miss a rank?"
@@ -13,18 +14,20 @@ lesson: "Backend representation and rank-complete startup artifacts determine wh
 
 <article class="note-article" markdown="1">
 
-<p><a class="notes-backlink" href="{{ '/blog/' | relative_url }}">Back to Blog</a></p>
-<p class="note-meta">Inference Engineering • Field note 05 • {{ page.date | date: "%d %b %Y" }} • 7 min read</p>
+On GH200, a quantized checkpoint that looked small enough on disk still failed while its serving backend prepared weights. In another startup path, a cache existed but lacked the tuned records for one expert-parallel rank. Both incidents changed how I think about “startup”: **the files, generated artifacts, and chosen backend representation are part of the runtime profile, not a one-time prelude.**
+
+<figure class="blog-figure blog-figure--wide" tabindex="0">
+  <img src="{{ '/assets/blog/backend-startup.svg' | relative_url }}" alt="Conceptual startup boundary: checkpoint loading and backend preparation come before later graph and KV work, whose relative order is unspecified. Each expert-parallel rank needs genuine autotune records." loading="lazy">
+  <figcaption><strong>Figure 1 · Two startup contracts.</strong> Conceptual boundary between backend preparation and later graph/KV work, plus rank-specific cache completeness, based on the historical MiMo report, FACT-START-001 / SRC-03. The line lengths are not phase timings.</figcaption>
+</figure>
 
 {% include blog-at-a-glance.html %}
-
-On GH200, a quantized checkpoint that looked small enough on disk still failed while its serving backend prepared weights. In another startup path, a cache existed but lacked the tuned records for one expert-parallel rank. Both incidents changed how I think about “startup”: **the files, generated artifacts, and chosen backend representation are part of the runtime profile, not a one-time prelude.**
 
 ## The failing phase determines the memory question
 
 Checkpoint size is not peak startup memory. Loading can create a backend-specific representation, packing buffers, conversion workspaces, and later graph or KV reservations. A lower KV-memory target cannot rescue a failure that occurs before the engine has begun allocating KV.
 
-The historical MiMo v2.6 backend investigation recorded three distinct outcomes on a tensor-parallel serving profile:
+The historical MiMo v2.6 B0 profile used a pinned vLLM development build, reported as <code>0.29.1rc1.dev449+geb8798058</code>, on dual GH200. Tensor parallelism (TP) split model work across two GPU ranks; expert parallelism (EP) placed experts across two ranks. The backend investigation recorded three distinct outcomes in that historical runtime:
 
 | Backend path | Reported outcome | What it established |
 | --- | --- | --- |
@@ -42,11 +45,7 @@ The next problem involved expert-parallel autotuning. A persisted cache with **4
 
 Copying a rank-zero record and changing its key would not show that its tactic had been tuned or validated for rank one. The cache must agree with the actual backend, shapes, version, and rank identity. [FlashInfer's autotuning documentation](https://docs.flashinfer.ai/autotuning.html) describes public persistence concepts; it does not certify that this older local workaround is required or suitable for today's stack.
 
-```text
-rank 0 shapes and key ──► tuned record 0 ┐
-                                         ├─► validated cache-only startup
-rank 1 shapes and key ──► tuned record 1 ┘
-```
+The two-rank record count is a completeness check, not an invitation to duplicate files: rank 0 and rank 1 each require tactics genuinely tuned for their own keys. The figure above shows the two independent record sets beside the startup phases.
 
 ## Faster startup has fixed constraints
 

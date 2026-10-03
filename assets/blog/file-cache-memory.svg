@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 270" role="img" aria-labelledby="title desc">
+  <title id="title">Two possible owners after checkpoint loading</title><desc id="desc">A checkpoint file can populate reclaimable file-backed pages, while a loader may construct a separate runtime tensor. A loader retaining its mapping has a different lifetime.</desc>
+  <rect width="780" height="270" fill="#f8f6ef"/>
+  <text x="24" y="35" fill="#25443d" font-size="13" font-family="monospace">CONCEPTUAL · OWNERSHIP AFTER LOAD</text>
+  <line x1="24" y1="66" x2="756" y2="66" stroke="#b9c4bd"/>
+  <text x="26" y="101" fill="#172923" font-size="18" font-family="sans-serif">Checkpoint on storage</text>
+  <path d="M225 96 H300 M300 96 V148 H348 M300 96 V218 H348" fill="none" stroke="#516c60" stroke-width="2"/>
+  <circle cx="300" cy="96" r="4" fill="#516c60"/>
+  <text x="355" y="153" fill="#172923" font-size="19" font-family="sans-serif">File-backed pages</text>
+  <text x="355" y="176" fill="#516c60" font-size="14" font-family="sans-serif">Kernel cache · reclaimable when unused</text>
+  <text x="355" y="223" fill="#172923" font-size="19" font-family="sans-serif">Runtime allocation</text>
+  <text x="355" y="246" fill="#516c60" font-size="14" font-family="sans-serif">Live tensor · lifetime set by serving runtime</text>
+</svg>

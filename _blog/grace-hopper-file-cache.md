@@ -2,6 +2,7 @@
 title: "When Linux file cache occupies GPU memory"
 date: 2026-10-03
 category: "inference-engineering"
+read_time: "6 min"
 series_order: 1
 excerpt: "I traced a failed GH200 model startup to checkpoint file pages occupying HBM and measured the KV capacity recovered after targeted cache advice."
 question: "Why did HBM appear full after the model checkpoint loaded?"
@@ -13,14 +14,18 @@ lesson: "Distinguish file-backed checkpoint pages from live tensors before diagn
 
 <article class="note-article" markdown="1">
 
-<p><a class="notes-backlink" href="{{ '/blog/' | relative_url }}">Back to Blog</a></p>
-<p class="note-meta">Inference Engineering • Field note 01 • {{ page.date | date: "%d %b %Y" }} • 6 min read</p>
+The model shards loaded, then the engine said it had no room for request cache. Apparent high-bandwidth memory (HBM) occupancy did not reveal whether those bytes belonged to the running model or to Linux's file cache. I traced the backing before changing the capacity budget.
 
 {% include blog-at-a-glance.html %}
 
-While investigating a model server that appeared short of GPU memory after loading its checkpoint, I initially treated every occupied byte as part of the live model. The useful question was narrower: **what owned each page, what backed it, and where was it physically resident?**
+In one historical early V4.1 serving profile, the initial capacity calculation reported **−4.43 GiB available for key-value (KV) cache** and startup failed. Per-node inspection showed that file-backed pages dominated the occupied HBM domains. After targeted advice for the checkpoint files, a subsequent launch reported **118.59 GiB available for KV** and **15,250,409 logical KV tokens**.
 
-In one historical early V4.1 serving profile, the initial capacity calculation reported **−4.43 GiB available for KV cache** and startup failed. Inspection showed that the HBM memory domains were dominated by file-backed pages. After targeted advice for the checkpoint files, a subsequent launch reported **118.59 GiB available for KV** and **15,250,409 logical KV tokens**. These are observations from that early profile, not a capacity guarantee for GH200 or a result from the later V4.1 E16 configuration.
+| Early V4.1 capacity check | Engine-reported available KV |
+| --- | ---: |
+| Before targeted checkpoint file advice; launch failed | −4.43 GiB |
+| Subsequent launch after file advice | 118.59 GiB |
+
+These are engine capacity outputs, not physical HBM totals. The source record supports file-page dominance but does not preserve a phase-labelled per-node byte series suitable for a chart. This early eager profile is separate from the later V4.1 E16 configuration. Source: canonical pack, FACT-MEM-002/003, SRC-02.
 
 On Grace Hopper, this question matters because some configurations expose GPU HBM as Linux NUMA memory. File pages can therefore occupy capacity that the serving engine also needs. The exact accounting depends on the system's driver and memory mode; a `free` total is not automatically “CPU RAM plus a separate GPU.” [NVIDIA's Grace operating-system guide](https://docs.nvidia.com/dccpu/grace-perf-tuning-guide/os-settings.html) describes both NUMA-onlined GPU memory and a mode where it is not onlined.
 
@@ -28,14 +33,10 @@ On Grace Hopper, this question matters because some configurations expose GPU HB
 
 A buffered checkpoint read may populate Linux's page cache. The loader can then construct weights in a separate runtime allocation. The file pages and the live tensor have different owners and lifetimes:
 
-```text
-checkpoint on storage
-        │ read or map
-        ▼
-file-backed cache pages ── loader ──► runtime tensor
-        │                              │
-        └─ may be reclaimed             └─ used for inference
-```
+<figure class="blog-figure blog-figure--wide" tabindex="0">
+  <img src="{{ '/assets/blog/file-cache-memory.svg' | relative_url }}" alt="Conceptual fork after checkpoint load: reclaimable file-backed pages and a separately owned live runtime tensor can coexist." loading="lazy">
+  <figcaption><strong>Figure 1 · Two possible owners after a checkpoint load.</strong> Conceptual mechanism, supported by Linux page-cache semantics and the early V4.1 incident. The fork is possible, not a claim that every loader copies weights or stops using its file mapping.</figcaption>
+</figure>
 
 The arrows show *possible* data flow, not a promise that every loader copies every tensor. A runtime that continues to use a file mapping has a different dependency: discarding its file pages can cause later faults and rereads. [Linux's page-cache documentation](https://docs.kernel.org/mm/page_cache.html) explains why ordinary file reads and mappings participate in the cache.
 

@@ -2,6 +2,7 @@
 title: "Benchmark numbers that misled me—and how I corrected them"
 date: 2026-10-03
 category: "evaluation"
+read_time: "8 min"
 series_order: 2
 excerpt: "I reconciled token counts, prompt lengths, cache reuse, and unfinished requests before comparing GH200 serving runs."
 question: "Which counters and workloads made a benchmark number look faster than the serving experience?"
@@ -13,14 +14,13 @@ lesson: "Define token counts, workload, cache state, and observation interval be
 
 <article class="note-article" markdown="1">
 
-<p><a class="notes-backlink" href="{{ '/blog/' | relative_url }}">Back to Blog</a></p>
-<p class="note-meta">Evaluation &amp; Benchmarking • Field note 02 • {{ page.date | date: "%d %b %Y" }} • 7 min read</p>
+An inference benchmark can produce a precise number and still answer the wrong question. I learned to read every “tokens per second” headline as an unfinished sentence: **which tokens, over which time interval, for which requests?**
 
 {% include blog-at-a-glance.html %}
 
-An inference benchmark can produce a precise number and still answer the wrong question. I learned to read every “tokens per second” headline as an unfinished sentence: **which tokens, over which time interval, for which requests?**
-
 This became especially important when I compared runs with different prompt lengths, streaming behavior, prefix-cache state, and client concurrency. Several apparent performance stories changed once I reconstructed the denominator and workload. The figures identified as historical below come from recovered run records and reports; they are not fresh reruns.
+
+Three profile names appear below. **B0** is the report-backed MiMo v2.6 reference serving profile. **P1** is a later MiMo expansion with separate client and archive evidence; some short-run values survive only as a derived comparison. **E16** is a report-backed DeepSeek V4.1 reference profile, separate from the early V4.1 startup incident in [article 1]({{ '/blog/grace-hopper-file-cache/' | relative_url }}). None is a controlled variant of every other profile.
 
 ## “Tokens per second” has more than one numerator
 
@@ -43,11 +43,10 @@ Streaming clients observe events or chunks. A speculative decoder may verify mul
 
 Time to first token (TTFT) describes the wait until first output. Time per output token (TPOT) usually amortizes time *after* the first output over the remaining generated tokens. Inter-token latency (ITL) describes gaps between output events or tokens, depending on the tool. Under bundled streaming, an event gap is not automatically a per-token delay. These definitions need to travel with any chart, as the [vLLM benchmark CLI documentation](https://docs.vllm.ai/en/latest/benchmarking/cli/) illustrates.
 
-```text
-submit ───── first output ───── later output ───── finish
-       ◄ TTFT ►
-                 ◄ post-first-output interval ►
-```
+<figure class="blog-figure blog-figure--wide" tabindex="0">
+  <img src="{{ '/assets/blog/benchmark-timing.svg' | relative_url }}" alt="Conceptual request timeline: submission to first output is TTFT; first output to completion is the post-first-output interval. A stream chunk can contain more than one token." loading="lazy">
+  <figcaption><strong>Figure 1 · Two different waits.</strong> Conceptual timing diagram, not a measured request trace. Streaming events can bundle multiple tokens, so an event gap is not necessarily a per-token gap.</figcaption>
+</figure>
 
 An average TPOT cannot by itself describe a user's wait if the request spent a long time queued before its first token.
 
@@ -70,9 +69,20 @@ One useful check is to rerun cold-prompt cases with distinct seeds or prefixes w
 
 In one report-backed cold-prompt series, unique seeds were used after a prefix-reuse correction. At **8K, 16K, and 24K input tokens**, each with a **512-token output target** and **16 outstanding clients**, median TTFT was **2.383, 5.486, and 10.202 seconds**. The corresponding output rates were **646.35, 546.29, and 312.16 tokens/s**. Those points belong to one B0 serving profile. They do not form a single scaling curve with a later P1 profile, even though both used the same machine family.
 
+### Supplementary cross-profile comparisons
+
 A separate DeepSeek V4.1 E16 reference reported **500.34** and **500.96 output tokens/s** on two **128-input / 512-output, 16-client** runs, for a simple mean of **500.65**. The B0 profile reported **1,018.93 output tokens/s** on the same nominal input/output and client settings. That roughly **2.04× systems ratio** compares two reported serving profiles; model architecture, backend, KV format, and speculative path differed. It is neither a model-quality ranking nor an isolated gain from one optimization.
 
 I also found a derived comparison in which a **1,856.96 to 5,191.72 output tokens/s** concurrency ladder was associated with **128-token inputs**, not the **16K-token inputs** attached to it in a summary. The highest-concurrency point also used **512 requests**, while lower points used **128**. The corrected workload is the result to report; the original raw files for that derived comparison were not recovered, so I would not use it as a precise long-context headline.
+
+| Derived P1 point, 128 input / 512 output target | Requests | Output tokens/s |
+| --- | ---: | ---: |
+| C16 | 128 | 1,856.96 |
+| C32 | 128 | 2,478.55 |
+| C64 | 128 | 3,321.96 |
+| C128 | 512 | 5,191.72 |
+
+Source: canonical pack, EXP-GH200-2001/2005/2007/2009, derived comparison. The original raw short-run files were not available for this family.
 
 A later raw archive gave **1,756.34 output tokens/s** at a nominal **128-input / 512-output, 128-client, 512-request** point, far below the derived comparison's **5,191.72**. The run families used different archived recipes and timing behavior; the surviving records do not establish a cause for the gap. Averaging them or calling the difference a regression would manufacture an experiment that was never run.
 
@@ -84,8 +94,14 @@ The same boundary applies to latency percentiles. A p95 calculated only from com
 
 The archived long-context soak is a real example of this limit. It recorded **2,252 successful completed rows** and **zero observed failed rows**, while **38 requests were still in flight at the last monitor sample** and the drain was incomplete. Its recorded output rate was **1,267.90 tokens/s** over **29,100.679 seconds**; median TTFT among completed requests was **550.876 seconds**. The unknown tail cannot be counted as successes or failures, and the completed-only latency does not describe every submitted request. This was a separate workload and runtime profile from the cold-prompt results above.
 
-<div class="note-callout note-callout--definition" markdown="1">
-**Reporting rule:** pair every rate or percentile with its numerator, denominator, workload shape, cache state, and observation boundary.
+### A benchmark line worth keeping
+
+<div class="benchmark-template" markdown="1">
+- **Profile and evidence:** model, runtime, backend, version, record ID, historical or rerun.
+- **Workload:** actual input/output tokens, output target, request count, client-outstanding count, arrival pattern.
+- **State:** warm or cold, prompt/prefix reuse, observation window and drain status.
+- **Rate:** output or input-plus-output numerator, exact elapsed-time denominator.
+- **Latency and outcomes:** TTFT/TPOT definition, mean or percentile, completed population, failed and unresolved requests.
 </div>
 
 This discipline does not make a benchmark less impressive. It makes the result reusable: another engineer can tell what was measured, which comparisons are valid, and where the evidence stops.
