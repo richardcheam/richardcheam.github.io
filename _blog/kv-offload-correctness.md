@@ -1,0 +1,69 @@
+---
+title: "Correct KV offload needs more than a successful response"
+date: 2026-10-03
+category: "inference-engineering"
+series_order: 3
+excerpt: "Moving attention state between HBM and Grace memory requires correct ownership, rollback, reload, and transfer completion—not just a client response."
+---
+
+<article class="note-article" markdown="1">
+
+<p><a class="notes-backlink" href="{{ '/blog/' | relative_url }}">Back to Blog</a></p>
+<p class="note-meta">Inference Engineering • Field note 03 • {{ page.date | date: "%d %b %Y" }} • 7 min read</p>
+
+In my GH200 work, adding CPU capacity for KV state was only the beginning. A successful answer could conceal a broken allocation ledger, a reload path that was never exercised, or an asynchronous device-to-host copy still running after the last response. The result I wanted was stronger: **correct output under actual KV movement, with no pending work or corrupted ownership at the end.**
+
+The offload path I adapted drew on SuperInfer's scheduling ideas and integrated them into a newer vLLM serving stack. SuperInfer and vLLM supplied the original concepts and interfaces. My work was adaptation, debugging, and validation on a dual-GH200 setup; it was not a reimplementation of every paper mechanism.
+
+## Three proofs, not one
+
+I separated validation into three questions:
+
+| Question | Evidence | What it does not establish alone |
+| --- | --- | --- |
+| Did the answer survive eviction and reload? | Exact prompt lengths and identical output across repeated cycles | That a transfer actually occurred in that client test |
+| Did blocks move under pressure? | Store/load counters and directional byte counts | That ownership and cleanup are safe at every boundary |
+| Did the engine become truly idle? | Zero pending transfers and a healthy final state | General uptime or a speedup over another runtime |
+
+In a deterministic reload check, four exact **131,072-token** inputs were run through three eviction and reload cycles. The recorded outputs and lengths matched, with no client failures. That client did not collect transfer counters, so I do not use it as movement proof. Complementary pressure records supplied that evidence.
+
+In one reasoning-tree pressure profile with a **128 GiB total CPU-KV pool**, **24 clients**, **327,680-token inputs**, and five rounds, **120 of 120 requests completed**. The report recorded **90 stores, 10 loads**, full logical KV occupancy during pressure, and **zero pending transfers at the end**. A separate, more aggressive two-round profile used **524,288-token inputs** and completed **48 of 48**, with **26 stores, two loads**, about **72.0 GB device-to-host** and **3.0 GB host-to-device** traffic. Those are reported historical results for that profile, not a universal GH200 capacity or throughput figure.
+
+## A grouped allocation is a transaction
+
+The allocator failure I had to reason about was not a simple “out of blocks” return. A request could need several KV groups. If an early group updated a request table and free list, then a later group failed, the system could retain only part of the new state. A later assertion might appear far from the first incorrect mutation.
+
+The invariant is straightforward: either every required group acquires its blocks and the request owns them, or the attempted allocation leaves the allocator as it was. That includes request tables, block references, free-list membership, and counters.
+
+```text
+inspect all required groups
+          │
+          ├─ enough capacity ──► commit every group
+          │
+          └─ failure ──────────► restore every touched owner and count
+```
+
+The historical reliability record describes preflight and rollback repairs, duplicate-safe freeing, and free-list bookkeeping fixes. The original patch and reproducer were not freshly audited for this article, so I treat that as a reported repair, then use the accepted pressure runs as functional evidence. A timeout around the failing request would not have restored partial allocator state.
+
+## Response completion is not copy completion
+
+CPU-KV movement can be asynchronous. A device-to-host copy can be submitted while computation continues; an event later marks when the source block may safely be reused. A host-to-device reload must finish before dependent GPU work reads the restored KV. Separate streams permit overlap, but their existence does not prove how much copy time was hidden.
+
+In a later integration track, the active request set once reached zero while device-to-host completion work remained pending. Treating that state as idle could let shutdown or a new phase race with the copy. The reported fix made pending push work part of the idle decision. A later **48-of-48** long-context soak ended with healthy, drained transfer queues and recorded about **28.6 GB stores** and **10.2 GB loads**. This was a different integration track from the more aggressive 128 GiB pressure profile above; its counters should not be added to that run.
+
+<div class="note-callout note-callout--definition" markdown="1">
+**Completion rule:** a client response ends the request's visible output. Engine quiescence also requires every transfer event and block owner to reach a safe terminal state.
+</div>
+
+This is the practical standard I would carry to another offload design: prove output consistency, observe actual movement, check allocator rollback under pressure, and gate idleness on transfer completion. The records establish functionality in named historical profiles. They do not isolate a latency gain from NUMA placement or prove complete parity with the original SuperInfer system.
+
+<div class="note-related" markdown="1">
+
+## Continue the series
+
+- Previous: [Locality is a claim you must measure]({{ '/blog/gh200-locality-evidence/' | relative_url }})
+- Next: [Benchmark numbers need a denominator and a workload]({{ '/blog/benchmark-denominators/' | relative_url }})
+
+</div>
+
+</article>

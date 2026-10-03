@@ -1,0 +1,73 @@
+---
+title: "An inference workload needs an explicit lifecycle owner"
+date: 2026-10-03
+category: "inference-engineering"
+series_order: 7
+excerpt: "Container health, inference readiness, and route readiness can disagree. A serving system needs one clear owner for startup, shutdown, recovery, and pending work."
+---
+
+<article class="note-article" markdown="1">
+
+<p><a class="notes-backlink" href="{{ '/blog/' | relative_url }}">Back to Blog</a></p>
+<p class="note-meta">Inference Engineering • Field note 07 • {{ page.date | date: "%d %b %Y" }} • 6 min read</p>
+
+One recurring serving investigation began with an uncomfortable mismatch: inference workers stopped responding while their container remained alive. A worker log showed the parent-monitor pipe closing, but the surviving records did not identify the first process to exit or the sender of any signal. Calling it a crash, an OOM, or a scheduled termination would have been more certain than the evidence allowed.
+
+The useful engineering result was a clearer model of ownership. A container, launcher, API process, engine workers, and request gateway can each have a different lifetime and health signal. If no one component owns the full inference workload, a green container can coexist with an unavailable model.
+
+## Draw the process boundary before diagnosing the exit
+
+In the historical case, the container's continued existence ruled out a simple whole-container exit. Parent-pipe EOF supported a narrower observation: the worker lost its parent connection or the pipe closed. It did not reveal *why*. The runbook compared clocks, process ancestry, and available historical events; it proposed prospective signal and exit tracing because retrospective records were insufficient.
+
+```text
+container or supervisor
+        │ owns
+        ▼
+launcher / API parent
+        │ owns
+        ▼
+engine and GPU workers
+        │ serve
+        ▼
+model requests and pending transfers
+```
+
+That conceptual tree is not the private deployment layout. Its purpose is to ask, at each edge, who starts the child, notices it exited, stops its descendants, and decides whether to restart it. A detached process can fail without changing the status of the container's main process. Recovery that watches only the outermost level will miss that state.
+
+## Readiness must name what is ready
+
+An open HTTP port establishes that something answers HTTP. It does not prove the intended model loaded, its workers are healthy, or a request through the intended route can complete. Similarly, a gateway accepting an identity token establishes neither authorization for every route nor spare capacity in the backend.
+
+The separation I use is:
+
+| Check | Question it answers |
+| --- | --- |
+| Container/process liveness | Is the supervised process present? |
+| Engine readiness | Are the model workers and required resources initialized? |
+| Model-route readiness | Does the intended route reach the intended healthy model? |
+| Workload admission | Can this request fit the current latency and capacity policy? |
+
+The [long-context soak]({{ '/blog/throughput-versus-usable-latency/' | relative_url }}) showed why the last row matters: **2,252 completed successes** coexisted with **550.876-second median first-token wait** among completed requests. Routing another large request to a live backend would not create more KV capacity or shorten an existing queue.
+
+## Recovery needs a single owner and an idle definition
+
+A robust controller needs to distinguish an unexpected failure from planned maintenance, stop the right process tree, wait for GPU and asynchronous transfer work to settle, and only then start a replacement. Maintenance should have an explicit hold or pause state so a manual stop does not race an automatic relaunch. Readiness should be withdrawn before accepting new work on an instance that is shutting down.
+
+The KV-offload investigation provided a related boundary: zero active requests did not always mean zero pending device-to-host work. Cleanup based solely on client count could outlive blocks still referenced by a transfer. The later reliability record describes scoped parent-first termination and pending-work cleanup, but that later control does not retroactively identify the original shutdown trigger.
+
+<div class="note-callout note-callout--pitfall" markdown="1">
+**Evidence boundary:** I observed parent connection loss while the container remained alive. The original sender and first exiting process were not established. Better supervision is a design response to the failure mode, not proof of its historical root cause.
+</div>
+
+This is the operational end of the GH200 field notes. Memory placement, correct KV movement, benchmark units, and startup artifacts determine whether a model can serve. Explicit workload ownership determines whether it keeps serving, stops cleanly, and reports readiness honestly. None of those layers replaces admission control when a live server is already overloaded.
+
+<div class="note-related" markdown="1">
+
+## Continue the series
+
+- Previous: [A server can keep working while answers become unusably slow]({{ '/blog/throughput-versus-usable-latency/' | relative_url }})
+- Start again: [When Linux file cache occupies GPU memory on Grace Hopper]({{ '/blog/grace-hopper-file-cache/' | relative_url }})
+
+</div>
+
+</article>

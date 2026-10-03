@@ -4,13 +4,13 @@ title: "Blog"
 permalink: /blog/
 ---
 
-{% assign sorted_posts = site.blog | sort: "date" | reverse %}
+{% assign sorted_posts = site.blog | sort: "series_order" %}
 
 <section class="page-intro" data-reveal>
   <p class="section-eyebrow">Blog</p>
-  <h2>Technical blog posts, explainers, and implementation reminders</h2>
+  <h2>Field notes on inference engineering</h2>
   <p class="section-description">
-    This is the technical writing side of the site: concise blog posts for revisiting concepts, systems, and ML ideas.
+    Seven Grace Hopper field notes from my inference engineering work: memory placement, KV correctness, benchmark evidence, startup, sustained load, and service lifecycle. Read them in order, or choose a topic below.
   </p>
 </section>
 
@@ -50,7 +50,7 @@ permalink: /blog/
 
   {% if sorted_posts.size > 0 %}
     <div class="filter-wrap" data-reveal>
-      <input class="filter-input" id="blog-search-input" data-filter-input type="search" placeholder="Search blog posts (e.g. speech, world model, optimization)">
+      <input class="filter-input" id="blog-search-input" data-filter-input type="search" placeholder="Search blog posts (e.g. memory, throughput, benchmarking)">
       <p class="filter-empty" data-filter-empty hidden>No blog posts match that keyword.</p>
     </div>
 
@@ -65,7 +65,7 @@ permalink: /blog/
         {% endfor %}
 
         <a class="blog-card" data-reveal data-filter-card data-filter-text="{{ post.title | downcase }} {{ category_label | downcase }} {{ post_key }} {{ post_key | replace: '-', ' ' }} {{ post.excerpt | strip_html | downcase }}" href="{{ post.url | relative_url }}">
-          <p class="card-meta">{{ category_label }}{% if post.date %} · {{ post.date | date: "%d %b %Y" }}{% endif %}</p>
+          <p class="card-meta">{% if post.series_order %}Field note {{ post.series_order }} · {% endif %}{{ category_label }}{% if post.date %} · {{ post.date | date: "%d %b %Y" }}{% endif %}</p>
           <h3 class="card-title">{{ post.title }}</h3>
           <p class="card-summary">{{ post.excerpt | strip_html | truncate: 180 }}</p>
           <span class="inline-link">Read more</span>

@@ -12,13 +12,9 @@
   label: Deep Learning
   summary: Neural architectures, optimization, and training patterns.
 
-- key: speech
-  label: Speech
-  summary: ASR, TTS, streaming inference, and speech pipelines.
-
-- key: world-models
-  label: World Models
-  summary: Latent dynamics, simulation, planning, and model-based reasoning.
+- key: inference-engineering
+  label: Inference Engineering
+  summary: Memory, serving systems, and the evidence behind performance claims.
 
 - key: nlp
   label: NLP
@@ -64,9 +60,9 @@
 #   label: Optimization
 #   summary: Schedulers, optimizers, objectives, and convergence diagnostics.
 
-# - key: evaluation
-#   label: Evaluation & Benchmarking
-#   summary: Metrics, ablations, robustness checks, and comparison protocols.
+- key: evaluation
+  label: Evaluation & Benchmarking
+  summary: Workload definitions, metrics, and trustworthy comparisons.
 
 # - key: mlops
 #   label: MLOps & Production

@@ -1486,6 +1486,53 @@ html[data-theme="dark"] .hero::before {
   padding-left: 1.2rem;
 }
 
+.note-article table {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.note-article th,
+.note-article td {
+  min-width: 150px;
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.note-article th {
+  color: var(--text);
+  background: var(--surface);
+  font-weight: 600;
+}
+
+.note-article td {
+  color: var(--text-secondary);
+}
+
+.note-article div.highlighter-rouge {
+  margin: var(--space-4) 0;
+}
+
+.note-article pre {
+  margin: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--code-bg);
+  padding: var(--space-3);
+  font-size: 13.5px;
+  line-height: 1.65;
+}
+
 .note-callout {
   border-left: 2px solid var(--border);
   background: var(--surface-strong);
