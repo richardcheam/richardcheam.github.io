@@ -27,7 +27,7 @@
   --code-keyword: #111111;
   --code-string: #4f4f4f;
   --code-number: #4f4f4f;
-  --prose-measure: 680px;
+  --review-prose-measure: 680px;
   --shadow: 0 20px 44px -28px rgba(17, 17, 17, 0.25);
   --shadow-hover: 0 28px 56px -30px rgba(17, 17, 17, 0.35);
   --radius-sm: 14px;
@@ -1471,11 +1471,6 @@ html[data-theme="dark"] .hero::before {
   font-size: 14px;
 }
 
-.note-article {
-  max-width: 860px;
-  margin: 0 auto;
-}
-
 .note-article h2 {
   margin-top: var(--space-5);
   font-size: clamp(1.55rem, 2.7vw, 2.1rem);
@@ -2105,7 +2100,7 @@ html[data-theme="dark"] .hero::before {
 }
 
 .review-prose > * {
-  max-width: var(--prose-measure);
+  max-width: var(--review-prose-measure);
 }
 
 .review-prose > .table-wrap,
@@ -2295,7 +2290,7 @@ html[data-theme="dark"] .hero::before {
 }
 
 .review-figure figcaption {
-  max-width: var(--prose-measure);
+  max-width: var(--review-prose-measure);
   margin-top: 12px;
   color: var(--text-secondary);
   font-size: 13px;
@@ -2737,7 +2732,7 @@ html[data-theme="dark"] .hero::before {
 /* GH200 publication uses the site's homepage canvas and color tokens. */
 
 body[data-page^="/blog/"] {
-  --blog-reading-measure: 780px;
+  --blog-reading-measure: 60rem;
   --blog-artifact-measure: 1320px;
 }
 
@@ -3045,11 +3040,8 @@ body[data-page^="/blog/"] .page-heading[data-reveal].is-visible {
 .blog-contents li { padding: 0.65rem 0; border-bottom: 1px solid var(--border); }
 .blog-contents a { color: var(--text); }
 
-.note-article {
-  max-width: none;
-}
 .note-article > :not(.blog-figure):not(.blog-wait-figure) {
-  max-width: var(--blog-reading-measure);
+  max-width: min(100%, var(--blog-reading-measure));
   margin-left: 0;
   margin-right: 0;
 }
@@ -3069,7 +3061,6 @@ body[data-page^="/blog/"] .page-heading[data-reveal].is-visible {
   scroll-margin-top: 6rem;
 }
 .note-article h3 {
-  max-width: var(--blog-reading-measure);
   margin: 2.2rem 0 0;
 }
 .note-article strong { color: var(--text); }
@@ -3196,7 +3187,7 @@ body[data-page^="/blog/"] :focus-visible {
 @media (max-width: 760px) {
   body[data-page^="/blog/"] .site-header__inner,
   body[data-page^="/blog/"] .site-main,
-  body[data-page^="/blog/"] .site-footer { width: calc(100% - 32px); }
+  body[data-page^="/blog/"] .site-footer { width: calc(100% - 48px); }
   .blog-series-entry { grid-template-columns: 2.7rem minmax(0, 1fr); gap: 1rem; }
   .blog-series-meta { grid-column: 2; text-align: left; }
   .blog-wait-figure { display: block; }
