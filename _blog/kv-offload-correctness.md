@@ -24,15 +24,21 @@ The offload path I adapted drew on [SuperInfer's published design](https://super
 
 I separated validation into three questions:
 
+<div class="blog-table-scroll" role="region" aria-label="KV offload validation questions" tabindex="0" markdown="1">
+
 | Question | Evidence | What it does not establish alone |
 | --- | --- | --- |
 | Did the answer survive eviction and reload? | Exact prompt lengths and identical output across repeated cycles | That a transfer actually occurred in that client test |
 | Did blocks move under pressure? | Store/load counters and directional byte counts | That ownership and cleanup are safe at every boundary |
 | Did the engine become truly idle? | Zero pending transfers and a healthy final state | General uptime or a speedup over another runtime |
 
+</div>
+
 In a deterministic reload check, four exact **131,072-token** inputs were run through three eviction and reload cycles. The recorded outputs and lengths matched, with no client failures. That client did not collect transfer counters, so I do not use it as movement proof. Complementary pressure records supplied that evidence.
 
 In one reasoning-tree pressure profile with a **128 GiB total CPU-KV pool**, **24 clients**, **327,680-token inputs**, and five rounds, **120 of 120 requests completed**. The report recorded **90 stores, 10 loads**, full logical KV occupancy during pressure, and **zero pending transfers at the end**. A separate, more aggressive two-round profile used **524,288-token inputs** and completed **48 of 48**, with **26 stores, two loads**, about **72.0 GB device-to-host** and **3.0 GB host-to-device** traffic. Those are reported historical results for that profile, not a universal GH200 capacity or throughput figure.
+
+<div class="blog-table-scroll" role="region" aria-label="KV pressure profile results" tabindex="0" markdown="1">
 
 | Accepted 128 GiB reasoning-tree pressure profile | Reported observation |
 | --- | ---: |
@@ -40,6 +46,8 @@ In one reasoning-tree pressure profile with a **128 GiB total CPU-KV pool**, **2
 | Completed requests | 120 / 120 |
 | KV movement | 90 stores · 10 loads |
 | Pending transfers at end | 0 |
+
+</div>
 
 This table is one historical profile, not the more aggressive 524,288-token run or the later v0.26 integration track. Source: canonical pack, FACT-KV-001/002 and SRC-06/08.
 
@@ -49,7 +57,7 @@ The allocator failure I had to reason about was not a simple “out of blocks”
 
 The invariant is straightforward: either every required group acquires its blocks and the request owns them, or the attempted allocation leaves the allocator as it was. That includes request tables, block references, free-list membership, and counters.
 
-<figure class="blog-figure blog-figure--wide" tabindex="0">
+<figure class="blog-figure blog-figure--prose" tabindex="0">
   <img src="{{ '/assets/blog/kv-transaction.svg' | relative_url }}" alt="Conceptual grouped allocation: reserve every group before committing request ownership; on failure, roll back every touched table, free-list entry, reference and count." loading="lazy">
   <figcaption><strong>Figure 1 · All groups or none.</strong> Conceptual ownership invariant from the reported allocator repair, not a diagram of an audited code path. Transfer dependencies must finish before a block is released or reused. Source: canonical pack, FAIL-GH200 allocator record / SRC-07.</figcaption>
 </figure>

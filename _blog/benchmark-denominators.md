@@ -56,6 +56,8 @@ Draft-token acceptance is another tempting single-number ranking. In the B0 long
 
 When I review two runs, I write down the following alongside the headline rate:
 
+<div class="blog-table-scroll" role="region" aria-label="Benchmark comparison checklist" tabindex="0" markdown="1">
+
 | Dimension | Why it changes the result |
 | --- | --- |
 | Input and actual output lengths | Prefill and decode impose different costs. |
@@ -64,6 +66,8 @@ When I review two runs, I write down the following alongside the headline rate:
 | Prefix reuse and warm caches | Repeated prompts can reuse work that a cold request must perform. |
 | Model, tokenizer, backend, and precision | “Same GPU” does not make two serving profiles equivalent. |
 | Completion and error counts | Percentiles from completed requests omit unfinished work. |
+
+</div>
 
 One useful check is to rerun cold-prompt cases with distinct seeds or prefixes when prefix caching is enabled. An implausibly faster long prompt can be cache reuse rather than a new scaling property. Likewise, a throughput row with a short input must not be relabeled as a long-context result because another summary remembered it that way.
 
@@ -75,12 +79,16 @@ A separate DeepSeek V4.1 E16 reference reported **500.34** and **500.96 output t
 
 I also found a derived comparison in which a **1,856.96 to 5,191.72 output tokens/s** concurrency ladder was associated with **128-token inputs**, not the **16K-token inputs** attached to it in a summary. The highest-concurrency point also used **512 requests**, while lower points used **128**. The corrected workload is the result to report; the original raw files for that derived comparison were not recovered, so I would not use it as a precise long-context headline.
 
+<div class="blog-table-scroll" role="region" aria-label="Derived P1 comparison" tabindex="0" markdown="1">
+
 | Derived P1 point, 128 input / 512 output target | Requests | Output tokens/s |
 | --- | ---: | ---: |
 | C16 | 128 | 1,856.96 |
 | C32 | 128 | 2,478.55 |
 | C64 | 128 | 3,321.96 |
 | C128 | 512 | 5,191.72 |
+
+</div>
 
 Source: canonical pack, EXP-GH200-2001/2005/2007/2009, derived comparison. The original raw short-run files were not available for this family.
 

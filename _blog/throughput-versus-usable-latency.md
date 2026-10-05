@@ -40,6 +40,8 @@ The archive showed high KV pressure and persistent waiting; maximum sampled mana
 
 The soak's recorded output rate used a **29,100.679-second denominator**. Among completed requests, TTFT was **550.876 seconds at p50** and **567.503 seconds at p95**; end-to-end time was **818.576 seconds at p50**. These figures show continued service under a severe workload and poor interactive response time at the same time.
 
+<div class="blog-table-scroll" role="region" aria-label="Historical soak measurements" tabindex="0" markdown="1">
+
 | Historical soak measure | Archived observation |
 | --- | ---: |
 | Completed successful rows | 2,252 |
@@ -48,6 +50,8 @@ The soak's recorded output rate used a **29,100.679-second denominator**. Among 
 | Output rate | 1,267.90 output tokens/s |
 | Recorded rate denominator | 29,100.679 s |
 | TTFT among completed requests | p50 550.876 s · p95 567.503 s |
+
+</div>
 
 The submission timer and later finalization timestamps do not align cleanly in the surviving archive, so I retain the recorded denominator rather than calculate a replacement. Source: canonical pack, EXP-GH200-1118 / SRC-05.
 

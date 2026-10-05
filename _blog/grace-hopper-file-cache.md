@@ -20,10 +20,14 @@ The model shards loaded, then the engine said it had no room for request cache. 
 
 In one historical early V4.1 serving profile, the initial capacity calculation reported **−4.43 GiB available for key-value (KV) cache** and startup failed. Per-node inspection showed that file-backed pages dominated the occupied HBM domains. After targeted advice for the checkpoint files, a subsequent launch reported **118.59 GiB available for KV** and **15,250,409 logical KV tokens**.
 
+<div class="blog-table-scroll" role="region" aria-label="Early V4.1 capacity comparison" tabindex="0" markdown="1">
+
 | Early V4.1 capacity check | Engine-reported available KV |
 | --- | ---: |
 | Before targeted checkpoint file advice; launch failed | −4.43 GiB |
 | Subsequent launch after file advice | 118.59 GiB |
+
+</div>
 
 These are engine capacity outputs, not physical HBM totals. The source record supports file-page dominance but does not preserve a phase-labelled per-node byte series suitable for a chart. This early eager profile is separate from the later V4.1 E16 configuration. Source: canonical pack, FACT-MEM-002/003, SRC-02.
 
@@ -33,7 +37,7 @@ On Grace Hopper, this question matters because some configurations expose GPU HB
 
 A buffered checkpoint read may populate Linux's page cache. The loader can then construct weights in a separate runtime allocation. The file pages and the live tensor have different owners and lifetimes:
 
-<figure class="blog-figure blog-figure--wide" tabindex="0">
+<figure class="blog-figure blog-figure--prose" tabindex="0">
   <img src="{{ '/assets/blog/file-cache-memory.svg' | relative_url }}" alt="Conceptual fork after checkpoint load: reclaimable file-backed pages and a separately owned live runtime tensor can coexist." loading="lazy">
   <figcaption><strong>Figure 1 · Two possible owners after a checkpoint load.</strong> Conceptual mechanism, supported by Linux page-cache semantics and the early V4.1 incident. The fork is possible, not a claim that every loader copies weights or stops using its file mapping.</figcaption>
 </figure>
@@ -46,6 +50,8 @@ It also helps to name the mechanism before saying “offload.” Host-resident *
 
 ## What I would measure before changing anything
 
+<div class="blog-table-scroll" role="region" aria-label="Memory evidence checklist" tabindex="0" markdown="1">
+
 | Question | Evidence to collect | What it cannot prove alone |
 | --- | --- | --- |
 | Which physical domains exist? | NUMA topology and per-node capacity | Where a particular buffer landed |
@@ -53,6 +59,8 @@ It also helps to name the mechanism before saying “offload.” Host-resident *
 | What does the server own? | Process mappings, proportional set size, device allocations | Whether an allocation is needed on the next request |
 | Did capacity actually recover? | The same capacity check before and after a targeted action | That every future run will have the same result |
 | Did behavior stay correct? | A warm inference and storage-I/O observation | That another loader or restart path is unaffected |
+
+</div>
 
 I would compare the readings at explicit phases: before loading, after loading, after the runtime has created its tensors, and after a controlled cache action. The phase labels matter as much as the byte counts. Otherwise, an allocation made during graph capture or KV reservation can be mistaken for file-cache growth.
 

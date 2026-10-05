@@ -29,11 +29,15 @@ Checkpoint size is not peak startup memory. Loading can create a backend-specifi
 
 The historical MiMo v2.6 B0 profile used a pinned vLLM development build, reported as <code>0.29.1rc1.dev449+geb8798058</code>, on dual GH200. Tensor parallelism (TP) split model work across two GPU ranks; expert parallelism (EP) placed experts across two ranks. The backend investigation recorded three distinct outcomes in that historical runtime:
 
+<div class="blog-table-scroll" role="region" aria-label="Backend startup outcomes" tabindex="0" markdown="1">
+
 | Backend path | Reported outcome | What it established |
 | --- | --- | --- |
 | Marlin preparation | About **145.9 GiB per rank** at the failing preparation stage | Representation and temporary work exceeded the available budget before KV creation |
 | Triton path | Activation compatibility rejection | A memory-only fix would not make this path valid |
 | FlashInfer CUTLASS | Loaded at about **83 GiB per rank** | This historical representation fit and enabled the validated B0 serving profile |
+
+</div>
 
 These are report-backed observations from a pinned historical image, not a current backend leaderboard. They also do not isolate the gain from a single flag. The practical diagnostic is to record *where* the allocation fails—load, packing, profiling, graph capture, or KV reservation—before adjusting a budget for a later phase.
 

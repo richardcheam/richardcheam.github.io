@@ -29,6 +29,8 @@ Grace Hopper's coherent memory makes remote access possible, but it does not mak
 
 During the investigation, several different things were easy to call “local”:
 
+<div class="blog-table-scroll" role="region" aria-label="NUMA locality evidence ladder" tabindex="0" markdown="1">
+
 | Claim | What would support it |
 | --- | --- |
 | The intended CPU and GPU are a pair | Topology and device-to-NUMA mapping |
@@ -37,6 +39,8 @@ During the investigation, several different things were easy to call “local”
 | The KV buffer is physically nearby | A page-location query for that specific buffer |
 | Transfers use the nearby path | Runtime traffic or transfer evidence tied to that buffer |
 | Locality improves serving | A controlled comparison with the same workload and other settings |
+
+</div>
 
 Each row answers a different question. Seeing good whole-worker placement is useful, but a worker owns more than KV: code, stacks, temporary allocations, file mappings, and other model state can all contribute. A high aggregate percentage cannot stand in for a KV-buffer measurement.
 

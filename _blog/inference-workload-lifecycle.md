@@ -39,12 +39,16 @@ An open HTTP port establishes that something answers HTTP. It does not prove the
 
 The separation I use is:
 
+<div class="blog-table-scroll" role="region" aria-label="Inference service readiness checks" tabindex="0" markdown="1">
+
 | Check | Question it answers |
 | --- | --- |
 | Container/process liveness | Is the supervised process present? |
 | Engine readiness | Are the model workers and required resources initialized? |
 | Model-route readiness | Does the intended route reach the intended healthy model? |
 | Workload admission | Can this request fit the current latency and capacity policy? |
+
+</div>
 
 The [long-context soak]({{ '/blog/throughput-versus-usable-latency/' | relative_url }}) showed why the last row matters: **2,252 completed successes** coexisted with **550.876-second median first-token wait** among completed requests. Routing another large request to a live backend would not create more KV capacity or shorten an existing queue.
 
