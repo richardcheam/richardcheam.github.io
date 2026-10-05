@@ -58,7 +58,7 @@ The KV-offload investigation provided a related boundary: zero active requests d
 **Evidence boundary:** I observed parent connection loss while the container remained alive. The original sender and first exiting process were not established. Better supervision is a design response to the failure mode, not proof of its historical root cause.
 </div>
 
-This is the operational end of the GH200 field notes. Memory placement, correct KV movement, benchmark units, and startup artifacts determine whether a model can serve. Explicit workload ownership determines whether it keeps serving, stops cleanly, and reports readiness honestly. None of those layers replaces admission control when a live server is already overloaded.
+This is the operational end of the GH200 series. Memory placement, correct KV movement, benchmark units, and startup artifacts determine whether a model can serve. Explicit workload ownership determines whether it keeps serving, stops cleanly, and reports readiness honestly. None of those layers replaces admission control when a live server is already overloaded.
 
 <div class="note-related" markdown="1">
 

@@ -14,7 +14,7 @@ permalink: /blog/
 </section>
 
 <section class="blog-feature" aria-labelledby="blog-feature-title">
-  <p class="section-eyebrow">Featured investigation · Field note 06</p>
+  <p class="section-eyebrow">Featured investigation · Part 06</p>
   <h2 id="blog-feature-title"><a href="{{ '/blog/throughput-versus-usable-latency/' | relative_url }}">High throughput, minutes of waiting</a></h2>
   <p>An eight-hour long-context soak kept producing output while first-token waits stretched into minutes. What does capacity mean when a caller cannot use it interactively?</p>
   <a class="inline-link" href="{{ '/blog/throughput-versus-usable-latency/' | relative_url }}">Read the investigation</a>
@@ -23,12 +23,12 @@ permalink: /blog/
 <section class="section-block blog-index" aria-labelledby="blog-index-title">
   <header class="section-head">
     <p class="section-eyebrow">The complete series</p>
-    <h2 id="blog-index-title">Seven field notes</h2>
+    <h2 id="blog-index-title">Seven articles</h2>
   </header>
 
   {% if sorted_posts.size > 0 %}
     <div class="filter-wrap">
-      <input class="filter-input" id="blog-search-input" data-filter-input type="search" placeholder="Find a field note (e.g. memory, startup, latency)" aria-label="Search field notes">
+      <input class="filter-input" id="blog-search-input" data-filter-input type="search" placeholder="Find an article (e.g. memory, startup, latency)" aria-label="Search articles">
       <p class="filter-empty" data-filter-empty hidden>No blog posts match that keyword.</p>
     </div>
 
