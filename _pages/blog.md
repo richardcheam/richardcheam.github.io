@@ -44,11 +44,11 @@ permalink: /blog/
 
         <li class="blog-series-entry" data-filter-card data-filter-text="{{ post.title | downcase }} {{ category_label | downcase }} {{ post_key }} {{ post_key | replace: '-', ' ' }} {{ post.excerpt | strip_html | downcase }} {{ post.question | downcase }} {{ post.result | downcase }}">
           <span class="blog-series-number" aria-hidden="true">{{ post.series_order | prepend: '0' }}</span>
-          <div>
-            <p class="blog-series-meta">{{ category_label }} · {{ post.read_time | default: '7 min' }} read</p>
+          <div class="blog-series-main">
             <h3><a href="{{ post.url | relative_url }}">{{ post.title }}</a></h3>
             <p>{{ post.excerpt }}</p>
           </div>
+          <p class="blog-series-meta">{{ category_label }}<br>{{ post.read_time | default: '7 min' }} read</p>
         </li>
       {% endfor %}
     </ol>
@@ -60,7 +60,7 @@ permalink: /blog/
   {% endif %}
 </section>
 
-<section class="section-block" data-reveal>
+<section class="section-block blog-topic-section" data-reveal>
   <header class="section-head">
     <p class="section-eyebrow">Browse by topic</p>
     <h2>Topics in this series</h2>
