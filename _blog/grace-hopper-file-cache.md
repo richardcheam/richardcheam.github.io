@@ -81,7 +81,7 @@ The general lesson from my investigation is a measurement habit, not a claim tha
 
 ## Continue the series
 
-- Next: [Benchmark numbers that misled me—and how I corrected them]({{ '/blog/benchmark-denominators/' | relative_url }})
+- Next: [Benchmark numbers that misled me and how I corrected them]({{ '/blog/benchmark-denominators/' | relative_url }})
 - [Inference Engineering project](https://richardcheam.github.io/inference-engineering/)
 
 </div>

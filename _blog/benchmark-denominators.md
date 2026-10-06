@@ -1,5 +1,5 @@
 ---
-title: "Benchmark numbers that misled me—and how I corrected them"
+title: "Benchmark numbers that misled me and how I corrected them"
 date: 2026-10-03
 category: "evaluation"
 read_time: "8 min"

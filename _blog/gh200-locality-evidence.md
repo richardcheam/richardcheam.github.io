@@ -75,7 +75,7 @@ That boundary is useful. It tells the next engineer exactly which measurement wo
 
 ## Continue the series
 
-- Previous: [Benchmark numbers that misled me—and how I corrected them]({{ '/blog/benchmark-denominators/' | relative_url }})
+- Previous: [Benchmark numbers that misled me and how I corrected them]({{ '/blog/benchmark-denominators/' | relative_url }})
 - Next: [Making KV offload correct]({{ '/blog/kv-offload-correctness/' | relative_url }})
 - [Inference Engineering project](https://richardcheam.github.io/inference-engineering/)
 
