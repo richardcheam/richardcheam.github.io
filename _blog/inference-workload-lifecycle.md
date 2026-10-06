@@ -55,7 +55,15 @@ The [long-context soak]({{ '/blog/throughput-versus-usable-latency/' | relative_
 
 ## Recovery needs a single owner and an idle definition
 
-A robust controller needs to distinguish an unexpected failure from planned maintenance, stop the right process tree, wait for GPU and asynchronous transfer work to settle, and only then start a replacement. Maintenance should have an explicit hold or pause state so a manual stop does not race an automatic relaunch. Readiness should be withdrawn before accepting new work on an instance that is shutting down.
+The recovery procedure I would use is:
+
+1. **Classify the stop:** distinguish an unexpected failure from planned maintenance. Put maintenance in an explicit hold or pause state so a manual stop does not race an automatic relaunch.
+2. **Withdraw readiness:** stop admitting new work to the instance that is shutting down.
+3. **Stop the owned process tree:** terminate the intended launcher, API, and worker processes through the workload's recovery owner.
+4. **Wait for a safe final state:** let GPU work and asynchronous transfers settle before resources can be released or reused.
+5. **Start and validate the replacement:** confirm engine readiness and the intended model route before resuming admission under its capacity and latency policy.
+
+These are proposed recovery steps. They do not establish the sender, first exiting process, or cause of the original shutdown.
 
 The KV-offload investigation provided a related boundary: zero active requests did not always mean zero pending device-to-host work. Cleanup based solely on client count could outlive blocks still referenced by a transfer. The later reliability record describes scoped parent-first termination and pending-work cleanup, but that later control does not retroactively identify the original shutdown trigger.
 

@@ -30,7 +30,14 @@ The work here was deployment, integration, and measurement of a MiMo serving pro
 
 ## What the soak actually asked the server to do
 
-The fixed stress recipe used **131,072 input tokens** and a **16,384 output-token target** per request, with up to **62 client-outstanding requests**. Submission was scheduled for eight hours. The matching recovery startup reported **2,947,463 logical key-value (KV) cache tokens** of engine capacity, counted once across the distributed profile, and **40.15/41.45 GiB** of KV allocation on its two ranks.
+The fixed stress recipe was:
+
+- **Input:** 131,072 tokens per request.
+- **Output target:** 16,384 tokens per request.
+- **Client load:** up to 62 outstanding requests.
+- **Submission schedule:** eight hours.
+
+The matching recovery startup reported **2,947,463 logical key-value (KV) cache tokens** of engine capacity, counted once across the distributed profile, and **40.15/41.45 GiB** of KV allocation on its two ranks.
 
 One full request budget is **147,456 tokens**. Dividing the reported logical KV capacity by that maximum yields about **20 full-budget request equivalents**. That is a planning ratio, not a measurement that exactly 20 requests must always run. State grows over time, output can stop early, and scheduling and preemption change residency. The client-side 62 outstanding requests were not 62 simultaneous full-budget residents.
 
@@ -72,9 +79,13 @@ The soak archive contains **zero observed failed rows** among the **2,252 comple
 
 A separate very-long-input probe also lost service after a small completed subset; its root cause was not established and cannot be generalized to every long request.
 
-<div class="note-callout note-callout--definition" markdown="1">
-**Capacity lesson:** a model's context limit, the KV pool size, and the number of accepted client connections are three different limits. Usable service also needs a first-token latency target and an explicit policy for admitting heavy work.
-</div>
+Three capacity limits need separate names:
+
+- **Model context limit:** the supported token budget for one request.
+- **KV pool size:** the available storage for resident request state across the serving profile.
+- **Accepted client connections:** the requests the service accepts, including requests that may wait rather than run.
+
+Usable service also needs a first-token latency target and an explicit policy for admitting heavy work.
 
 The practical next step would be to measure queue time and prefill separately, then admit interactive and long background work against a defined latency objective. That is a proposed operating policy, not an optimization shown to be deployed by these results. The historical soak proves that the engine could continue completing a large number of requests under pressure; it also shows why completion and peak output rate were insufficient measures of user experience.
 

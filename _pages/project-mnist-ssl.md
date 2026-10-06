@@ -33,38 +33,32 @@ github_url: "https://github.com/richardcheam"
     </ul>
   </section>
 
-  <section id="build" class="detail-block" data-detail-panel hidden>
+  <section id="build" class="detail-block" data-detail-panel>
     <h2>What I Built</h2>
-    <div class="project-points">
-      <p><strong>Semi-supervised branch:</strong> CNN baseline with pseudo-label refresh loops and targeted augmentation.</p>
-      <p><strong>Self-supervised branch:</strong> SimCLR pretraining with downstream linear-probe and MLP-head evaluation.</p>
-      <p><strong>Protocol controls:</strong> Stable splits, repeatable seeds, and aligned evaluation criteria.</p>
-      <p><strong>Analysis:</strong> Confidence profiles and failure-sample inspection for ambiguous digits.</p>
-    </div>
+    <ul class="project-components">
+      <li><strong>Semi-supervised branch:</strong> CNN baseline with pseudo-label refresh loops and targeted augmentation.</li>
+      <li><strong>Self-supervised branch:</strong> SimCLR pretraining with downstream linear-probe and MLP-head evaluation.</li>
+      <li><strong>Protocol controls:</strong> Stable splits, repeatable seeds, and aligned evaluation criteria.</li>
+      <li><strong>Analysis:</strong> Confidence profiles and failure-sample inspection for ambiguous digits.</li>
+    </ul>
   </section>
 
-  <section id="results" class="detail-block" data-detail-panel hidden>
+  <section id="results" class="detail-block" data-detail-panel>
     <h2>Results</h2>
-    <div class="detail-metric-grid">
-      <article class="detail-metric">
-        <p class="detail-metric__label">Semi-supervised</p>
-        <h3>97.18%</h3>
-        <p>CNN with pseudo-labeling under strict low-label conditions.</p>
-      </article>
-      <article class="detail-metric">
-        <p class="detail-metric__label">Self-supervised</p>
-        <h3>98.55%</h3>
-        <p>SimCLR linear probe with only 100 labeled samples.</p>
-      </article>
-      <article class="detail-metric">
-        <p class="detail-metric__label">Self-supervised</p>
-        <h3>98.44%</h3>
-        <p>SimCLR with MLP classification head.</p>
-      </article>
+    <p>These reported MNIST results come from the low-label study using 100 labeled samples across 60,000 images.</p>
+    <div class="project-table-scroll" role="region" aria-label="Project results comparison" tabindex="0">
+    <table>
+      <thead><tr><th>Learning path</th><th>Reported result</th><th>Evaluation setting</th></tr></thead>
+      <tbody>
+        <tr><td>CNN with pseudo-labeling</td><td>97.18%</td><td>Semi-supervised, under strict low-label conditions</td></tr>
+        <tr><td>SimCLR linear probe</td><td>98.55%</td><td>Only 100 labeled samples</td></tr>
+        <tr><td>SimCLR with MLP classification head</td><td>98.44%</td><td>Self-supervised representation learning</td></tr>
+      </tbody>
+    </table>
     </div>
   </section>
 
-  <section id="links" class="detail-block" data-detail-panel hidden>
+  <section id="links" class="detail-block" data-detail-panel>
     <h2>Links</h2>
     <p class="project-links">
       {% if page.demo_url and page.demo_url != "" %}

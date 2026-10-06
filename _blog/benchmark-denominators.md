@@ -21,7 +21,13 @@ An inference benchmark can produce a precise number and still answer the wrong q
 
 This became especially important when I compared runs with different prompt lengths, streaming behavior, prefix-cache state, and client concurrency. Several apparent performance stories changed once I reconstructed the denominator and workload. The figures identified as historical below come from recovered run records and reports; they are not fresh reruns.
 
-Three profile names appear below. **B0** is the report-backed MiMo v2.6 reference serving profile. **P1** is a later MiMo expansion with separate client and archive evidence; some short-run values survive only as a derived comparison. **E16** is a report-backed DeepSeek V4.1 reference profile, separate from the early V4.1 startup incident in [article 1]({{ '/blog/grace-hopper-file-cache/' | relative_url }}). None is a controlled variant of every other profile.
+Three profile names appear below:
+
+- **B0:** the report-backed MiMo v2.6 reference serving profile.
+- **P1:** a later MiMo expansion with separate client and archive evidence. Some short-run values survive only as a derived comparison.
+- **E16:** a report-backed DeepSeek V4.1 reference profile, separate from the early V4.1 startup incident in [article 1]({{ '/blog/grace-hopper-file-cache/' | relative_url }}).
+
+None is a controlled variant of every other profile.
 
 ## “Tokens per second” has more than one numerator
 
@@ -42,7 +48,13 @@ Actual output is also different from requested `max_tokens`. A client may ask fo
 
 Streaming clients observe events or chunks. A speculative decoder may verify multiple tokens before emitting a chunk, and transport buffering can change event boundaries. Counting chunks as tokens therefore makes both throughput and inter-event timing hard to interpret.
 
-Time to first token (TTFT) describes the wait until first output. Time per output token (TPOT) usually amortizes time *after* the first output over the remaining generated tokens. Inter-token latency (ITL) describes gaps between output events or tokens, depending on the tool. Under bundled streaming, an event gap is not automatically a per-token delay. These definitions need to travel with any chart, as the [vLLM benchmark CLI documentation](https://docs.vllm.ai/en/latest/benchmarking/cli/) illustrates.
+The latency names describe different intervals:
+
+- **TTFT, time to first token:** the wait until first output.
+- **TPOT, time per output token:** usually the time *after* the first output, amortized over the remaining generated tokens.
+- **ITL, inter-token latency:** gaps between output events or tokens, depending on the tool.
+
+Under bundled streaming, an event gap is not automatically a per-token delay. These definitions need to travel with any chart, as the [vLLM benchmark CLI documentation](https://docs.vllm.ai/en/latest/benchmarking/cli/) illustrates.
 
 <figure class="blog-figure blog-figure--wide" tabindex="0">
   <img src="{{ '/assets/blog/benchmark-timing.svg' | relative_url }}" alt="Conceptual request timeline: submission to first output is TTFT; first output to completion is the post-first-output interval. A stream chunk can contain more than one token." loading="lazy">
@@ -105,7 +117,9 @@ The archived long-context soak is a real example of this limit. It recorded **2,
 
 ### A benchmark line worth keeping
 
-<div class="benchmark-template" markdown="1">
+Before publishing a result, I would check that it includes each of these fields:
+
+<div class="benchmark-template editorial-checklist" markdown="1">
 - **Profile and evidence:** model, runtime, backend, version, record ID, historical or rerun.
 - **Workload:** actual input/output tokens, output target, request count, client-outstanding count, arrival pattern.
 - **State:** warm or cold, prompt/prefix reuse, observation window and drain status.

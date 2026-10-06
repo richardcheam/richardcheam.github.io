@@ -59,7 +59,15 @@ Neither failed probe proves that the desired KV pages were local. A policy must 
 
 ## The evidence ladder I would use now
 
-The next measurement would identify the allocation phase, sample the actual CPU-KV buffer pages, then connect their residency to observed transfer traffic and a matched serving run. A worker-level aggregate cannot substitute for any of these observations.
+This is proposed measurement work. I would use the following sequence to advance from configuration intent to performance evidence:
+
+1. **Topology:** map each GPU to its Grace CPU, host-memory domain, and HBM domain.
+2. **Effective policy:** record CPU affinity, allowed memory nodes, allocation phase, and the memory policy active when the buffer is created.
+3. **Specific buffer-page residency:** sample the actual CPU-KV buffer pages and report their physical locations.
+4. **Transfer evidence:** tie observed runtime traffic or transfers to that same buffer.
+5. **Matched performance comparison:** hold the workload and other settings fixed while changing one locality choice.
+
+A worker-level aggregate cannot substitute for any of these observations.
 
 The middle step needs an addressable buffer and a page-level status check, not just a configuration flag. Linux's [`move_pages` interface](https://man7.org/linux/man-pages/man2/move_pages.2.html) can report where selected pages reside; callers still need to handle permission errors and per-page results. That establishes placement at the instant of the query. It does not, by itself, show which path the GPU used later or how much transfer time was exposed to a request.
 

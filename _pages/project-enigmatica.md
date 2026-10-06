@@ -34,17 +34,17 @@ github_url: "https://github.com/richardcheam/enigmatica"
     </ul>
   </section>
 
-  <section id="build" class="detail-block" data-detail-panel hidden>
+  <section id="build" class="detail-block" data-detail-panel>
     <h2>What I Built</h2>
-    <div class="project-points">
-      <p><strong>Reusable mechanics layer:</strong> separated cipher and extraction logic from chapter-specific puzzle scripting so each new chapter can build on the same core modules.</p>
-      <p><strong>Chapter pipeline:</strong> each chapter owns its own playable sequence, notes, and assets, which keeps manga analysis and game implementation aligned.</p>
-      <p><strong>Static web delivery:</strong> exported Python chapter data into JSON, then rendered it through a dedicated landing page and one-puzzle-at-a-time play interface.</p>
-      <p><strong>Deployment workflow:</strong> GitHub Pages automation rebuilds the public project site from the repo whenever the chapter content changes.</p>
-    </div>
+    <ul class="project-components">
+      <li><strong>Reusable mechanics layer:</strong> separated cipher and extraction logic from chapter-specific puzzle scripting so each new chapter can build on the same core modules.</li>
+      <li><strong>Chapter pipeline:</strong> each chapter owns its own playable sequence, notes, and assets, which keeps manga analysis and game implementation aligned.</li>
+      <li><strong>Static web delivery:</strong> exported Python chapter data into JSON, then rendered it through a dedicated landing page and one-puzzle-at-a-time play interface.</li>
+      <li><strong>Deployment workflow:</strong> GitHub Pages automation rebuilds the public project site from the repo whenever the chapter content changes.</li>
+    </ul>
   </section>
 
-  <section id="results" class="detail-block" data-detail-panel hidden>
+  <section id="results" class="detail-block" data-detail-panel>
     <h2>Results</h2>
     <div class="detail-metric-grid">
       <article class="detail-metric">
@@ -70,15 +70,15 @@ github_url: "https://github.com/richardcheam/enigmatica"
     </div>
   </section>
 
-  <section id="visuals" class="detail-block" data-detail-panel hidden>
+  <section id="visuals" class="detail-block" data-detail-panel>
     <h2>Visuals</h2>
     <p>Current public-build cover artwork used for the project presentation.</p>
     <p>
-      <img src="{{ '/assets/projects/enigmatica/cover.png' | relative_url }}" alt="Enigmatica project cover" style="width:100%; border-radius: 18px; border: 1px solid #d6dce5; margin-top: 0.75rem;" />
+      <img src="{{ '/assets/projects/enigmatica/cover.png' | relative_url }}" alt="Enigmatica project cover" style="width:100%; border: 1px solid var(--border); margin-top: 0.75rem;" />
     </p>
   </section>
 
-  <section id="links" class="detail-block" data-detail-panel hidden>
+  <section id="links" class="detail-block" data-detail-panel>
     <h2>Links</h2>
     <p class="project-links">
       <a class="btn btn--primary" href="{{ page.demo_url }}" target="_blank" rel="noopener noreferrer">Live Demo</a>

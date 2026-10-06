@@ -34,34 +34,28 @@ github_url: "https://github.com/richardcheam/xai-vision-transfer"
     </ul>
   </section>
 
-  <section id="build" class="detail-block" data-detail-panel hidden>
+  <section id="build" class="detail-block" data-detail-panel>
     <h2>What I Built</h2>
-    <div class="project-points">
-      <p><strong>Unified training pipeline:</strong> one configurable framework for CNN, ViT, and DHVT across source and downstream datasets.</p>
-      <p><strong>Frugal-learning protocol:</strong> CIFAR-10 data-efficiency runs plus downstream comparison between scratch, frozen-backbone linear probing, and full fine-tuning.</p>
-      <p><strong>Checkpoint-first evaluation:</strong> saved model weights, per-run histories, plot regeneration, and canonical result export through a master results table.</p>
-      <p><strong>Explainability workflow:</strong> Grad-CAM for CNN, attention rollout for ViT, head-token influence for DHVT, confusion matrices, class diagnostics, and misclassification interpretability.</p>
-    </div>
+    <ul class="project-components">
+      <li><strong>Unified training pipeline:</strong> one configurable framework for CNN, ViT, and DHVT across source and downstream datasets.</li>
+      <li><strong>Frugal-learning protocol:</strong> CIFAR-10 data-efficiency runs plus downstream comparison between scratch, frozen-backbone linear probing, and full fine-tuning.</li>
+      <li><strong>Checkpoint-first evaluation:</strong> saved model weights, per-run histories, plot regeneration, and canonical result export through a master results table.</li>
+      <li><strong>Explainability workflow:</strong> Grad-CAM for CNN, attention rollout for ViT, head-token influence for DHVT, confusion matrices, class diagnostics, and misclassification interpretability.</li>
+    </ul>
   </section>
 
-  <section id="results" class="detail-block" data-detail-panel hidden>
+  <section id="results" class="detail-block" data-detail-panel>
     <h2>Results</h2>
-    <div class="detail-metric-grid">
-      <article class="detail-metric">
-        <p class="detail-metric__label">Source stage</p>
-        <h3>88.88%</h3>
-        <p>DHVT clean CIFAR-10 accuracy, the strongest source-stage model in the study.</p>
-      </article>
-      <article class="detail-metric">
-        <p class="detail-metric__label">EuroSAT</p>
-        <h3>97.52%</h3>
-        <p>Best downstream EuroSAT result with DHVT trained from scratch.</p>
-      </article>
-      <article class="detail-metric">
-        <p class="detail-metric__label">Brain MRI</p>
-        <h3>94.00%</h3>
-        <p>Best downstream Brain Tumor MRI result with pretrained DHVT and full fine-tuning.</p>
-      </article>
+    <p>Each row reports a selected result for its dataset and training setting. The percentages describe separate evaluations.</p>
+    <div class="project-table-scroll" role="region" aria-label="Project results comparison" tabindex="0">
+    <table>
+      <thead><tr><th>Dataset</th><th>Reported result</th><th>Model and evaluation setting</th></tr></thead>
+      <tbody>
+        <tr><td>CIFAR-10</td><td>88.88%</td><td>DHVT clean accuracy; strongest source-stage model in this study</td></tr>
+        <tr><td>EuroSAT</td><td>97.52%</td><td>Best downstream result; DHVT trained from scratch</td></tr>
+        <tr><td>Brain Tumor MRI</td><td>94.00%</td><td>Best downstream result; pretrained DHVT with full fine-tuning</td></tr>
+      </tbody>
+    </table>
     </div>
 
     <div class="project-points" style="margin-top: 1rem;">
@@ -71,21 +65,21 @@ github_url: "https://github.com/richardcheam/xai-vision-transfer"
     </div>
   </section>
 
-  <section id="visuals" class="detail-block" data-detail-panel hidden>
+  <section id="visuals" class="detail-block" data-detail-panel>
     <h2>Visuals</h2>
     <p>Selected report-ready panels from the experiment repository.</p>
     <p>
-      <img src="{{ '/assets/projects/xai-vision-transfer/source_overview.png' | relative_url }}" alt="Source-stage overview panel" style="width:100%; border-radius: 18px; border: 1px solid #d6dce5; margin-top: 0.75rem;" />
+      <img src="{{ '/assets/projects/xai-vision-transfer/source_overview.png' | relative_url }}" alt="Source-stage overview panel" style="width:100%; border: 1px solid var(--border); margin-top: 0.75rem;" />
     </p>
     <p>
-      <img src="{{ '/assets/projects/xai-vision-transfer/downstream_dynamics.png' | relative_url }}" alt="Downstream learning dynamics panel" style="width:100%; border-radius: 18px; border: 1px solid #d6dce5;" />
+      <img src="{{ '/assets/projects/xai-vision-transfer/downstream_dynamics.png' | relative_url }}" alt="Downstream learning dynamics panel" style="width:100%; border: 1px solid var(--border);" />
     </p>
     <p>
-      <img src="{{ '/assets/projects/xai-vision-transfer/downstream_interpretability_overview.png' | relative_url }}" alt="Downstream interpretability panel" style="width:100%; border-radius: 18px; border: 1px solid #d6dce5;" />
+      <img src="{{ '/assets/projects/xai-vision-transfer/downstream_interpretability_overview.png' | relative_url }}" alt="Downstream interpretability panel" style="width:100%; border: 1px solid var(--border);" />
     </p>
   </section>
 
-  <section id="links" class="detail-block" data-detail-panel hidden>
+  <section id="links" class="detail-block" data-detail-panel>
     <h2>Links</h2>
     <p class="project-links">
       <a class="btn btn--inverse" href="{{ page.github_url }}" target="_blank" rel="noopener noreferrer">GitHub</a>

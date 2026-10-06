@@ -63,7 +63,14 @@ The invariant is straightforward: either every required group acquires its block
   <figcaption><strong>Figure 1 · All groups or none.</strong> Conceptual ownership invariant from the reported allocator repair, not a diagram of an audited code path. Transfer dependencies must finish before a block is released or reused. Source: canonical pack, FAIL-GH200 allocator record / SRC-07.</figcaption>
 </figure>
 
-For example, suppose a request needs groups A and B. A conceptual failure sequence is: take A from the free list, add A to the request table, then fail to obtain B. Returning “out of capacity” at that point leaves A owned and the counters changed. A correct rollback removes A from the request table, restores its free-list membership and references, and returns the counters to their prior values. The surviving records describe preflight and rollback repairs; they do not preserve this exact sequence as the historical reproducer.
+For example, suppose a request needs groups A and B. This conceptual sequence shows the partial-allocation problem and required rollback:
+
+1. **Reserve A:** take A from the free list.
+2. **Record ownership:** add A to the request table and update the relevant counters.
+3. **Fail on B:** the allocator cannot obtain the second group. Returning “out of capacity” now would leave A owned and the counters changed.
+4. **Roll back:** remove A from the request table, restore its free-list membership and references, and return the counters to their prior values.
+
+The surviving records describe preflight and rollback repairs; they do not preserve this exact sequence as the historical reproducer.
 
 The historical reliability record describes preflight and rollback repairs, duplicate-safe freeing, and free-list bookkeeping fixes. The original patch and reproducer were not freshly audited for this article, so I treat that as a reported repair, then use the accepted pressure runs as functional evidence. A timeout around the failing request would not have restored partial allocator state.
 
@@ -77,7 +84,14 @@ In a later integration track, the active request set once reached zero while dev
 **Completion rule:** a client response ends the request's visible output. Engine quiescence also requires every transfer event and block owner to reach a safe terminal state.
 </div>
 
-This is the practical standard I would carry to another offload design: prove output consistency, observe actual movement, check allocator rollback under pressure, and gate idleness on transfer completion. The records establish functionality in named historical profiles. They do not isolate a latency gain from NUMA placement or prove complete parity with the original SuperInfer system.
+This is the correctness checklist I would carry to another offload design:
+
+- **Output consistency:** prove that eviction and reload preserve the expected output.
+- **Actual movement:** observe store/load counters and directional traffic.
+- **Allocator rollback:** check that failed grouped allocation restores every affected owner and counter.
+- **Transfer completion:** gate idleness and block reuse on completed transfer dependencies.
+
+The records establish functionality in named historical profiles. They do not isolate a latency gain from NUMA placement or prove complete parity with the original SuperInfer system.
 
 <div class="note-related" markdown="1">
 

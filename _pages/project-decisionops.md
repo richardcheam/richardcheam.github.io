@@ -33,18 +33,18 @@ github_url: "https://github.com/richardcheam/decisionops"
     </ul>
   </section>
 
-  <section id="build" class="detail-block" data-detail-panel hidden>
+  <section id="build" class="detail-block" data-detail-panel>
     <h2>What I Built</h2>
-    <div class="project-points">
-      <p><strong>Deterministic harness:</strong> four bounded fixture tools return checked-in database, authentication, storage and service-health observations; they never call live services or change systems. The harness alone controls candidate eligibility, evidence masking, tool returns, proposal acceptance or rejection, budgets and terminal accounting.</p>
-      <p><strong>Learned action selection:</strong> GLiClass and Laya choose among the actions the harness makes available. The harness never overrides a model's choice with an argmax or hidden-label fallback, and gold outcomes and unrequested observations stay hidden from every policy.</p>
-      <p><strong>Baselines and variants:</strong> deterministic fixed-order and rules baselines, plus unmasked and evidence-masked variants of each model, run in separate sequential worker processes that reuse each model for its two variants.</p>
-      <p><strong>Replay and viewer:</strong> versioned, model-free replay of the recorded decision traces, and a standard-library exporter that builds a self-contained HTML viewer needing no model weights, PyTorch, server or network access.</p>
-      <p><strong>Verified deploy:</strong> GitHub Actions runs the model-free tests and the export on pull requests, and deploys only the generated site from the main branch after verification.</p>
-    </div>
+    <ul class="project-components">
+      <li><strong>Deterministic harness:</strong> four bounded fixture tools return checked-in database, authentication, storage and service-health observations; they never call live services or change systems. The harness alone controls candidate eligibility, evidence masking, tool returns, proposal acceptance or rejection, budgets and terminal accounting.</li>
+      <li><strong>Learned action selection:</strong> GLiClass and Laya choose among the actions the harness makes available. The harness never overrides a model's choice with an argmax or hidden-label fallback, and gold outcomes and unrequested observations stay hidden from every policy.</li>
+      <li><strong>Baselines and variants:</strong> deterministic fixed-order and rules baselines, plus unmasked and evidence-masked variants of each model, run in separate sequential worker processes that reuse each model for its two variants.</li>
+      <li><strong>Replay and viewer:</strong> versioned, model-free replay of the recorded decision traces, and a standard-library exporter that builds a self-contained HTML viewer needing no model weights, PyTorch, server or network access.</li>
+      <li><strong>Verified deploy:</strong> GitHub Actions runs the model-free tests and the export on pull requests, and deploys only the generated site from the main branch after verification.</li>
+    </ul>
   </section>
 
-  <section id="results" class="detail-block" data-detail-panel hidden>
+  <section id="results" class="detail-block" data-detail-panel>
     <h2>Results</h2>
     <div class="detail-metric-grid">
       <article class="detail-metric">
@@ -66,11 +66,19 @@ github_url: "https://github.com/richardcheam/decisionops"
 
     <div class="project-points" style="margin-top: 1rem;">
       <p><strong>The tradeoff:</strong> masking increased reviews, including unnecessary ones (5 for Laya, 7 for GLiClass). A diagnosis supported by visible evidence can still be premature: on one evaluation scenario, masked Laya checked only the database before diagnosing, while the scenario held multiple faults.</p>
-      <p><strong>Limitations:</strong> the 24 scenarios are inspected synthetic regression cases, not held-out data or evidence of production accuracy. Model scores are uncalibrated and never authorize an action. GLiClass and Laya receive different native input formats, so the comparison does not isolate model architecture. No confidence threshold was fitted and no prompt variants were searched.</p>
+      <div class="project-limitations">
+        <h3>Limits of the comparison</h3>
+        <ul>
+          <li><strong>Scenario scope:</strong> the 24 scenarios are inspected synthetic regression cases, not held-out data or evidence of production accuracy.</li>
+          <li><strong>Model scores:</strong> scores are uncalibrated and never authorize an action.</li>
+          <li><strong>Input formats:</strong> GLiClass and Laya receive different native input formats, so the comparison does not isolate model architecture.</li>
+          <li><strong>Tuning:</strong> no confidence threshold was fitted and no prompt variants were searched.</li>
+        </ul>
+      </div>
     </div>
   </section>
 
-  <section id="links" class="detail-block" data-detail-panel hidden>
+  <section id="links" class="detail-block" data-detail-panel>
     <h2>Links</h2>
     <p>The demo is a viewer for the recorded traces. It does not run live model inference or perform any operational remediation.</p>
     <p class="project-links">

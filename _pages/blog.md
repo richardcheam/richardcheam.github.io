@@ -33,6 +33,8 @@ permalink: /blog/
     {% endfor %}
   </nav>
 
+  <p class="blog-filter-count" data-filter-count data-filter-noun="posts" aria-live="polite">Showing {{ published_posts.size }} of {{ published_posts.size }} posts</p>
+
   {% if published_posts.size > 0 %}
     <ol class="blog-post-list" aria-label="All blog posts">
       {% for post in published_posts %}
@@ -41,16 +43,19 @@ permalink: /blog/
         {% for cat in site.data.blog_categories %}
           {% if cat.key == post_key %}{% assign category_label = cat.label %}{% endif %}
         {% endfor %}
-        {% assign post_series = published_posts | where: "series", post.series %}
+        {% assign post_series = published_posts | where: "series", post.series | sort: "series_order" %}
+        {% for series_post in post_series %}
+          {% if series_post.url == post.url %}{% assign post_position = forloop.index %}{% endif %}
+        {% endfor %}
 
         <li class="blog-post-row" data-filter-card data-filter-facets="category:{{ post_key }}" data-filter-text="{{ post.title | downcase }} {{ category_label | downcase }} {{ post_key }} {{ post.excerpt | strip_html | downcase }}">
           <div class="blog-post-main">
+            {% if post.series %}<p class="blog-reading-order">Post {{ post_position }} of {{ post_series.size }}</p>{% endif %}
             <div class="blog-post-titleline">
               <h3><a href="{{ post.url | relative_url }}">{{ post.title }}</a></h3>
               {% if post.featured %}<span class="blog-featured-label">Featured</span>{% endif %}
             </div>
             <p class="blog-post-description">{{ post.excerpt }}</p>
-            {% if post.series %}<p class="blog-post-series">Post {{ post.series_order }} of {{ post_series.size }} in this series</p>{% endif %}
           </div>
           <p class="blog-post-meta"><time datetime="{{ post.date | date: '%Y-%m-%d' }}">{{ post.date | date: '%d %b %Y' }}</time><span>{{ post.read_time | default: '7 min' }} read</span><span class="blog-post-topic">{{ category_label }}</span></p>
         </li>

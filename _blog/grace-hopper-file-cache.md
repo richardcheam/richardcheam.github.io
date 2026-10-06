@@ -47,7 +47,13 @@ The arrows show *possible* data flow, not a promise that every loader copies eve
 
 That distinction changed how I interpreted a memory shortfall. The observation “memory stayed occupied after load” did not establish a CUDA leak. It could include file-backed checkpoint pages, anonymous allocations, pinned buffers, and live device tensors. A process's virtual mappings are views of physical storage, not another pile of bytes to add to the total. The measured recovery supports a checkpoint-cache explanation for *this startup failure*; it does not diagnose every retained-HBM incident.
 
-It also helps to name the mechanism before saying “offload.” Host-resident **weights** are model state, CPU-stored **KV** is request state that must be reloaded before dependent attention work, and Linux **swap** backs eligible OS pages on storage. A NUMA placement policy chooses where a host allocation should live; it does not itself move KV blocks. These mechanisms have different owners and costs, and the file-cache incident should not be combined with the separate CPU-KV tests as one measured stack.
+It also helps to name the mechanism before saying “offload”:
+
+- **Host-resident weights:** model state.
+- **CPU-stored KV:** request state that must be reloaded before dependent attention work.
+- **Linux swap:** storage backing for eligible OS pages.
+
+A NUMA placement policy chooses where a host allocation should live; it does not itself move KV blocks. These mechanisms have different owners and costs, and the file-cache incident should not be combined with the separate CPU-KV tests as one measured stack.
 
 ## What I would measure before changing anything
 
@@ -63,7 +69,14 @@ It also helps to name the mechanism before saying “offload.” Host-resident *
 
 </div>
 
-I would compare the readings at explicit phases: before loading, after loading, after the runtime has created its tensors, and after a controlled cache action. The phase labels matter as much as the byte counts. Otherwise, an allocation made during graph capture or KV reservation can be mistaken for file-cache growth.
+I would compare the readings at four explicit phases:
+
+1. **Before loading:** establish the starting memory state.
+2. **After loading:** inspect what the checkpoint read left resident.
+3. **After the runtime has created its tensors:** distinguish runtime allocations from file-backed pages.
+4. **After a controlled cache action:** repeat the same capacity and backing checks.
+
+This is the measurement sequence I would use, not a recovered phase-by-phase byte trace. The phase labels matter as much as the byte counts. Otherwise, an allocation made during graph capture or KV reservation can be mistaken for file-cache growth.
 
 ## Why targeted file advice is a diagnostic, not a universal fix
 

@@ -34,18 +34,18 @@ findings_url: "https://github.com/richardcheam/embedding-diagnostics/blob/main/d
     </ul>
   </section>
 
-  <section id="build" class="detail-block" data-detail-panel hidden>
+  <section id="build" class="detail-block" data-detail-panel>
     <h2>What I Built</h2>
-    <div class="project-points">
-      <p><strong>Controlled degradation bench:</strong> seven training conditions, including a control with no collapse prevention that is built to fail, run over five paired seeds on CIFAR-10 (Phase A) and BDD100K driving scenarios (Phase B).</p>
-      <p><strong>Diagnostics under test:</strong> total variance, mean pairwise cosine, RankMe, participation ratio, linear probes and retrieval precision, each documented with its formula, a worked example and its blind spot.</p>
-      <p><strong>Validated components:</strong> the SIGReg loss matches the reference implementation bit for bit, and that validation found a real bug in the first version. The rest of the system (masked latent prediction, a project-specific projector) is not a LeJEPA reproduction.</p>
-      <p><strong>Minimal sufficient panel:</strong> an exhaustive search over subsets found that no single label-free diagnostic covers every collapse mode, but total variance plus RankMe does, with zero misclassifications across all 14 condition-dataset pairs.</p>
-      <p><strong>Reproducible runs:</strong> environment checks before training, crash recovery that reruns only unfinished jobs, one locked CUDA 12.8 environment across x86 and Grace Hopper machines, and CI that runs lint, 300+ tests and the panel validation.</p>
-    </div>
+    <ul class="project-components">
+      <li><strong>Controlled degradation bench:</strong> seven training conditions, including a control with no collapse prevention that is built to fail, run over five paired seeds on CIFAR-10 (Phase A) and BDD100K driving scenarios (Phase B).</li>
+      <li><strong>Diagnostics under test:</strong> total variance, mean pairwise cosine, RankMe, participation ratio, linear probes and retrieval precision, each documented with its formula, a worked example and its blind spot.</li>
+      <li><strong>Validated components:</strong> the SIGReg loss matches the reference implementation bit for bit, and that validation found a real bug in the first version. The rest of the system (masked latent prediction, a project-specific projector) is not a LeJEPA reproduction.</li>
+      <li><strong>Minimal sufficient panel:</strong> an exhaustive search over subsets found that no single label-free diagnostic covers every collapse mode, but total variance plus RankMe does, with zero misclassifications across all 14 condition-dataset pairs.</li>
+      <li><strong>Reproducible runs:</strong> environment checks before training, crash recovery that reruns only unfinished jobs, one locked CUDA 12.8 environment across x86 and Grace Hopper machines, and CI that runs lint, 300+ tests and the panel validation.</li>
+    </ul>
   </section>
 
-  <section id="results" class="detail-block" data-detail-panel hidden>
+  <section id="results" class="detail-block" data-detail-panel>
     <h2>Results</h2>
     <div class="detail-metric-grid">
       <article class="detail-metric">
@@ -71,7 +71,7 @@ findings_url: "https://github.com/richardcheam/embedding-diagnostics/blob/main/d
     </div>
   </section>
 
-  <section id="links" class="detail-block" data-detail-panel hidden>
+  <section id="links" class="detail-block" data-detail-panel>
     <h2>Links</h2>
     <p class="project-links">
       <a class="btn btn--primary" href="{{ page.findings_url }}" target="_blank" rel="noopener noreferrer">Findings</a>

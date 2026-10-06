@@ -1,172 +1,96 @@
 ---
-# ─────────────────────────────────────────────────────────────────────────────
-# Authoring template for Paper Reviews.
-# Files starting with "_" are never published by Jekyll, so this file is safe
-# to keep here. Copy it to `_paper_reviews/<slug>.md` (the slug becomes the URL:
-# /paper-reviews/<slug>/), fill it in, and delete what you do not use.
-#
-# Layout: `paper-review` is applied automatically (see `defaults` in _config.yml).
-# ─────────────────────────────────────────────────────────────────────────────
-
-title: "Model or Paper Name"            # required; shown as the page h1
-date: 2026-10-01                        # required; review date, sorts the index
-excerpt: "One or two sentences that say what this is and why it matters."  # required; card summary and page subtitle
-
-type: tech-report                       # paper | tech-report (default: paper). Keys live in _data/paper_review_topics.yml
-topic: [moe, attention, serving]        # one or more topic keys from _data/paper_review_topics.yml
-tags: [MLA, FP8, MTP]                   # free text; searchable, shown on the entry
-
-org: "Lab or company"                   # shown on cards and in the header
-authors: "First Author, Second Author"  # optional
-source_url: https://arxiv.org/abs/0000.00000   # optional; the primary button
-source_label: "Read the report"         # optional; default is "Read the paper" or "Read the report"
-links:                                  # optional extra buttons
-  - label: "Model card"
-    url: https://huggingface.co/
-  - label: "Code"
-    url: https://github.com/
-source_date: 2026-09-20                 # optional; when the paper or report came out
-
-featured: false                         # optional; true makes the card span the full row on the index
-series: model-family                    # optional; entries sharing this key get Previous / Next links
-series_title: "Model Family"            # optional; readable series name
-series_order: 1                         # optional; position inside the series
-
-read_time: 12                           # optional; minutes. Leave out to compute from word count (220 wpm)
-math: true                              # optional; loads KaTeX on this page only
-
-tldr:                                   # optional but recommended: 3 to 5 answers up front. Markdown allowed
-  - "The single most important result, with its number."
-  - "What changed compared with the previous version."
-  - "What this means if you serve or fine-tune it."
-
-glance:                                 # optional; tech reports. Any label / value pairs, shown as a spec card
-  - label: "Total params"
-    value: "000B"
-  - label: "Active params"
-    value: "00B"
-  - label: "Context length"
-    value: "128K"
-  - label: "Attention"
-    value: "MLA"
-  - label: "Precision"
-    value: "FP8"
-  - label: "License"
-    value: "MIT"
+# Copy to a named review file, replace the prompts, and set published: true only
+# when the claims, evidence, sources, and limitations have been checked.
+title: "Paper or report title"
+published: false
+date: 2026-10-01
+question: "What concrete question does this paper try to answer?"
+excerpt: "A short summary of the contribution and the evidence that supports it."
+type: paper
+# Topic keys come from _data/paper_review_topics.yml.
+topic: []
+tags: []
+org: ""
+authors: ""
+source_url: ""
+source_label: "Read the paper"
+source_date: 2026-09-20
+featured: false
+math: false
+# Optional: series, series_title, series_order, links, read_time.
+# Summary points are independent findings, so they render as bullets.
+tldr:
+  - "**Authors’ claim:** the central contribution, with its scope."
+  - "**Evidence:** the experiment or analysis supporting that claim."
+  - "**My reading:** the interpretation I can support from that evidence."
+# Optional glance: label/value pairs for verified facts such as model size,
+# context limit, or evaluation setting. Use only the facts this review needs.
 ---
 
 <!--
-  Write the body in Markdown. Every `##` and `###` heading goes into the
-  "On this page" contents automatically, and `##` headings are numbered.
-  Keep headings short: they are also the navigation.
+Use paragraphs for motivation and reasoning, bullets for independent findings,
+numbered lists for real sequences, and tables for shared comparison dimensions.
+Keep limitations next to the claims they qualify. Do not leave prompts or
+invented values in a published review. Every h2/h3 appears in "On this page".
 -->
 
-## First section
+## The question and why it matters
 
-Plain paragraphs, **bold** for the key number, and `inline code` for names such as `max_num_seqs`.
+Explain the problem, the prior constraint, and why I chose to read this work.
+Keep the authors’ stated objective distinct from my reason for reading it.
 
-### A subsection
+## How the method works
 
-Lists work as usual:
+Introduce the mechanism before listing stages. Number stages only when their
+order matters; adjust their number and labels to the actual method.
 
-- First point.
-- Second point.
+1. **First stage:** what enters, what changes, and what passes to the next stage.
+2. **Next stage:** the operation that depends on the previous stage.
 
-## Tables
+Explain why the stages connect. If the method is a set of independent components,
+use labeled bullets instead of a numbered pipeline.
 
-Write standard Markdown tables. They scroll sideways inside their own frame on small screens, so wide benchmark tables are fine.
+## What the evidence shows
 
-| Model | Params | Active | MMLU | GSM8K |
-|:--|--:|--:|--:|--:|
-| Previous version | 000B | 00B | 00.0 | 00.0 |
-| This version | 000B | 00B | **00.0** | **00.0** |
+State the dataset, split, metric, evaluation conditions, and comparison scope
+before the result. Attribute each value to a table, figure, section, or linked
+source. Distinguish reported results from anything I independently reproduced.
 
-## Figures
+| Comparison | Metric and unit | Dataset and conditions | Reported result | Source |
+|:--|:--|:--|:--|:--|
+| Fill from the paper | Define the metric | Record the evaluation setup | Copy the verified value | Cite its location |
 
-Inline SVG goes inside a figure. Use the `fig-*` classes so the drawing follows the site colours: `fig-box`, `fig-box--soft`, `fig-box--on` (black, for the highlighted element), `fig-line`, `fig-line--on`, `fig-text`, `fig-text--strong`, `fig-text--on`, `fig-text--label`.
+Place any unmatched baseline settings, missing uncertainty, or other limits
+immediately after the comparison they qualify.
 
-<figure class="review-figure">
-  <div class="review-figure__frame">
-    <svg viewBox="0 0 640 120" role="img" aria-labelledby="fig-template-title">
-      <title id="fig-template-title">Describe the diagram for screen readers</title>
-      <rect class="fig-box" x="20" y="40" width="160" height="44" rx="10"/>
-      <text class="fig-text fig-text--strong" x="100" y="67" text-anchor="middle">Input</text>
-      <path class="fig-line fig-line--on" d="M180 62 H460"/>
-      <rect class="fig-box fig-box--on" x="460" y="40" width="160" height="44" rx="10"/>
-      <text class="fig-text fig-text--on" x="540" y="67" text-anchor="middle">Output</text>
-    </svg>
-  </div>
-  <figcaption><strong>Figure 1.</strong> A caption that says what to notice, not what is drawn.</figcaption>
-</figure>
+- **Finding:** one result and the evidence supporting it.
+- **Limitation:** the boundary of that result, without generalizing beyond it.
 
-Images work the same way: put an `<img src="..." alt="...">` inside `review-figure__frame`.
+## My interpretation
 
-## Code and config
+Explain what I think follows from the evidence and why. Mark inferences as my
+interpretation. Explain alternative readings when the experiments do not isolate
+one cause.
 
-```python
-from vllm import LLM, SamplingParams
+## Open questions and possible next work
 
-llm = LLM(model="org/model", tensor_parallel_size=8)
-print(llm.generate(["Hello"], SamplingParams(max_tokens=32)))
-```
+- **Unresolved question:** what the authors’ evidence cannot establish.
+- **Proposed experiment:** what I would measure next and which claim it would test.
 
-```yaml
-max_model_len: 131072
-enable_expert_parallel: true
-```
-
-## Math
-
-Needs `math: true` in the front matter. Inline math uses double dollars inside a sentence, such as $$O(n^2)$$, and a display equation sits on its own lines:
-
-$$
-\mathrm{Attention}(Q, K, V) = \mathrm{softmax}\!\left(\frac{QK^\top}{\sqrt{d_k}}\right)V
-$$
-
-## Callouts
-
-<div class="note-callout note-callout--definition" markdown="1">
-**Definition.** For terms the reader needs before going further.
-</div>
-
-<div class="note-callout note-callout--pitfall" markdown="1">
-**Pitfall.** For claims that do not hold outside the paper's setup, or easy misreadings.
-</div>
-
-<div class="note-callout note-callout--inference" markdown="1">
-**Inference note.** For serving implications: memory, kernels, batching, latency.
-</div>
+Close with a short connection to my own work if one is supported. A proposed
+experiment is future work, not a result that has already been achieved.
 
 <!--
-  ──────────────────────────────────────────────────────────────────────────
-  Optional section set for classic paper reviews (type: paper).
-  Delete the sections above and keep these, or mix both.
-  ──────────────────────────────────────────────────────────────────────────
+Optional technical artifacts:
 
-## 10 Minute Pass
+Wrap a real figure in <figure class="review-figure"> with a
+<div class="review-figure__frame"> containing the image or SVG. Supply alt text,
+a source, and a caption distinguishing measured, reconstructed, or conceptual
+content. Use fig-box/fig-line/fig-text classes for native SVG. Include units and
+scope in the figure itself. Add a figure only when it explains the subject.
 
-1. The **problem** in one sentence.
-2. The **core method** in one sentence.
-3. The **main result** in one sentence.
-
-<div class="note-callout note-callout--definition" markdown="1">
-**Why this works:** forcing one line summaries exposes whether the paper was really understood.
-</div>
-
-## Deep Pass
-
-- What assumptions are hidden?
-- What data constraints limit transferability?
-- Which component is reusable in my own projects?
-
-## Action Block
-
-- One experiment to run.
-- One idea to reuse.
-- One claim to verify before trusting it.
-
-## Review Summary
-
-- Why the paper matters, in one sentence.
-- What I would do differently.
+Markdown tables scroll inside their own wrapper. Use code fences only for code
+or configuration actually relevant to the paper. Set math: true for KaTeX;
+inline and display math use double-dollar delimiters. A note-callout may explain
+a definition or evidence boundary, but ordinary paragraphs are the default.
 -->

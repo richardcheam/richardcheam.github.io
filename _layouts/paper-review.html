@@ -10,7 +10,7 @@ layout: default
 {%- assign page_tags = page.tags | join: "," | split: "," -%}
 
 {%- if page.series -%}
-  {%- assign series_docs = site.paper_reviews | where: "series", page.series | sort: "series_order" -%}
+  {%- assign series_docs = site.paper_reviews | where_exp: "doc", "doc.published != false" | where: "series", page.series | sort: "series_order" -%}
   {%- for doc in series_docs -%}
     {%- if doc.url == page.url -%}
       {%- assign series_position = forloop.index -%}
@@ -32,6 +32,7 @@ layout: default
       <span class="type-badge type-badge--{{ review_type }}">{{ type_long_label }}</span>
       {% if page.org %}<span>{{ page.org }}</span>{% endif %}
     </p>
+    {% if page.question %}<p class="review-head__question">{{ page.question }}</p>{% endif %}
     <h1 class="review-head__title">{{ page.title }}</h1>
     {% if page.excerpt %}<p class="review-head__dek">{{ page.excerpt | strip_html | strip }}</p>{% endif %}
     {% if page.source_url or page.links %}
@@ -75,11 +76,11 @@ layout: default
     {% if page.tldr %}
       <section class="review-tldr" aria-labelledby="review-tldr-title" data-reveal>
         <h2 class="review-panel-title" id="review-tldr-title">In short</h2>
-        <ol class="review-tldr__list">
+        <ul class="review-tldr__list">
           {% for point in page.tldr %}
             <li>{{ point | markdownify | remove: "<p>" | remove: "</p>" | strip }}</li>
           {% endfor %}
-        </ol>
+        </ul>
       </section>
     {% endif %}
 
@@ -117,7 +118,7 @@ layout: default
 
     {%- assign related_count = 0 -%}
     {%- capture related_cards -%}
-      {%- assign candidates = site.paper_reviews | sort: "date" | reverse -%}
+      {%- assign candidates = site.paper_reviews | where_exp: "doc", "doc.published != false" | sort: "date" | reverse -%}
       {%- for doc in candidates -%}
         {%- if related_count >= 3 -%}{%- break -%}{%- endif -%}
         {%- if doc.url == page.url -%}{%- continue -%}{%- endif -%}

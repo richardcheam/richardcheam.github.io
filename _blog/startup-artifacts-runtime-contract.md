@@ -26,7 +26,13 @@ On GH200, a quantized checkpoint that looked small enough on disk still failed w
 
 ## The failing phase determines the memory question
 
-Checkpoint size is not peak startup memory. Loading can create a backend-specific representation, packing buffers, conversion workspaces, and later graph or KV reservations. A lower KV-memory target cannot rescue a failure that occurs before the engine has begun allocating KV.
+Checkpoint size is not peak startup memory. I distinguish three parts of startup:
+
+1. **Checkpoint loading:** read model state and create the initial runtime allocations.
+2. **Backend preparation:** construct the backend-specific representation, packing buffers, and conversion workspaces.
+3. **Later runtime preparation:** profile capacity, capture graphs, and reserve KV as required by the particular engine path.
+
+The relative order of graph and KV work depends on that path; this list does not establish their order in every runtime. A lower KV-memory target cannot rescue a failure that occurs before the engine has begun allocating KV.
 
 The historical MiMo v2.6 B0 profile used a pinned vLLM development build, reported as <code>0.29.1rc1.dev449+geb8798058</code>, on dual GH200. Tensor parallelism (TP) split model work across two GPU ranks; expert parallelism (EP) placed experts across two ranks. The backend investigation recorded three distinct outcomes in that historical runtime:
 
@@ -58,9 +64,12 @@ Graph capture, compilation, and tuning can make initialization expensive because
 
 For this work, the constraint was to keep runtime performance, quality, features, graph coverage, and KV capacity while removing avoidable repeated startup work. One separate report recorded about **69 seconds of graph capture** in a historical profile. It was a phase observation, **not** an A/B-proven startup improvement. Another raw startup log warned that referenced compiled artifacts were missing; the archive does not establish their performance impact or a verified repair.
 
-<div class="note-callout note-callout--pitfall" markdown="1">
-**Validation rule:** a populated cache directory and an HTTP-ready process are insufficient. Check the expected rank-specific hits, effective graph path, KV capacity, and the same serving workload after restart.
-</div>
+A populated cache directory and an HTTP-ready process are insufficient. After restart, I would validate:
+
+- **Rank-specific cache hits:** every expected rank uses its genuine tuned records.
+- **Effective graph path:** the intended graph mode and coverage remain active.
+- **KV capacity:** the capacity budget remains consistent with the validated profile.
+- **Serving behavior:** the same workload still completes with the required performance, quality, and features.
 
 I can attribute the historical cache completeness repair and backend selection to the local integration work. I cannot infer that the workaround is needed on current upstream code, that all compilation artifacts were reused, or that an unmeasured startup speedup occurred. Those boundaries are part of the result.
 

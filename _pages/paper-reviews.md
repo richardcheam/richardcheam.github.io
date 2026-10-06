@@ -4,13 +4,13 @@ title: "Paper Reviews"
 permalink: /paper-reviews/
 ---
 
-{% assign sorted_reviews = site.paper_reviews | sort: "date" | reverse %}
+{% assign sorted_reviews = site.paper_reviews | where_exp: "review", "review.published != false" | sort: "date" | reverse %}
 
 <section class="page-intro" data-reveal>
   <p class="section-eyebrow">Paper Reviews</p>
   <h2>Research takeaways worth keeping</h2>
   <p class="section-description">
-    Close readings of research papers, and long explainers of technical reports on frontier models and serving systems. Written for myself and any learner.
+    Close readings of research papers and technical reports, with the authors’ claims, their evidence, and my interpretation kept distinct.
   </p>
 </section>
 
@@ -18,7 +18,7 @@ permalink: /paper-reviews/
   <header class="section-head">
     <p class="section-eyebrow">Library</p>
     <h2>Browse the reviews</h2>
-    <p class="section-description">Search by title, organisation, tag or topic, or narrow the list by type and topic.</p>
+    {% if sorted_reviews.size > 0 %}<p class="section-description">Search by title, organisation, tag or topic, or narrow the list by type and topic.</p>{% endif %}
   </header>
 
   {% if sorted_reviews.size > 0 %}
@@ -65,9 +65,9 @@ permalink: /paper-reviews/
       {% endfor %}
     </div>
   {% else %}
-    <article class="premium-card" data-reveal>
-      <h3 class="card-title">No reviews yet</h3>
-      <p class="card-summary">Add a markdown file in <code>_paper_reviews/</code>, starting from <code>_paper_reviews/_template.md</code>.</p>
-    </article>
+    <div class="review-empty">
+      <h3>No reviews published yet</h3>
+      <p>Future reviews will trace a paper’s question, method, evidence, and limitations, followed by what I take from it.</p>
+    </div>
   {% endif %}
 </section>

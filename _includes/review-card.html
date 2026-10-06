@@ -11,6 +11,7 @@
    {% if include.filterable %}data-reveal data-filter-card data-filter-facets="{{ r_facets | strip }}" data-filter-text="{{ r.title | downcase | escape }} {{ r_type_label | downcase }} {{ r.org | downcase | escape }} {{ r.authors | downcase | escape }} {{ r_topic_labels | downcase }} {{ r_topics | join: ' ' }} {{ r_tags | join: ' ' | downcase | escape }} {{ r.excerpt | strip_html | downcase | escape }}"{% endif %}
    href="{{ r.url | relative_url }}">
   <p class="review-card__top">
+    {% if include.featured %}<span class="review-card__featured">Featured</span>{% endif %}
     <span class="type-badge type-badge--{{ r_type }}">{{ r_type_label }}</span>
     {% if r_topic_labels != "" %}<span class="review-card__topics">{{ r_topic_labels }}</span>{% endif %}
   </p>

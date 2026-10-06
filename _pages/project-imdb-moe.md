@@ -33,17 +33,17 @@ github_url: "https://github.com/richardcheam/customer-feedback-intelligence"
     </ul>
   </section>
 
-  <section id="build" class="detail-block" data-detail-panel hidden>
+  <section id="build" class="detail-block" data-detail-panel>
     <h2>What I Built</h2>
-    <div class="project-points">
-      <p><strong>Reproducible benchmark:</strong> built a clean IMDb pipeline with deterministic sampling, TF-IDF + Logistic Regression as the active saved baseline, and a RoBERTa fine-tuning path for later higher-capacity runs.</p>
-      <p><strong>Transfer checks:</strong> evaluated the IMDb-trained model on Amazon polarity reviews and on a fixed local 200-example customer-feedback evaluation set to see how far the benchmark generalizes without retraining.</p>
-      <p><strong>Dashboard product surface:</strong> added a Gradio interface that accepts pasted text or uploads, preserves metadata like `channel` and `product`, scores the whole batch, exports the filtered results as CSV, and is now deployed publicly on Hugging Face Spaces.</p>
-      <p><strong>Triage and summarization:</strong> layered confidence, uncertainty, manual-review gating, priority scoring, and exploratory theme clustering on top of raw sentiment predictions so the tool feels useful for analysts instead of just model inspection.</p>
-    </div>
+    <ul class="project-components">
+      <li><strong>Reproducible benchmark:</strong> built a clean IMDb pipeline with deterministic sampling, TF-IDF + Logistic Regression as the active saved baseline, and a RoBERTa fine-tuning path for later higher-capacity runs.</li>
+      <li><strong>Transfer checks:</strong> evaluated the IMDb-trained model on Amazon polarity reviews and on a fixed local 200-example customer-feedback evaluation set to see how far the benchmark generalizes without retraining.</li>
+      <li><strong>Dashboard product surface:</strong> added a Gradio interface that accepts pasted text or uploads, preserves metadata like `channel` and `product`, scores the whole batch, exports the filtered results as CSV, and is now deployed publicly on Hugging Face Spaces.</li>
+      <li><strong>Triage and summarization:</strong> layered confidence, uncertainty, manual-review gating, priority scoring, and exploratory theme clustering on top of raw sentiment predictions so the tool feels useful for analysts instead of just model inspection.</li>
+    </ul>
   </section>
 
-  <section id="results" class="detail-block" data-detail-panel hidden>
+  <section id="results" class="detail-block" data-detail-panel>
     <h2>Results</h2>
     <div class="detail-metric-grid">
       <article class="detail-metric">
@@ -70,7 +70,7 @@ github_url: "https://github.com/richardcheam/customer-feedback-intelligence"
     </div>
   </section>
 
-  <section id="links" class="detail-block" data-detail-panel hidden>
+  <section id="links" class="detail-block" data-detail-panel>
     <h2>Links</h2>
     <p class="project-links">
       {% if page.demo_url and page.demo_url != "" %}
