@@ -4,6 +4,7 @@ date: 2026-10-03
 category: "inference-engineering"
 read_time: "6 min"
 series_order: 4
+series: dual-gh200
 excerpt: "I adapted a CPU-KV path, checked reload output and actual movement, and investigated allocator rollback and transfer drain under pressure."
 question: "Could offloaded KV survive eviction and reload under pressure without corrupting allocator state?"
 my_work: "I adapted a CPU-KV path, investigated grouped allocation and idle-state failures, and ran exact-token pressure checks."

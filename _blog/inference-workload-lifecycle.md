@@ -4,6 +4,7 @@ date: 2026-10-03
 category: "inference-engineering"
 read_time: "4 min"
 series_order: 7
+series: dual-gh200
 excerpt: "I investigated why workers stopped while their container stayed alive, then separated process ownership, model readiness, and workload admission."
 question: "Who owns inference when workers stop responding but the container remains alive?"
 my_work: "I traced process and readiness boundaries and separated recovery behavior from workload admission."

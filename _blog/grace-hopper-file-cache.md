@@ -4,6 +4,7 @@ date: 2026-10-03
 category: "inference-engineering"
 read_time: "6 min"
 series_order: 1
+series: dual-gh200
 excerpt: "I traced a failed GH200 model startup to checkpoint file pages occupying HBM and measured the KV capacity recovered after targeted cache advice."
 question: "Why did HBM appear full after the model checkpoint loaded?"
 my_work: "I compared HBM file pages with the engine's KV-capacity check, then tested targeted advice for checkpoint files."

@@ -702,7 +702,7 @@
                 {% endif %}
               {% endfor %}
               {% if cat_count > 0 %}
-                <a class="mega-primary-link" href="{{ '/blog/' | relative_url }}?category={{ cat.key | uri_escape }}#blog-search-input">{{ cat.label }}</a>
+                <a class="mega-primary-link" href="{{ '/blog/' | relative_url }}?category={{ cat.key | uri_escape }}#blog-filters">{{ cat.label }}</a>
               {% endif %}
             {% endfor %}
           </div>
@@ -739,18 +739,41 @@
     </header>
 
     <main class="site-main">
+      {% if page.collection == 'blog' %}
+        {% assign published_blog_posts = site.blog | where_exp: "post", "post.published != false" %}
+        {% assign article_series_posts = published_blog_posts | where: "series", page.series | sort: "series_order" %}
+        {% assign article_series_title = "Blog series" %}
+        {% for blog_series in site.data.blog_series %}
+          {% if blog_series.key == page.series %}{% assign article_series_title = blog_series.title %}{% endif %}
+        {% endfor %}
+      {% endif %}
       {% if page.url != '/' and page.title and page.layout != 'paper-review' %}
         <header class="page-heading{% if page.collection == 'blog' %} blog-heading{% endif %}" data-reveal>
-          {% if page.collection == 'blog' %}<p class="blog-kicker"><a href="{{ '/blog/' | relative_url }}">Inference Engineering: Lessons from Dual GH200</a> <span aria-hidden="true">/</span> {{ page.series_order | prepend: '0' }}</p>{% endif %}
+          {% if page.collection == 'blog' %}
+            <p class="blog-all-posts"><a href="{{ '/blog/' | relative_url }}">← All posts</a></p>
+            <p class="blog-kicker">{{ article_series_title }}</p>
+          {% endif %}
           <h1>{{ page.title }}</h1>
           {% if page.collection == 'blog' %}
             <div class="blog-meta-row">
-              <p class="blog-byline">Part {{ page.series_order | prepend: '0' }} <span aria-hidden="true">·</span> {{ page.date | date: '%d %b %Y' }} <span aria-hidden="true">·</span> {{ page.read_time | default: '7 min' }} read</p>
+              <p class="blog-byline">Post {{ page.series_order }} of {{ article_series_posts.size }} <span aria-hidden="true">·</span> {{ page.date | date: '%d %b %Y' }} <span aria-hidden="true">·</span> {{ page.read_time | default: '7 min' }} read</p>
               <details class="blog-contents" data-blog-contents hidden>
-                <summary>Contents</summary>
+                <summary>On this page</summary>
                 <nav aria-label="In this article"><button type="button" class="blog-contents-close" data-blog-contents-close>Close contents</button><p class="figure-label">In this article</p><ol data-blog-contents-list></ol></nav>
               </details>
             </div>
+            {% if article_series_posts.size > 0 %}
+              <details class="blog-series-nav">
+                <summary>Posts in this series <span>· {{ article_series_posts.size }}</span></summary>
+                <nav aria-label="Posts in this series">
+                  <ol>
+                    {% for series_post in article_series_posts %}
+                      <li><a href="{{ series_post.url | relative_url }}"{% if series_post.url == page.url %} aria-current="page"{% endif %}><span class="blog-series-nav__number">{{ series_post.series_order | prepend: '0' }}</span><span>{{ series_post.title }}</span>{% if series_post.url == page.url %}<span class="blog-series-nav__current">Current</span>{% endif %}</a></li>
+                    {% endfor %}
+                  </ol>
+                </nav>
+              </details>
+            {% endif %}
           {% endif %}
         </header>
       {% endif %}

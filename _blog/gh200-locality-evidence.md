@@ -4,7 +4,8 @@ date: 2026-10-03
 category: "inference-engineering"
 read_time: "5 min"
 series_order: 3
-excerpt: "I mapped the two Grace Hopper locality domains, checked worker placement, and tested NUMA restrictions. The remaining KV-buffer locality claim needs its own measurement."
+series: dual-gh200
+excerpt: "I mapped the two Grace Hopper locality domains, checked worker placement, and tested NUMA restrictions while leaving KV-buffer locality for direct measurement."
 question: "Did a local-first CPU-KV policy put the actual buffer pages near the owning GPU?"
 my_work: "I mapped the two Grace Hopper pairs, inspected worker placement, and tested memory-policy boundaries."
 result: "Whole-worker placement looked local, but CPU-KV-buffer residency and a NUMA speedup remain unmeasured."

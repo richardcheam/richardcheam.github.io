@@ -4,80 +4,60 @@ title: "Blog"
 permalink: /blog/
 ---
 
-{% assign sorted_posts = site.blog | sort: "series_order" %}
+{% assign published_posts = site.blog | where_exp: "post", "post.published != false" | sort: "series_order" %}
+{% assign featured_series = site.data.blog_series | first %}
+{% assign series_posts = published_posts | where: "series", featured_series.key %}
 
-<section class="blog-intro">
-  <p class="section-eyebrow">A seven-part engineering series</p>
-  <h2>Inference Engineering: Lessons from Dual GH200</h2>
-  <p>I deployed, adapted, debugged, and measured large-model serving on a dual-GH200 system. Each essay follows an engineering question through the evidence that answered it—and the part that remains open.</p>
-  <p class="blog-start">Start with <a href="{{ '/blog/grace-hopper-file-cache/' | relative_url }}">01 · Memory</a> and <a href="{{ '/blog/benchmark-denominators/' | relative_url }}">02 · Measurement</a>. For the strongest experimental story, read <a href="{{ '/blog/throughput-versus-usable-latency/' | relative_url }}">06 · Throughput and waiting</a>.</p>
-</section>
+<p class="blog-archive-intro">Articles from my work deploying, debugging, and measuring large language model inference.</p>
 
-<section class="blog-feature" aria-labelledby="blog-feature-title">
-  <p class="section-eyebrow">Featured investigation · Part 06</p>
-  <h2 id="blog-feature-title"><a href="{{ '/blog/throughput-versus-usable-latency/' | relative_url }}">High throughput, minutes of waiting</a></h2>
-  <p>An eight-hour long-context soak kept producing output while first-token waits stretched into minutes. What does capacity mean when a caller cannot use it interactively?</p>
-  <a class="inline-link" href="{{ '/blog/throughput-versus-usable-latency/' | relative_url }}">Read the investigation</a>
-</section>
-
-<section class="section-block blog-index" aria-labelledby="blog-index-title">
-  <header class="section-head">
-    <p class="section-eyebrow">The complete series</p>
-    <h2 id="blog-index-title">Seven articles</h2>
+<section class="blog-index" aria-labelledby="blog-index-title">
+  <header class="blog-archive-head">
+    <h2 id="blog-index-title">All posts <span>· {{ published_posts.size }}</span></h2>
+    {% if series_posts.size > 0 %}
+      <div class="blog-series-summary">
+        <p class="blog-series-summary__label">Series</p>
+        <p class="blog-series-summary__title">{{ featured_series.title }}</p>
+        <p class="blog-series-summary__count">{{ series_posts.size }} posts in this series</p>
+      </div>
+    {% endif %}
   </header>
 
-  {% if sorted_posts.size > 0 %}
-    <div class="filter-wrap">
-      <input class="filter-input" id="blog-search-input" data-filter-input type="search" placeholder="Find an article (e.g. memory, startup, latency)" aria-label="Search articles">
-      <p class="filter-empty" data-filter-empty hidden>No blog posts match that keyword.</p>
-    </div>
+  <nav class="blog-filters" id="blog-filters" aria-label="Filters">
+    <span class="blog-filters__label">Filters</span>
+    <a href="{{ '/blog/' | relative_url }}#blog-filters" data-facet-link data-facet="category" data-facet-value="">All posts ({{ published_posts.size }})</a>
+    {% for cat in site.data.blog_categories %}
+      {% assign category_posts = published_posts | where: "category", cat.key %}
+      {% if category_posts.size > 0 %}
+        <a href="{{ '/blog/' | relative_url }}?category={{ cat.key | uri_escape }}#blog-filters" data-facet-link data-facet="category" data-facet-value="{{ cat.key }}">{{ cat.label }} ({{ category_posts.size }})</a>
+      {% endif %}
+    {% endfor %}
+  </nav>
 
-    <ol class="blog-series-list" aria-label="Blog entries">
-      {% for post in sorted_posts %}
+  {% if published_posts.size > 0 %}
+    <ol class="blog-post-list" aria-label="All blog posts">
+      {% for post in published_posts %}
         {% assign post_key = post.category | default: "post" | slugify %}
         {% assign category_label = "Blog Post" %}
         {% for cat in site.data.blog_categories %}
-          {% if cat.key == post_key %}
-            {% assign category_label = cat.label %}
-          {% endif %}
+          {% if cat.key == post_key %}{% assign category_label = cat.label %}{% endif %}
         {% endfor %}
+        {% assign post_series = published_posts | where: "series", post.series %}
 
-        <li class="blog-series-entry" data-filter-card data-filter-text="{{ post.title | downcase }} {{ category_label | downcase }} {{ post_key }} {{ post_key | replace: '-', ' ' }} {{ post.excerpt | strip_html | downcase }} {{ post.question | downcase }} {{ post.result | downcase }}">
-          <span class="blog-series-number" aria-hidden="true">{{ post.series_order | prepend: '0' }}</span>
-          <div class="blog-series-main">
-            <h3><a href="{{ post.url | relative_url }}">{{ post.title }}</a></h3>
-            <p>{{ post.excerpt }}</p>
+        <li class="blog-post-row" data-filter-card data-filter-facets="category:{{ post_key }}" data-filter-text="{{ post.title | downcase }} {{ category_label | downcase }} {{ post_key }} {{ post.excerpt | strip_html | downcase }}">
+          <div class="blog-post-main">
+            <div class="blog-post-titleline">
+              <h3><a href="{{ post.url | relative_url }}">{{ post.title }}</a></h3>
+              {% if post.featured %}<span class="blog-featured-label">Featured</span>{% endif %}
+            </div>
+            <p class="blog-post-description">{{ post.excerpt }}</p>
+            {% if post.series %}<p class="blog-post-series">Post {{ post.series_order }} of {{ post_series.size }} in this series</p>{% endif %}
           </div>
-          <p class="blog-series-meta">{{ category_label }}<br>{{ post.read_time | default: '7 min' }} read</p>
+          <p class="blog-post-meta"><time datetime="{{ post.date | date: '%Y-%m-%d' }}">{{ post.date | date: '%d %b %Y' }}</time><span>{{ post.read_time | default: '7 min' }} read</span><span class="blog-post-topic">{{ category_label }}</span></p>
         </li>
       {% endfor %}
     </ol>
+    <p class="filter-empty" data-filter-empty hidden>No posts match this filter.</p>
   {% else %}
-    <article class="premium-card" data-reveal>
-      <h3 class="card-title">No blog posts yet</h3>
-      <p class="card-summary">Add a markdown file in <code>_blog/</code> to publish a new post.</p>
-    </article>
+    <p>No blog posts yet.</p>
   {% endif %}
-</section>
-
-<section class="section-block blog-topic-section" data-reveal>
-  <header class="section-head">
-    <p class="section-eyebrow">Browse by topic</p>
-    <h2>Topics in this series</h2>
-  </header>
-  <div class="blog-topics">
-    {% for cat in site.data.blog_categories %}
-      {% assign cat_count = 0 %}
-      {% for post in sorted_posts %}
-        {% assign post_key = post.category | default: "" | slugify %}
-        {% if post_key == cat.key %}
-          {% assign cat_count = cat_count | plus: 1 %}
-        {% endif %}
-      {% endfor %}
-
-      {% if cat_count > 0 %}
-        <a class="blog-topic-link" href="{{ '/blog/' | relative_url }}?category={{ cat.key | uri_escape }}#blog-search-input">{{ cat.label }} <span>{{ cat_count }}</span></a>
-      {% endif %}
-    {% endfor %}
-  </div>
 </section>

@@ -4,6 +4,7 @@ date: 2026-10-03
 category: "evaluation"
 read_time: "8 min"
 series_order: 2
+series: dual-gh200
 excerpt: "I reconciled token counts, prompt lengths, cache reuse, and unfinished requests before comparing GH200 serving runs."
 question: "Which counters and workloads made a benchmark number look faster than the serving experience?"
 my_work: "I rechecked token-versus-chunk accounting, prompt lengths, prefix reuse, denominators, and incomplete outcomes."

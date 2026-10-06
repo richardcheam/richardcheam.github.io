@@ -4,6 +4,8 @@ date: 2026-10-03
 category: "inference-engineering"
 read_time: "6 min"
 series_order: 6
+series: dual-gh200
+featured: true
 excerpt: "A long-context soak kept producing output while first-token latency made interactive use difficult."
 question: "Could a server keep completing long requests while interactive latency became unusable?"
 my_work: "I measured a sustained long-context soak and reconciled KV capacity, waiting requests, throughput, and outcomes."

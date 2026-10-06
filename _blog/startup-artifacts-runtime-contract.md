@@ -4,6 +4,7 @@ date: 2026-10-03
 category: "inference-engineering"
 read_time: "5 min"
 series_order: 5
+series: dual-gh200
 excerpt: "I compared weight-backend footprints and fixed a rank-incomplete autotune cache so a historical serving profile could start with validated artifacts."
 question: "Why did one backend fail before KV allocation, and why did a saved tuning cache miss a rank?"
 my_work: "I investigated weight representations and rank-specific autotune persistence in the historical MiMo serving profile."
