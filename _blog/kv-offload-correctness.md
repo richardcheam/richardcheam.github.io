@@ -15,13 +15,13 @@ lesson: "Correct KV offload requires output consistency, actual movement, alloca
 
 <article class="note-article" markdown="1">
 
-A CPU pool increased space for key-value (KV) state, but it also created a new ownership problem. A request could appear successful while an earlier grouped allocation had left the free list inconsistent, or while a device-to-host transfer was still pending. I needed separate evidence for output, movement, and a safe final state.
+I wanted to know whether request state could move out of GPU memory and return without changing the answer or leaving the allocator in a broken state. The key-value (KV) cache holds attention state used during generation. Storing some of it in a CPU pool increased available space, but it also created a new ownership problem.
 
-{% include blog-at-a-glance.html %}
+A request could appear successful while an earlier grouped allocation had left the free list inconsistent, or while a device-to-host transfer was still pending. I needed separate evidence for output, movement, and a safe final state.
 
 The offload path I adapted drew on [SuperInfer's published design](https://supercomputing-system-ai-lab.github.io/projects/superinfer/) and integrated it into a newer [vLLM serving stack](https://github.com/vllm-project/vllm). Those projects supplied the original ideas and interfaces. My recorded work was adaptation, debugging, and validation on dual GH200, not a reimplementation of every paper mechanism.
 
-## Three proofs, not one
+## What I tested and what each check could show
 
 I separated validation into three questions:
 
@@ -35,9 +35,13 @@ I separated validation into three questions:
 
 </div>
 
-In a deterministic reload check, four exact **131,072-token** inputs were run through three eviction and reload cycles. The recorded outputs and lengths matched, with no client failures. That client did not collect transfer counters, so I do not use it as movement proof. Complementary pressure records supplied that evidence.
+The reload check used the adapted CPU-KV path on dual GH200. Four exact **131,072-token** inputs went through three eviction and reload cycles, keeping the inputs fixed while testing repeated reuse. The surviving summary does not specify the model revision, output target, client concurrency, or elapsed duration.
 
-In one reasoning-tree pressure profile with a **128 GiB total CPU-KV pool**, **24 clients**, **327,680-token inputs**, and five rounds, **120 of 120 requests completed**. The report recorded **90 stores, 10 loads**, full logical KV occupancy during pressure, and **zero pending transfers at the end**. A separate, more aggressive two-round profile used **524,288-token inputs** and completed **48 of 48**, with **26 stores, two loads**, about **72.0 GB device-to-host** and **3.0 GB host-to-device** traffic. Those are reported historical results for that profile, not a universal GH200 capacity or throughput figure.
+The recorded outputs and lengths matched, with no client failures. That is useful evidence that the answer survived these cycles. The client did not collect transfer counters, so this check alone cannot show how much state moved. I used separate pressure tests for that question.
+
+The first reasoning-tree pressure test used a **128 GiB total CPU-KV pool**, **24 clients**, and **327,680-token inputs** over five rounds. That recipe stayed fixed across the rounds. It tested whether the engine could move state and finish the workload under pressure. The report does not provide a complete output-target or elapsed-duration record.
+
+**120 of 120 requests completed**. The counters recorded **90 stores, 10 loads**, full logical KV occupancy during pressure, and **zero pending transfers at the end**. Unlike the output-only reload check, these counters show actual movement. The empty transfer queue also shows that the test ended without recorded copies still pending.
 
 <div class="blog-table-scroll" role="region" aria-label="KV pressure profile results" tabindex="0" markdown="1">
 
@@ -50,7 +54,7 @@ In one reasoning-tree pressure profile with a **128 GiB total CPU-KV pool**, **2
 
 </div>
 
-This table is one historical profile, not the more aggressive 524,288-token run or the later v0.26 integration track. Source: canonical pack, FACT-KV-001/002 and SRC-06/08.
+In a separate, more aggressive two-round profile, input length increased to **524,288 tokens**. It completed **48 of 48** requests, with **26 stores, two loads**, about **72.0 GB device-to-host** and **3.0 GB host-to-device** traffic. The remaining request settings are not fully specified here, so I do not treat it as a matched comparison with the first profile. These are historical functionality checks, not universal capacity or throughput figures. Source: canonical pack, FACT-KV-001/002 and SRC-06/08.
 
 ## A grouped allocation is a transaction
 
@@ -70,18 +74,16 @@ For example, suppose a request needs groups A and B. This conceptual sequence sh
 3. **Fail on B:** the allocator cannot obtain the second group. Returning “out of capacity” now would leave A owned and the counters changed.
 4. **Roll back:** remove A from the request table, restore its free-list membership and references, and return the counters to their prior values.
 
-The surviving records describe preflight and rollback repairs; they do not preserve this exact sequence as the historical reproducer.
-
-The historical reliability record describes preflight and rollback repairs, duplicate-safe freeing, and free-list bookkeeping fixes. The original patch and reproducer were not freshly audited for this article, so I treat that as a reported repair, then use the accepted pressure runs as functional evidence. A timeout around the failing request would not have restored partial allocator state.
+The historical record describes preflight and rollback repairs, duplicate-safe freeing, and free-list bookkeeping fixes. It does not preserve this exact sequence as the reproducer, and I have not freshly audited the original patch. I therefore describe the repair as reported and use the pressure runs as functional evidence. A timeout around the failing request would not have restored partial allocator state.
 
 ## Response completion is not copy completion
 
 CPU-KV movement can be asynchronous. A device-to-host copy can be submitted while computation continues; an event later marks when the source block may safely be reused. A host-to-device reload must finish before dependent GPU work reads the restored KV. Separate streams permit overlap, but their existence does not prove how much copy time was hidden.
 
-In a later integration track, the active request set once reached zero while device-to-host completion work remained pending. Treating that state as idle could let shutdown or a new phase race with the copy. The reported fix made pending push work part of the idle decision. A later **48-of-48** long-context soak ended with healthy, drained transfer queues and recorded about **28.6 GB stores** and **10.2 GB loads**. This was a different integration track from the more aggressive 128 GiB pressure profile above; its counters should not be added to that run.
+In the later v0.26 integration track, the active request set once reached zero while device-to-host completion work remained pending. Treating that state as idle could let shutdown or a new phase race with the copy. The reported fix made pending push work part of the idle decision. A later long-context soak in that integration track checked whether work and transfer queues drained. Its full request recipe and duration are not supplied in this summary. It completed **48-of-48** requests, ended with healthy, drained transfer queues, and recorded about **28.6 GB stores** and **10.2 GB loads**. This was a different integration track from the more aggressive 128 GiB pressure profile above; its counters should not be added to that run.
 
 <div class="note-callout note-callout--definition" markdown="1">
-**Completion rule:** a client response ends the request's visible output. Engine quiescence also requires every transfer event and block owner to reach a safe terminal state.
+**Completion rule:** a client response ends the request's visible output. Before the engine is safe to stop or reuse blocks, every dependent transfer must also finish and ownership must be settled.
 </div>
 
 This is the correctness checklist I would carry to another offload design:

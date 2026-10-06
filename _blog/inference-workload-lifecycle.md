@@ -15,14 +15,14 @@ lesson: "Container liveness, model readiness, and workload ownership need separa
 
 <article class="note-article" markdown="1">
 
+I investigated why an inference service had stopped responding even though its container was still alive. This was a process-lifecycle incident on dual GH200, not a controlled load experiment. The surviving record does not provide a complete model, request-size, concurrency, or duration recipe for the shutdown.
+
 Inference workers stopped responding while their container remained alive. A worker log showed the parent-monitor pipe closing, but the surviving records did not identify the first process to exit or any signal sender. The incident showed why container liveness was an incomplete measure of model service.
 
 <figure class="blog-figure blog-figure--wide" tabindex="0">
   <img src="{{ '/assets/blog/service-lifecycle.svg' | relative_url }}" alt="Observed state: container alive, inference workers unresponsive, parent-monitor pipe closed. The first exiting process and cause remain unknown." loading="lazy">
   <figcaption><strong>Figure 1 · What the surviving record establishes.</strong> Reconstructed set of observations, not a precise timestamped trace. The ordering and cause of the underlying exits remain unresolved. Source: canonical pack, lifecycle incident / SRC-11.</figcaption>
 </figure>
-
-{% include blog-at-a-glance.html %}
 
 The useful engineering result was a clearer model of ownership. A container, launcher, API process, engine workers, and request gateway can each have a different lifetime and health signal. If no one component owns the full inference workload, a green container can coexist with an unavailable model.
 
@@ -51,7 +51,7 @@ The separation I use is:
 
 </div>
 
-The [long-context soak]({{ '/blog/throughput-versus-usable-latency/' | relative_url }}) showed why the last row matters: **2,252 completed successes** coexisted with **550.876-second median first-token wait** among completed requests. Routing another large request to a live backend would not create more KV capacity or shorten an existing queue.
+A separate [long-context soak]({{ '/blog/throughput-versus-usable-latency/' | relative_url }}) used a fixed MiMo workload on dual GH200: 131,072 input tokens, a 16,384-token output target, up to 62 outstanding requests, and an eight-hour submission schedule. It showed why admission matters: **2,252 completed successes** coexisted with **550.876-second median first-token wait** among completed requests. That is about 9.2 minutes before a typical completed caller saw any output. Routing another large request to a live backend would not create more KV capacity or shorten an existing queue.
 
 ## Recovery needs a single owner and an idle definition
 
@@ -63,12 +63,12 @@ The recovery procedure I would use is:
 4. **Wait for a safe final state:** let GPU work and asynchronous transfers settle before resources can be released or reused.
 5. **Start and validate the replacement:** confirm engine readiness and the intended model route before resuming admission under its capacity and latency policy.
 
-These are proposed recovery steps. They do not establish the sender, first exiting process, or cause of the original shutdown.
+These are proposed recovery steps, not a reconstruction of the original shutdown.
 
-The KV-offload investigation provided a related boundary: zero active requests did not always mean zero pending device-to-host work. Cleanup based solely on client count could outlive blocks still referenced by a transfer. The later reliability record describes scoped parent-first termination and pending-work cleanup, but that later control does not retroactively identify the original shutdown trigger.
+The KV-offload investigation provided a related boundary: zero active requests did not always mean zero pending device-to-host work. Cleanup based solely on client count could outlive blocks still referenced by a transfer. The later reliability record describes scoped parent-first termination and pending-work cleanup as responses to these ownership risks.
 
 <div class="note-callout note-callout--pitfall" markdown="1">
-**Evidence boundary:** I observed parent connection loss while the container remained alive. The original sender and first exiting process were not established. Better supervision is a design response to the failure mode, not proof of its historical root cause.
+**Why this matters:** monitor the engine and intended model route, not only the container. A live outer process can hide unavailable workers, and a live model can still be too busy to offer acceptable latency.
 </div>
 
 This is the operational end of the GH200 series. Memory placement, correct KV movement, benchmark units, and startup artifacts determine whether a model can serve. Explicit workload ownership determines whether it keeps serving, stops cleanly, and reports readiness honestly. None of those layers replaces admission control when a live server is already overloaded.

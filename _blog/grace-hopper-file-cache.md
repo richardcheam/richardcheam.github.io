@@ -17,9 +17,11 @@ lesson: "Distinguish file-backed checkpoint pages from live tensors before diagn
 
 The model shards loaded, then the engine said it had no room for request cache. Apparent high-bandwidth memory (HBM) occupancy did not reveal whether those bytes belonged to the running model or to Linux's file cache. I traced the backing before changing the capacity budget.
 
-{% include blog-at-a-glance.html %}
+## What I checked at startup
 
-In one historical early V4.1 serving profile, the initial capacity calculation reported **−4.43 GiB available for key-value (KV) cache** and startup failed. Per-node inspection showed that file-backed pages dominated the occupied HBM domains. After targeted advice for the checkpoint files, a subsequent launch reported **118.59 GiB available for KV** and **15,250,409 logical KV tokens**.
+The question was whether checkpoint file pages were using memory that the engine needed for requests. I investigated an early DeepSeek V4.1 eager serving profile on dual GH200. I compared per-node memory backing with the engine's startup capacity check, then gave Linux targeted advice that the checkpoint file pages were no longer needed. This was a startup investigation, not a timed request benchmark: request sizes, concurrency, and test duration are not available for this comparison. The later E16 profile was a separate configuration.
+
+The key-value (KV) cache stores attention state that a request reuses during generation. In this early profile, the initial capacity calculation reported **−4.43 GiB available for KV cache** and startup failed. Per-node inspection showed that file-backed pages dominated the occupied HBM domains. After targeted advice for the checkpoint files, a subsequent launch reported **118.59 GiB available for KV** and **15,250,409 logical KV tokens**.
 
 <div class="blog-table-scroll" role="region" aria-label="Early V4.1 capacity comparison" tabindex="0" markdown="1">
 
@@ -30,7 +32,7 @@ In one historical early V4.1 serving profile, the initial capacity calculation r
 
 </div>
 
-These are engine capacity outputs, not physical HBM totals. The source record supports file-page dominance but does not preserve a phase-labelled per-node byte series suitable for a chart. This early eager profile is separate from the later V4.1 E16 configuration. Source: canonical pack, FACT-MEM-002/003, SRC-02.
+Before the advice, the engine could not reserve its request cache, so the model could not serve. The subsequent launch reported room for KV. Those values describe the engine's available budget, not physical HBM totals or memory already occupied by requests. Together with the file-page inspection, the change supports the checkpoint-cache explanation for this failure. It is not a controlled proof that every other startup allocation stayed constant. The record does not preserve a phase-labelled per-node byte series suitable for a chart. Source: canonical pack, FACT-MEM-002/003, SRC-02.
 
 On Grace Hopper, this question matters because some configurations expose GPU HBM as Linux NUMA memory. File pages can therefore occupy capacity that the serving engine also needs. The exact accounting depends on the system's driver and memory mode; a `free` total is not automatically “CPU RAM plus a separate GPU.” [NVIDIA's Grace operating-system guide](https://docs.nvidia.com/dccpu/grace-perf-tuning-guide/os-settings.html) describes both NUMA-onlined GPU memory and a mode where it is not onlined.
 
@@ -45,7 +47,7 @@ A buffered checkpoint read may populate Linux's page cache. The loader can then 
 
 The arrows show *possible* data flow, not a promise that every loader copies every tensor. A runtime that continues to use a file mapping has a different dependency: discarding its file pages can cause later faults and rereads. [Linux's page-cache documentation](https://docs.kernel.org/mm/page_cache.html) explains why ordinary file reads and mappings participate in the cache.
 
-That distinction changed how I interpreted a memory shortfall. The observation “memory stayed occupied after load” did not establish a CUDA leak. It could include file-backed checkpoint pages, anonymous allocations, pinned buffers, and live device tensors. A process's virtual mappings are views of physical storage, not another pile of bytes to add to the total. The measured recovery supports a checkpoint-cache explanation for *this startup failure*; it does not diagnose every retained-HBM incident.
+That distinction changed how I interpreted a memory shortfall. Seeing memory remain occupied after loading did not establish a CUDA leak. It could include file-backed checkpoint pages, anonymous allocations, pinned buffers, and live device tensors. A process's virtual mappings are views of physical storage, not another pile of bytes to add to the total. For another retained-HBM incident, I would repeat the backing checks rather than assume the same explanation.
 
 It also helps to name the mechanism before saying “offload”:
 

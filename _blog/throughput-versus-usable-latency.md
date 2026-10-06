@@ -16,17 +16,9 @@ lesson: "Aggregate throughput and completion counts must be reported alongside f
 
 <article class="note-article" markdown="1">
 
-The long-context server kept producing output, but a caller could wait minutes before seeing any of it. In the archived soak, **2,252 requests completed** while median time to first token (TTFT) among those completions exceeded nine minutes. The output rate alone concealed that experience.
+I wanted to know whether a server could keep completing long requests while becoming too slow for an interactive conversation. A high output rate would answer only part of that question. I also needed to measure how long each caller waited before the first output appeared.
 
-<figure class="blog-wait-figure">
-  <p class="figure-label">Historical soak · completed requests only</p>
-  <p class="wait-number">9 <span>min</span> 11 <span>s</span></p>
-  <figcaption>Median wait before first output. The exact archived value is 550.876 seconds; unfinished requests are outside this percentile. Source: canonical pack, EXP-GH200-1118 / SRC-05.</figcaption>
-</figure>
-
-{% include blog-at-a-glance.html %}
-
-The work here was deployment, integration, and measurement of a MiMo serving profile on dual GH200 hardware. The model, vLLM engine, and speculative decoder were supplied by their respective projects. These numbers describe a historical stress workload, not a general rating for the hardware or a current production service.
+I tested a MiMo serving profile on dual GH200 hardware, using vLLM and its configured speculative decoder. My work was deployment, integration, and measurement; the model, engine, and decoder came from their respective projects. This was a historical stress test, not a measurement of a current production service.
 
 ## What the soak actually asked the server to do
 
@@ -37,17 +29,29 @@ The fixed stress recipe was:
 - **Client load:** up to 62 outstanding requests.
 - **Submission schedule:** eight hours.
 
-The matching recovery startup reported **2,947,463 logical key-value (KV) cache tokens** of engine capacity, counted once across the distributed profile, and **40.15/41.45 GiB** of KV allocation on its two ranks.
+The request recipe stayed fixed during the eight-hour submission schedule. The client kept supplying work rather than letting the server empty its queue. Outstanding requests could be running or waiting; 62 was the client limit, not a count of requests all executing at once.
 
-One full request budget is **147,456 tokens**. Dividing the reported logical KV capacity by that maximum yields about **20 full-budget request equivalents**. That is a planning ratio, not a measurement that exactly 20 requests must always run. State grows over time, output can stop early, and scheduling and preemption change residency. The client-side 62 outstanding requests were not 62 simultaneous full-budget residents.
+The key-value (KV) cache holds attention state that the model reuses while generating a response. The matching recovery startup reported **2,947,463 logical KV cache tokens** of engine capacity, counted once across the distributed profile, and **40.15/41.45 GiB** of KV allocation on its two ranks. These startup allocations describe the reserved pool, not how much request state occupied it at every moment.
+
+One full request budget is **147,456 tokens**. Dividing the reported logical KV capacity by that maximum yields about **20 full-budget request equivalents**. That is a planning ratio, not a measurement that exactly 20 requests must always run. State grows as requests generate output, and output can stop early. Scheduling and preemption, where a request is paused to make room for other work, also change which state is resident. The client-side 62 outstanding requests were not 62 simultaneous full-budget residents.
 
 <p class="capacity-equation"><span>2,947,463 logical KV tokens</span> ÷ <span>147,456 maximum tokens per request</span> ≈ <strong>20 full-budget equivalents</strong></p>
 
-The archive showed high KV pressure and persistent waiting; maximum sampled managed-KV occupancy was about **99.97%**. That percentage refers to the engine's KV pool, not all HBM. A separate million-token probe had long first-token waits even with substantially lower KV occupancy, showing why spare KV alone does not promise short TTFT. The records do not split every wait into queueing versus prefill compute, so I do not assign a single cause to each minute.
+The archive showed persistent waiting and high KV pressure: maximum sampled occupancy of the reserved KV pool was about **99.97%**. That is the fraction of the engine's pool occupied by request state, not the fraction of all GPU high-bandwidth memory (HBM) in use. As requests finished, their KV space became reusable, but the client continued supplying requests. The archive continued to show waiting requests. This pattern is consistent with sustained capacity pressure. The records do not separate queue time from prefill, the work of processing an input before generation, so they do not establish how much of each wait came from either source.
+
+A separate million-token probe also had long first-token waits with substantially lower KV occupancy. Its full setup is not presented here, so I use it only as a reminder that spare KV space alone does not guarantee a quick response.
 
 ## Throughput and latency must appear together
 
-The soak's recorded output rate used a **29,100.679-second denominator**. Among completed requests, TTFT was **550.876 seconds at p50** and **567.503 seconds at p95**; end-to-end time was **818.576 seconds at p50**. These figures show continued service under a severe workload and poor interactive response time at the same time.
+For that fixed stress workload, the server completed **2,252 requests**. Its aggregate output rate counts tokens produced across requests together, using the recorded **29,100.679-second denominator**. It does not measure the generation speed experienced by one caller.
+
+Time to first token (TTFT) is the wait from submitting a request until its first output appears. Among completed requests, TTFT was **550.876 seconds at p50**, the median, and **567.503 seconds at p95**, the 95th percentile. Median end-to-end time was **818.576 seconds**, about 13.6 minutes. The typical completed caller waited about 9.2 minutes just to see the first token. The server remained operational, but that was too slow for an interactive conversation.
+
+<figure class="blog-wait-figure">
+  <p class="figure-label">Historical soak · completed requests only</p>
+  <p class="wait-number">9 <span>min</span> 11 <span>s</span></p>
+  <figcaption>Median wait before first output. The exact archived value is 550.876 seconds; unfinished requests are outside this percentile. Source: canonical pack, EXP-GH200-1118 / SRC-05.</figcaption>
+</figure>
 
 <div class="blog-table-scroll" role="region" aria-label="Historical soak measurements" tabindex="0" markdown="1">
 
@@ -64,18 +68,22 @@ The soak's recorded output rate used a **29,100.679-second denominator**. Among 
 
 The submission timer and later finalization timestamps do not align cleanly in the surviving archive, so I retain the recorded denominator rather than calculate a replacement. Source: canonical pack, EXP-GH200-1118 / SRC-05.
 
-A smaller B0 benchmark had already shown the shape of saturation on a different profile. At **128 input / 512 output tokens** with **16 outstanding clients**, it reported **1,018.93 output tokens/s** and **0.177-second median TTFT**. At **32 outstanding clients**, output rate was essentially flat at **1,021.06 tokens/s** while median TTFT rose to **7.788 seconds**. That comparison belongs to the B0 reference profile; it is not a matched A/B with the later long-context soak.
+A separate B0 benchmark asked what happened when more clients shared the MiMo v2.6 reference profile on dual GH200. The request sizes stayed at **128 input / 512 output tokens**, while outstanding clients increased from **16** to **32**. The C32 point used a sequence limit of 16. The surviving comparison does not give the elapsed duration of each point, and it is not a matched comparison with the long-context soak.
+
+With 16 clients, the report recorded **1,018.93 output tokens/s** and **0.177-second median TTFT**. With 32, output rate was **1,021.06 tokens/s** and median TTFT was **7.788 seconds**. The graph separates the two metrics. C16 and C32 mean outstanding client counts; they are not request completion positions. Each panel uses its own scale.
 
 <figure class="blog-figure blog-figure--wide" tabindex="0">
   <img src="{{ '/assets/blog/b0-saturation.svg' | relative_url }}" alt="Two aligned B0 panels: output rate is nearly unchanged from C16 to C32, while median time to first token rises from 0.177 to 7.788 seconds." loading="lazy">
   <figcaption><strong>Figure 1 · Saturation in the separate B0 reference profile.</strong> Reconstructed from reported values, EXP-GH200-023 and 025 / SRC-03. Each panel has its own labelled units and scale; C is client-outstanding count. The C32 point used a sequence limit of 16. This is not part of the long-context soak.</figcaption>
 </figure>
 
+Output rate barely changed, but the median first-token wait grew from less than a fifth of a second to nearly eight seconds. Request sizes stayed the same. The pattern suggests that adding clients at this point mainly added waiting rather than useful output capacity; these two points alone do not identify the exact scheduling mechanism.
+
 This is why I report client-outstanding, running, and waiting counts separately. Dividing aggregate output tokens/s by a configured concurrency value does not measure an individual's decode speed when some clients spend most of their time waiting.
 
 ## A completed subset is not every submitted request
 
-The soak archive contains **zero observed failed rows** among the **2,252 completed successes**. At the last monitor sample, **38 in-flight outcomes remained unknown**, and the drain did not complete. Those requests are not proven successes or failures. The latency percentiles are conditioned on completed requests and may miss the slowest tail.
+The soak archive contains **zero observed failed rows** and **2,252 completed successes**. At the last monitor sample, **38 requests were still running or waiting**, and the drain did not complete. Their eventual outcomes are unknown. I do not count them as successes or failures. The latency percentiles cover completed requests only and may omit the slowest requests.
 
 A separate very-long-input probe also lost service after a small completed subset; its root cause was not established and cannot be generalized to every long request.
 

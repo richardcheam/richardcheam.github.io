@@ -15,14 +15,16 @@ lesson: "Backend representation and rank-complete startup artifacts determine wh
 
 <article class="note-article" markdown="1">
 
-On GH200, a quantized checkpoint that looked small enough on disk still failed while its serving backend prepared weights. In another startup path, a cache existed but lacked the tuned records for one expert-parallel rank. Both incidents changed how I think about “startup”: **the files, generated artifacts, and chosen backend representation are part of the runtime profile, not a one-time prelude.**
+Why could a quantized checkpoint look small enough for the GPU but fail during model startup? I investigated how the serving backend represented the weights in memory. A second question followed: could a saved tuning cache support every rank on restart? These were startup checks, not timed request benchmarks. Request sizes and client concurrency were not the variables under test.
+
+The historical MiMo v2.6 B0 profile used a pinned vLLM development build, reported as <code>0.29.1rc1.dev449+geb8798058</code>, on dual GH200. Tensor parallelism (TP) split model work across two GPU ranks; expert parallelism (EP) placed experts across two ranks. I compared backend preparation outcomes within that historical runtime, then checked rank-specific tuning records. The archive does not provide matched total startup durations for the backend comparison.
 
 <figure class="blog-figure blog-figure--wide" tabindex="0">
   <img src="{{ '/assets/blog/backend-startup.svg' | relative_url }}" alt="Conceptual startup boundary: checkpoint loading and backend preparation come before later graph and KV work, whose relative order is unspecified. Each expert-parallel rank needs genuine autotune records." loading="lazy">
   <figcaption><strong>Figure 1 · Two startup contracts.</strong> Conceptual boundary between backend preparation and later graph/KV work, plus rank-specific cache completeness, based on the historical MiMo report, FACT-START-001 / SRC-03. The line lengths are not phase timings.</figcaption>
 </figure>
 
-{% include blog-at-a-glance.html %}
+The diagram shows two things the runtime needs: enough space to prepare its weights, and tuning records for each rank. It is a conceptual map, not a timing plot. KV means the key-value cache, which stores attention state for requests.
 
 ## The failing phase determines the memory question
 
@@ -34,7 +36,7 @@ Checkpoint size is not peak startup memory. I distinguish three parts of startup
 
 The relative order of graph and KV work depends on that path; this list does not establish their order in every runtime. A lower KV-memory target cannot rescue a failure that occurs before the engine has begun allocating KV.
 
-The historical MiMo v2.6 B0 profile used a pinned vLLM development build, reported as <code>0.29.1rc1.dev449+geb8798058</code>, on dual GH200. Tensor parallelism (TP) split model work across two GPU ranks; expert parallelism (EP) placed experts across two ranks. The backend investigation recorded three distinct outcomes in that historical runtime:
+The backend changed between these startup attempts. The recorded outcomes were:
 
 <div class="blog-table-scroll" role="region" aria-label="Backend startup outcomes" tabindex="0" markdown="1">
 
@@ -46,17 +48,19 @@ The historical MiMo v2.6 B0 profile used a pinned vLLM development build, report
 
 </div>
 
-These are report-backed observations from a pinned historical image, not a current backend leaderboard. They also do not isolate the gain from a single flag. The practical diagnostic is to record the failure phase, such as load, packing, profiling, graph capture, or KV reservation, before adjusting a budget for a later phase.
+The selected FlashInfer CUTLASS path fit at about 83 GiB per rank, while Marlin preparation reached about 145.9 GiB per rank and failed before KV creation. The Triton attempt failed for compatibility rather than an established memory shortage. That distinction mattered: reducing the future request-cache budget could not repair a failure in weight preparation or activation support. These historical observations do not rank current backends or isolate a single flag's effect.
+
+The practical diagnostic is to record the failure phase, such as load, packing, profiling, graph capture, or KV reservation, before adjusting a budget for a later phase.
 
 A separate GLM quantized-and-speculative track reinforced the boundary between weights and request state. Its planning record reported about **338,624 GPU KV tokens** under one tensor-parallel configuration: fitting quantized weights did not remove the KV budget for long requests. The exact model revision, engine build, and output/request counts were not recovered well enough to make its recalled throughput figure a benchmark result, so I use this track only for the capacity lesson.
 
 ## A rank-specific cache must be complete
 
-The next problem involved expert-parallel autotuning. A persisted cache with **42** genuine records covered one rank, but a second rank needed its own keys. Rank zero could find a tuned entry while rank one missed or fell back. The local workaround generated and persisted **84 genuine records, 42 for each rank**, before a real startup using only the cache. The report recorded cache hits on both ranks in that historical profile.
+The next problem involved expert-parallel autotuning, which tries execution choices and saves the selected tactics for reuse. A persisted cache with **42** genuine records covered one rank, but a second rank needed its own keys. Rank zero could find a tuned entry while rank one missed or fell back. The local workaround generated and persisted **84 genuine records, 42 for each rank**, before a real startup using only the cache. The report recorded cache hits on both ranks in that historical profile.
 
 Copying a rank-zero record and changing its key would not show that its tactic had been tuned or validated for rank one. The cache must agree with the actual backend, shapes, version, and rank identity. [FlashInfer's autotuning documentation](https://docs.flashinfer.ai/autotuning.html) describes public persistence concepts; it does not certify that this older local workaround is required or suitable for today's stack.
 
-The two-rank record count is a completeness check, not an invitation to duplicate files: rank 0 and rank 1 each require tactics genuinely tuned for their own keys. The figure above shows the two independent record sets beside the startup phases.
+The change was from one rank's records to genuine records for both ranks. The runtime still needed the correct backend, shapes, version, and rank keys. The figure shows those independent sets beside the startup phases; it does not show measured phase durations.
 
 ## Faster startup has fixed constraints
 
@@ -71,7 +75,7 @@ A populated cache directory and an HTTP-ready process are insufficient. After re
 - **KV capacity:** the capacity budget remains consistent with the validated profile.
 - **Serving behavior:** the same workload still completes with the required performance, quality, and features.
 
-I can attribute the historical cache completeness repair and backend selection to the local integration work. I cannot infer that the workaround is needed on current upstream code, that all compilation artifacts were reused, or that an unmeasured startup speedup occurred. Those boundaries are part of the result.
+The local integration produced a fitting backend choice and a rank-complete cache for this historical profile. It did not establish a measured startup speedup or complete reuse of compilation artifacts. A current runtime would need its own restart validation.
 
 <div class="note-related" markdown="1">
 
