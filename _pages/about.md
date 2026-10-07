@@ -69,7 +69,7 @@ title: "Richard Cheam"
         <span class="tag">Self-Supervised</span>
         <span class="tag">BDD100K</span>
       </div>
-      <a class="card-link" href="{{ '/projects/embedding-diagnostics/' | relative_url }}">View project</a>
+      <a class="card-link" href="https://richardcheam.github.io/embedding-diagnostics/">View project</a>
     </article>
 
     <article class="premium-card project-card" data-reveal>
