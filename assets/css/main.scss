@@ -2306,6 +2306,17 @@ html[data-theme="dark"] .hero::before {
 
 /* Math */
 
+.note-article .katex-display {
+  margin: var(--space-4) 0;
+  padding: var(--space-1) 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.note-article .katex {
+  color: var(--text);
+}
+
 .review-prose .katex-display {
   margin: var(--space-4) 0;
   padding: var(--space-1) 0;

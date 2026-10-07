@@ -1,2 +1,5 @@
 - key: dual-gh200
   title: Running large language models on dual GH200
+
+- key: representation-collapse
+  title: Diagnosing representation collapse
