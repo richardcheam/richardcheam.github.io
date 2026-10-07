@@ -1,0 +1,44 @@
+{% unless include.standalone %}
+<p class="blog-figure-label">DEFINITIONAL PROPERTIES · NOT AN EXPERIMENTAL RESULT</p>
+<div class="blog-diagram" tabindex="0" role="region" aria-label="{{ include.alt | escape }}">
+{% endunless %}
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 52 780 348" role="img" aria-labelledby="diagnostic-sensitivity-title diagnostic-sensitivity-desc" class="blog-diagram-svg" font-family="Inter, sans-serif">
+  <title id="diagnostic-sensitivity-title">What each measurement is sensitive to, by definition</title><desc id="diagnostic-sensitivity-desc">A property table. Total variance and mean feature std are scale-sensitive. Mean pairwise cosine and retrieval precision are direction-sensitive. Participation ratio and RankMe are sensitive to neither, because both are ratios of spectra. The probe and retrieval rows need labels. These are definitional properties of each quantity, not experimental results.</desc>
+  <g fill="#5f5f66" font-size="14">
+    <text x="30" y="92">MEASUREMENT</text>
+    <text x="420" y="92" text-anchor="middle">SCALE</text>
+    <text x="558" y="92" text-anchor="middle">DIRECTION</text>
+    <text x="690" y="92" text-anchor="middle">LABELS</text>
+  </g>
+  <line x1="30" y1="104" x2="750" y2="104" stroke="#5f5f66" />
+
+  <g font-size="15" fill="#111111">
+    <text x="30" y="132">Total variance</text>
+    <text x="30" y="166">Mean feature std</text>
+    <text x="30" y="200">Mean pairwise cosine</text>
+    <text x="30" y="234">Participation ratio</text>
+    <text x="30" y="268">RankMe</text>
+    <text x="30" y="302">Linear probe, standardized</text>
+    <text x="30" y="336">Linear probe, unstandardized</text>
+    <text x="30" y="370">Retrieval P@10</text>
+  </g>
+
+  <g font-size="15" fill="#5f5f66" text-anchor="middle">
+    <text x="420" y="132" fill="#4F5D3A">●</text><text x="558" y="132">—</text><text x="690" y="132">—</text>
+    <text x="420" y="166" fill="#4F5D3A">●</text><text x="558" y="166">—</text><text x="690" y="166">—</text>
+    <text x="420" y="200">—</text><text x="558" y="200" fill="#4F5D3A">●</text><text x="690" y="200">—</text>
+    <text x="420" y="234">—</text><text x="558" y="234">—</text><text x="690" y="234">—</text>
+    <text x="420" y="268">—</text><text x="558" y="268">—</text><text x="690" y="268">—</text>
+    <text x="420" y="302">—</text><text x="558" y="302">—</text><text x="690" y="302" fill="#4F5D3A">●</text>
+    <text x="420" y="336" fill="#4F5D3A">●</text><text x="558" y="336">—</text><text x="690" y="336" fill="#4F5D3A">●</text>
+    <text x="420" y="370">—</text><text x="558" y="370" fill="#4F5D3A">●</text><text x="690" y="370" fill="#4F5D3A">●</text>
+  </g>
+
+  <g stroke="#d5d5dc"><rect x="360" y="214" width="390" height="68" fill="none" stroke="#A8503A" stroke-dasharray="4 4" /></g>
+
+  </svg>
+{% unless include.standalone %}
+</div>
+<p class="blog-figure-reading">Both rank measures are blind to scale and to direction — they are ratios of a spectrum</p>
+<p class="blog-figure-reading">That is the reason neither can serve as a collapse detector on its own, and why each is read beside total variance.</p>
+{% endunless %}

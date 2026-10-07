@@ -40,8 +40,8 @@ On Grace Hopper, this question matters because some configurations expose GPU HB
 
 A buffered checkpoint read may populate Linux's page cache. The loader can then construct weights in a separate runtime allocation. The file pages and the live tensor have different owners and lifetimes:
 
-<figure class="blog-figure blog-figure--prose" tabindex="0">
-  <img src="{{ '/assets/blog/file-cache-memory.svg' | relative_url }}" alt="Conceptual fork after checkpoint load: reclaimable file-backed pages and a separately owned live runtime tensor can coexist." loading="lazy">
+<figure class="blog-figure blog-figure--prose">
+  {% include blog-figures/file-cache-memory.html alt="Conceptual fork after checkpoint load: reclaimable file-backed pages and a separately owned live runtime tensor can coexist." %}
   <figcaption><strong>Figure 1 · Two possible owners after a checkpoint load.</strong> Conceptual mechanism, supported by Linux page-cache semantics and the early V4.1 incident. The fork is possible, not a claim that every loader copies weights or stops using its file mapping.</figcaption>
 </figure>
 

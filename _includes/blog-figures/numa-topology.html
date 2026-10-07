@@ -1,0 +1,15 @@
+{% unless include.standalone %}
+<p class="blog-figure-label">CONCEPTUAL TOPOLOGY · TWO PAIRS</p>
+<div class="blog-diagram" tabindex="0" role="region" aria-label="{{ include.alt | escape }}">
+{% endunless %}
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 52 780 178" role="img" aria-labelledby="numa-topology-title numa-topology-desc" class="blog-diagram-svg" font-family="Inter, sans-serif">
+  <title id="numa-topology-title">The two Grace Hopper locality pairs</title><desc id="numa-topology-desc">Each Grace memory domain is paired with a Hopper GPU and its HBM. Worker execution, allocation preference and actual KV page residency are different observations.</desc>
+  <g fill="none" stroke="#5f5f66" stroke-width="2"><rect x="30" y="80" width="335" height="128" /><rect x="415" y="80" width="335" height="128" /><line x1="192" y1="122" x2="220" y2="122" /><line x1="577" y1="122" x2="605" y2="122" /></g>
+  <g fill="#111111" font-size="17"><text x="50" y="130">Grace 0</text><text x="233" y="130">Hopper 0</text><text x="435" y="130">Grace 1</text><text x="618" y="130">Hopper 1</text></g>
+  <g fill="#5f5f66" font-size="14"><text x="50" y="162">CPU + host RAM</text><text x="233" y="162">HBM</text><text x="435" y="162">CPU + host RAM</text><text x="618" y="162">HBM</text></g>
+  </svg>
+{% unless include.standalone %}
+</div>
+<p class="blog-figure-reading">Configured placement ≠ measured residency or transfer path</p>
+<p class="blog-figure-reading">Pairing is documented; KV-buffer page locations and path were not established.</p>
+{% endunless %}

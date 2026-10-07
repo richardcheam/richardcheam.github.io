@@ -1,0 +1,16 @@
+{% unless include.standalone %}
+<p class="blog-figure-label">CONCEPTUAL · OWNERSHIP INVARIANT</p>
+<div class="blog-diagram" tabindex="0" role="region" aria-label="{{ include.alt | escape }}">
+{% endunless %}
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 52 780 173" role="img" aria-labelledby="kv-transaction-title kv-transaction-desc" class="blog-diagram-svg" font-family="Inter, sans-serif">
+  <title id="kv-transaction-title">Grouped KV allocation as a transaction</title><desc id="kv-transaction-desc">Reserve all required groups, then commit ownership. If a later group fails, restore every earlier mutation. Release only after dependent transfers complete.</desc>
+  <g fill="#111111" font-size="17"><text x="34" y="96">Reserve groups</text><text x="292" y="96">Commit request ownership</text><text x="590" y="96">Use KV</text><text x="292" y="192">Rollback every mutation</text></g>
+  <path d="M175 91 H273 M515 91 H570 M175 111 V183 H273" fill="none" stroke="#5f5f66" stroke-width="2" />
+  <text x="35" y="166" fill="#754a94" font-size="15">Later group fails</text>
+  <path d="M620 110 V182 H570" fill="none" stroke="#5f5f66" stroke-width="2" />
+  <text x="480" y="211" fill="#5f5f66" font-size="15">Release after transfers finish</text>
+  </svg>
+{% unless include.standalone %}
+</div>
+<p class="blog-figure-reading">Partial ownership must never survive a failed attempt.</p>
+{% endunless %}

@@ -19,8 +19,8 @@ When I adapted a CPU-side key-value (KV) offload path for two Grace Hopper pairs
 
 NUMA, non-uniform memory access, means that where a memory page lives can affect the cost of accessing it. Grace Hopper's coherent memory makes remote access possible, but it does not make every physical location equivalent. A GPU, its adjacent Grace memory, and memory across the other pair are distinct locations. [NVIDIA's architecture description](https://developer.nvidia.com/blog/nvidia-grace-hopper-superchip-architecture-in-depth/) explains the hardware relationship; a particular machine's topology still has to be discovered rather than inferred from a generic diagram.
 
-<figure class="blog-figure blog-figure--wide" tabindex="0">
-  <img src="{{ '/assets/blog/numa-topology.svg' | relative_url }}" alt="Two Grace Hopper pairs, each with Grace CPU and host memory beside a Hopper GPU and HBM. Configured placement is distinct from measured KV-buffer residency or transfer path." loading="lazy">
+<figure class="blog-figure blog-figure--wide">
+  {% include blog-figures/numa-topology.html alt="Two Grace Hopper pairs, each with Grace CPU and host memory beside a Hopper GPU and HBM. Configured placement is distinct from measured KV-buffer residency or transfer path." %}
   <figcaption><strong>Figure 1 · The paired topology, not a transfer measurement.</strong> Conceptual map based on the recorded dual-GH200 topology, FACT-NUMA-001/002 / SRC-01. The spacing and connecting lines encode pairing only; they are not bandwidth or latency values.</figcaption>
 </figure>
 

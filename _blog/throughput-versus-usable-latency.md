@@ -72,8 +72,8 @@ A separate B0 benchmark asked what happened when more clients shared the MiMo v2
 
 With 16 clients, the report recorded **1,018.93 output tokens/s** and **0.177-second median TTFT**. With 32, output rate was **1,021.06 tokens/s** and median TTFT was **7.788 seconds**. The graph separates the two metrics. C16 and C32 mean outstanding client counts; they are not request completion positions. Each panel uses its own scale.
 
-<figure class="blog-figure blog-figure--wide" tabindex="0">
-  <img src="{{ '/assets/blog/b0-saturation.svg' | relative_url }}" alt="Two aligned B0 panels: output rate is nearly unchanged from C16 to C32, while median time to first token rises from 0.177 to 7.788 seconds." loading="lazy">
+<figure class="blog-figure blog-figure--wide">
+  {% include blog-figures/b0-saturation.html alt="Two aligned B0 panels: output rate is nearly unchanged from C16 to C32, while median time to first token rises from 0.177 to 7.788 seconds." %}
   <figcaption><strong>Figure 1 · Saturation in the separate B0 reference profile.</strong> Reconstructed from reported values, EXP-GH200-023 and 025 / SRC-03. Each panel has its own labelled units and scale; C is client-outstanding count. The C32 point used a sequence limit of 16. This is not part of the long-context soak.</figcaption>
 </figure>
 

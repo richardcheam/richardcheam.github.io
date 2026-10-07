@@ -62,8 +62,8 @@ The allocator failure I had to reason about was not a simple “out of blocks”
 
 The invariant is straightforward: either every required group acquires its blocks and the request owns them, or the attempted allocation leaves the allocator as it was. That includes request tables, block references, free-list membership, and counters.
 
-<figure class="blog-figure blog-figure--prose" tabindex="0">
-  <img src="{{ '/assets/blog/kv-transaction.svg' | relative_url }}" alt="Conceptual grouped allocation: reserve every group before committing request ownership; on failure, roll back every touched table, free-list entry, reference and count." loading="lazy">
+<figure class="blog-figure blog-figure--prose">
+  {% include blog-figures/kv-transaction.html alt="Conceptual grouped allocation: reserve every group before committing request ownership; on failure, roll back every touched table, free-list entry, reference and count." %}
   <figcaption><strong>Figure 1 · All groups or none.</strong> Conceptual ownership invariant from the reported allocator repair, not a diagram of an audited code path. Transfer dependencies must finish before a block is released or reused. Source: canonical pack, FAIL-GH200 allocator record / SRC-07.</figcaption>
 </figure>
 

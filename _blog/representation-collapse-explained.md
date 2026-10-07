@@ -37,8 +37,8 @@ Before the failure modes, the algebra. Suppose you push N inputs through an enco
 
 $$Z \in \mathbb{R}^{N \times d}, \qquad z_i = f(x_i) \in \mathbb{R}^{d}$$
 
-<figure class="blog-figure blog-figure--wide" tabindex="0">
-  <img src="{{ '/assets/blog/embedding-matrix.svg' | relative_url }}" alt="A grid with one row per clip and one column per embedding dimension. One highlighted row is a single clip's 256-number embedding; one highlighted column is a single feature read across all 10,000 clips." loading="lazy">
+<figure class="blog-figure blog-figure--wide">
+  {% include blog-figures/embedding-matrix.html alt="A grid with one row per clip and one column per embedding dimension. One highlighted row is a single clip's 256-number embedding; one highlighted column is a single feature read across all 10,000 clips." %}
   <figcaption><strong>Figure 1 · The embedding matrix.</strong> Every diagnostic in this post is a statement about this one matrix. Schematic.</figcaption>
 </figure>
 
@@ -50,8 +50,8 @@ $$C = \tfrac{1}{N}\bar{Z}^{\top}\bar{Z} \in \mathbb{R}^{d \times d}, \qquad \bar
 
 Note the shape change: Z is 10,000 × 256, but C is 256 × 256. The dataset dimension has been summed away. C is not about clips any more; it is a table of relationships between features. Entry C<sub>jk</sub> takes column j and column k, centres both, multiplies elementwise and averages — so it answers: across the dataset, when feature j runs above its average, does feature k do the same?
 
-<figure class="blog-figure blog-figure--wide" tabindex="0">
-  <img src="{{ '/assets/blog/covariance-entries.svg' | relative_url }}" alt="Two five-by-five grids. In the first only the diagonal is dark, meaning features vary without moving together. In the second several off-diagonal cells are shaded, meaning groups of features duplicate each other." loading="lazy">
+<figure class="blog-figure blog-figure--wide">
+  {% include blog-figures/covariance-entries.html alt="Two five-by-five grids. In the first only the diagonal is dark, meaning features vary without moving together. In the second several off-diagonal cells are shaded, meaning groups of features duplicate each other." %}
   <figcaption><strong>Figure 2 · What one cell of the covariance means.</strong> The diagonal is a feature's own variance; off-diagonal entries are variation two features share. Schematic.</figcaption>
 </figure>
 
@@ -69,8 +69,8 @@ $$C = U\Lambda U^{\top}, \qquad U^{\top}U = I, \qquad \Lambda = \operatorname{di
 
 **λᵢ is the variance along direction uᵢ.** That one sentence is why eigenvalue spectra became the standard collapse diagnostic: it turns an abstract algebra question into "how fat is the cloud in each direction".
 
-<figure class="blog-figure blog-figure--wide" tabindex="0">
-  <img src="{{ '/assets/blog/covariance-ellipse.svg' | relative_url }}" alt="A tilted cloud of embeddings with an ellipse fitted to it and two arrows leaving the mean along the ellipse axes, a long one labelled as the direction of most variance and a short one as the least." loading="lazy">
+<figure class="blog-figure blog-figure--wide">
+  {% include blog-figures/covariance-ellipse.html alt="A tilted cloud of embeddings with an ellipse fitted to it and two arrows leaving the mean along the ellipse axes, a long one labelled as the direction of most variance and a short one as the least." %}
   <figcaption><strong>Figure 3 · Eigenvectors are the axes of the data ellipse.</strong> In the eigenframe the covariance is diagonal and the cloud is axis-aligned, with semi-axis lengths the square roots of the eigenvalues. Schematic.</figcaption>
 </figure>
 
@@ -82,8 +82,8 @@ Nothing in this kind of training makes "dimension 37" mean anything. Which coord
 
 A rotation is a change of measuring rulers. The cloud sits fixed; you choose a different frame to describe it in. Distances, angles and shape are unchanged — only the numbers you write down change.
 
-<figure class="blog-figure blog-figure--wide" tabindex="0">
-  <img src="{{ '/assets/blog/change-of-basis.svg' | relative_url }}" alt="Two panels holding the identical cloud. On the left the axes are the encoder's output units and one highlighted point is projected onto them; on the right the axes are the eigenvectors and the same point is projected onto those instead." loading="lazy">
+<figure class="blog-figure blog-figure--wide">
+  {% include blog-figures/change-of-basis.html alt="Two panels holding the identical cloud. On the left the axes are the encoder's output units and one highlighted point is projected onto them; on the right the axes are the eigenvectors and the same point is projected onto those instead." %}
   <figcaption><strong>Figure 4 · A rotation changes the rulers, not the cloud.</strong> The highlighted point is one input, described twice. Schematic.</figcaption>
 </figure>
 
@@ -102,8 +102,8 @@ That is why a method like VICReg needs two separate terms. Its variance term pus
 
 With the algebra in place the failure modes separate cleanly.
 
-<figure class="blog-figure blog-figure--wide" tabindex="0">
-  <img src="{{ '/assets/blog/collapse-modes.svg' | relative_url }}" alt="Four schematic point clouds: a healthy cloud using all directions, a cloud flattened onto a line, a cone of points spreading from the origin in one heading, and a single point." loading="lazy">
+<figure class="blog-figure blog-figure--wide">
+  {% include blog-figures/collapse-modes.html alt="Four schematic point clouds: a healthy cloud using all directions, a cloud flattened onto a line, a cone of points spreading from the origin in one heading, and a single point." %}
   <figcaption><strong>Figure 5 · Four shapes a representation can take.</strong> Only the last is what "collapse" usually brings to mind. Schematic.</figcaption>
 </figure>
 
@@ -125,8 +125,8 @@ A methodological point that matters more than it sounds: **measure at the right 
 
 The standard figure plots log λᵢ against index, sorted descending. The log axis is not cosmetic: healthy spectra span many orders of magnitude and a linear axis flattens every interesting eigenvalue against zero.
 
-<figure class="blog-figure blog-figure--wide" tabindex="0">
-  <img src="{{ '/assets/blog/eigenvalue-spectrum.svg' | relative_url }}" alt="Two curves on a log axis against eigenvalue index. One decays gradually across all indices; the other falls off a cliff after the first few and flattens near the numerical floor." loading="lazy">
+<figure class="blog-figure blog-figure--wide">
+  {% include blog-figures/eigenvalue-spectrum.html alt="Two curves on a log axis against eigenvalue index. One decays gradually across all indices; the other falls off a cliff after the first few and flattens near the numerical floor." %}
   <figcaption><strong>Figure 6 · Gradual decay against a rank cliff.</strong> The cliff is dimensional collapse: a handful of directions carry everything and the rest sit at numerical noise. Schematic.</figcaption>
 </figure>
 
@@ -142,8 +142,8 @@ Here is the structural catch. **Every one of these is a ratio.** Scale cancels. 
 
 Retrieval using cosine similarity discards norms entirely. Only angles survive to influence the ranking, and angle is a different axis from rank.
 
-<figure class="blog-figure blog-figure--wide" tabindex="0">
-  <img src="{{ '/assets/blog/angular-structure.svg' | relative_url }}" alt="Three unit circles with the resulting pairwise cosine distribution underneath each: a collapsed case where all cosines pile at one, a cone where they concentrate in a high band, and a spread case where they cover the range." loading="lazy">
+<figure class="blog-figure blog-figure--wide">
+  {% include blog-figures/angular-structure.html alt="Three unit circles with the resulting pairwise cosine distribution underneath each: a collapsed case where all cosines pile at one, a cone where they concentrate in a high band, and a spread case where they cover the range." %}
   <figcaption><strong>Figure 7 · Where the pairwise cosines land.</strong> Retrieval ranks inside that band and nowhere else. Schematic.</figcaption>
 </figure>
 
@@ -157,8 +157,8 @@ A caution about the third panel: it is a 2D cartoon of something that behaves di
 
 This is the piece that most often explains two diagnostics disagreeing about the same encoder.
 
-<figure class="blog-figure blog-figure--wide" tabindex="0">
-  <img src="{{ '/assets/blog/centering-changes-the-object.svg' | relative_url }}" alt="The same cloud read two ways: on the left the raw embeddings with the mean vector drawn from the origin and contributing to the spectrum, on the right the centered cloud with the mean subtracted first." loading="lazy">
+<figure class="blog-figure blog-figure--wide">
+  {% include blog-figures/centering-changes-the-object.html alt="The same cloud read two ways: on the left the raw embeddings with the mean vector drawn from the origin and contributing to the spectrum, on the right the centered cloud with the mean subtracted first." %}
   <figcaption><strong>Figure 8 · Translation is invisible to one diagnostic and not the other.</strong> Schematic.</figcaption>
 </figure>
 
@@ -184,8 +184,8 @@ Which camp a method belongs to determines whether a claim about it is a stabilit
 
 The useful summary is not a ranking of metrics but a note of which axis each one can see.
 
-<figure class="blog-figure blog-figure--wide" tabindex="0">
-  <img src="{{ '/assets/blog/diagnostic-sensitivity.svg' | relative_url }}" alt="A property table of measurements against three columns: sensitivity to scale, sensitivity to direction, and whether labels are needed. The two rank measures are marked in neither of the first two columns, highlighted by a dashed box." loading="lazy">
+<figure class="blog-figure blog-figure--wide">
+  {% include blog-figures/diagnostic-sensitivity.html alt="A property table of measurements against three columns: sensitivity to scale, sensitivity to direction, and whether labels are needed. The two rank measures are marked in neither of the first two columns, highlighted by a dashed box." %}
   <figcaption><strong>Figure 9 · Definitional properties, not experimental results.</strong> Each mark follows from how the quantity is computed. Schematic.</figcaption>
 </figure>
 

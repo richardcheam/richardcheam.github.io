@@ -58,8 +58,8 @@ The latency names describe different intervals:
 
 Under bundled streaming, an event gap is not automatically a per-token delay. These definitions need to travel with any chart, as the [vLLM benchmark CLI documentation](https://docs.vllm.ai/en/latest/benchmarking/cli/) illustrates.
 
-<figure class="blog-figure blog-figure--wide" tabindex="0">
-  <img src="{{ '/assets/blog/benchmark-timing.svg' | relative_url }}" alt="Conceptual request timeline: submission to first output is TTFT; first output to completion is the post-first-output interval. A stream chunk can contain more than one token." loading="lazy">
+<figure class="blog-figure blog-figure--wide">
+  {% include blog-figures/benchmark-timing.html alt="Conceptual request timeline: submission to first output is TTFT; first output to completion is the post-first-output interval. A stream chunk can contain more than one token." %}
   <figcaption><strong>Figure 1 · Two different waits.</strong> Conceptual timing diagram, not a measured request trace. Streaming events can bundle multiple tokens, so an event gap is not necessarily a per-token gap.</figcaption>
 </figure>
 

@@ -1,0 +1,16 @@
+{% unless include.standalone %}
+<p class="blog-figure-label">CONCEPTUAL PHASES · HISTORICAL PROFILE</p>
+<div class="blog-diagram" tabindex="0" role="region" aria-label="{{ include.alt | escape }}">
+{% endunless %}
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 52 780 158" role="img" aria-labelledby="backend-startup-title backend-startup-desc" class="blog-diagram-svg" font-family="Inter, sans-serif">
+  <title id="backend-startup-title">Startup phases and rank-specific tuning records</title><desc id="backend-startup-desc">Backend representation is prepared before graph and KV reservations. A genuine tuning cache needs 42 records for each of two expert-parallel ranks, not a copy with edited keys.</desc>
+  <line x1="24" y1="55" x2="756" y2="55" stroke="#d5d5dc" />
+  <g fill="#111111" font-size="17"><text x="30" y="96">Checkpoint</text><text x="223" y="96">Backend prep</text><text x="506" y="96">Later: graph / KV</text></g>
+  <path d="M120 103 H205 M350 103 H484" stroke="#5f5f66" stroke-width="2" />
+  <rect x="30" y="145" width="338" height="38" fill="#ece8f7" /><rect x="412" y="145" width="338" height="38" fill="#ece8f7" />
+  <g fill="#111111" font-size="17"><text x="47" y="170">EP rank 0 · 42 records</text><text x="429" y="170">EP rank 1 · 42 records</text></g>
+  </svg>
+{% unless include.standalone %}
+</div>
+<p class="blog-figure-reading">One rank&#x27;s cache cannot certify the other rank&#x27;s tactics.</p>
+{% endunless %}

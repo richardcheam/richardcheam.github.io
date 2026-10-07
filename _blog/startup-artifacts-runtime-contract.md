@@ -19,8 +19,8 @@ Why could a quantized checkpoint look small enough for the GPU but fail during m
 
 The historical MiMo v2.6 B0 profile used a pinned vLLM development build, reported as <code>0.29.1rc1.dev449+geb8798058</code>, on dual GH200. Tensor parallelism (TP) split model work across two GPU ranks; expert parallelism (EP) placed experts across two ranks. I compared backend preparation outcomes within that historical runtime, then checked rank-specific tuning records. The archive does not provide matched total startup durations for the backend comparison.
 
-<figure class="blog-figure blog-figure--wide" tabindex="0">
-  <img src="{{ '/assets/blog/backend-startup.svg' | relative_url }}" alt="Conceptual startup boundary: checkpoint loading and backend preparation come before later graph and KV work, whose relative order is unspecified. Each expert-parallel rank needs genuine autotune records." loading="lazy">
+<figure class="blog-figure blog-figure--wide">
+  {% include blog-figures/backend-startup.html alt="Conceptual startup boundary: checkpoint loading and backend preparation come before later graph and KV work, whose relative order is unspecified. Each expert-parallel rank needs genuine autotune records." %}
   <figcaption><strong>Figure 1 · Two startup contracts.</strong> Conceptual boundary between backend preparation and later graph/KV work, plus rank-specific cache completeness, based on the historical MiMo report, FACT-START-001 / SRC-03. The line lengths are not phase timings.</figcaption>
 </figure>
 

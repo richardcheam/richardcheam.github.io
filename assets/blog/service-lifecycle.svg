@@ -1,9 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 250" role="img" aria-labelledby="title desc">
-  <title id="title">Observed service state and unresolved exit cause</title><desc id="desc">The container remained alive while inference stopped. A parent-monitor pipe closed. The first exiting process and signal sender were not identified. Later supervision and cleanup measures addressed recovery.</desc>
-  <rect width="780" height="250" fill="#fafafa"/>
-  <text x="24" y="35" fill="#594578" font-size="13" font-family="monospace">HISTORICAL OBSERVATION · CAUSE UNRESOLVED</text>
-  <line x1="24" y1="55" x2="756" y2="55" stroke="#d5d5dc"/>
-  <g fill="#111111" font-size="17" font-family="sans-serif"><text x="30" y="99">Container still alive</text><text x="30" y="155">Workers stop responding</text><text x="30" y="211">Parent-monitor pipe closes</text></g>
-  <g fill="#5f5f66" font-size="15" font-family="sans-serif"><text x="410" y="99">Outer liveness observed</text><text x="410" y="155">Model readiness lost</text><text x="410" y="211">First exit / sender unknown</text></g>
-  <line x1="30" y1="118" x2="750" y2="118" stroke="#d5d5dc"/><line x1="30" y1="174" x2="750" y2="174" stroke="#d5d5dc"/>
-</svg>
+---
+layout: null
+---
+{% include blog-figures/service-lifecycle.html standalone=true %}

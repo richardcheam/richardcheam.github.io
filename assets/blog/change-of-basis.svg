@@ -1,40 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 326" role="img" aria-labelledby="title desc">
-<title id="title">The same cloud described in two coordinate frames</title><desc id="desc">Two panels holding the identical tilted cloud. On the left the rulers are the encoder output units; on the right they are the eigenvectors. One highlighted point is projected onto each frame. The points do not move.</desc>
-<rect width="780" height="326" fill="#fafafa"/>
-<text x="24" y="35" fill="#594578" font-size="13" font-family="monospace">SCHEMATIC · A ROTATION CHANGES THE RULERS, NOT THE CLOUD</text>
-<line x1="24" y1="54" x2="756" y2="54" stroke="#d5d5dc"/>
-<line x1="90" y1="150" x2="300" y2="150" stroke="#d5d5dc"/><line x1="190" y1="78" x2="190" y2="228" stroke="#d5d5dc"/>
-<circle cx="117.2" cy="195.1" r="4" fill="#4F5D3A"/>
-<circle cx="129.3" cy="161.8" r="4" fill="#4F5D3A"/>
-<circle cx="171.3" cy="145.4" r="4" fill="#4F5D3A"/>
-<circle cx="197.9" cy="155.1" r="4" fill="#4F5D3A"/>
-<circle cx="205.1" cy="123.1" r="4" fill="#4F5D3A"/>
-<circle cx="240.4" cy="139.7" r="4" fill="#4F5D3A"/>
-<circle cx="254.6" cy="111.1" r="4" fill="#4F5D3A"/>
-<circle cx="278.2" cy="114.3" r="4" fill="#4F5D3A"/>
-<line x1="165.9" y1="181.1" x2="165.9" y2="150" stroke="#5f5f66" stroke-dasharray="3 3"/>
-<line x1="165.9" y1="181.1" x2="190" y2="181.1" stroke="#5f5f66" stroke-dasharray="3 3"/>
-<circle cx="165.9" cy="181.1" r="5.5" fill="#594578"/>
-<text x="306" y="154" fill="#5f5f66" font-size="12" font-family="monospace">unit 1</text>
-<text x="190" y="70" fill="#5f5f66" font-size="12" font-family="monospace" text-anchor="middle">unit 2</text>
-<line x1="460.3" y1="196.5" x2="659.7" y2="103.5" stroke="#d5d5dc"/>
-<line x1="542.2" y1="111.9" x2="577.8" y2="188.1" stroke="#d5d5dc"/>
-<circle cx="487.2" cy="195.1" r="4" fill="#4F5D3A"/>
-<circle cx="499.3" cy="161.8" r="4" fill="#4F5D3A"/>
-<circle cx="541.3" cy="145.4" r="4" fill="#4F5D3A"/>
-<circle cx="567.9" cy="155.1" r="4" fill="#4F5D3A"/>
-<circle cx="575.1" cy="123.1" r="4" fill="#4F5D3A"/>
-<circle cx="610.4" cy="139.7" r="4" fill="#4F5D3A"/>
-<circle cx="624.6" cy="111.1" r="4" fill="#4F5D3A"/>
-<circle cx="648.2" cy="114.3" r="4" fill="#4F5D3A"/>
-<line x1="535.9" y1="181.1" x2="528.3" y2="164.8" stroke="#5f5f66" stroke-dasharray="3 3"/>
-<line x1="535.9" y1="181.1" x2="567.6" y2="166.3" stroke="#5f5f66" stroke-dasharray="3 3"/>
-<circle cx="535.9" cy="181.1" r="5.5" fill="#594578"/>
-<text x="666" y="100" fill="#5f5f66" font-size="12" font-family="monospace">u₁</text>
-<text x="584" y="200" fill="#5f5f66" font-size="12" font-family="monospace">u₂</text>
-<text x="90" y="258" fill="#111111" font-size="16" font-family="sans-serif">Encoder coordinates</text>
-<text x="460" y="258" fill="#111111" font-size="16" font-family="sans-serif">Eigen-coordinates</text>
-<text x="90" y="280" fill="#5f5f66" font-size="13" font-family="monospace">the point reads (−35, 18)</text>
-<text x="460" y="280" fill="#5f5f66" font-size="13" font-family="monospace">the same point reads (−40, 15)</text>
-<text x="30" y="312" fill="#594578" font-size="16" font-family="sans-serif">Distances and angles are unchanged. Only the numbers written down change.</text>
-</svg>
+---
+layout: null
+---
+{% include blog-figures/change-of-basis.html standalone=true %}

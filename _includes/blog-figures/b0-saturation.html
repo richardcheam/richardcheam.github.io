@@ -1,0 +1,18 @@
+{% unless include.standalone %}
+<p class="blog-figure-label">B0 · 128 INPUT / 512 OUTPUT TARGET · RECONSTRUCTED FROM REPORT</p>
+<div class="blog-diagram" tabindex="0" role="region" aria-label="{{ include.alt | escape }}">
+{% endunless %}
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 52 780 258" role="img" aria-labelledby="b0-saturation-title b0-saturation-desc" class="blog-diagram-svg" font-family="Inter, sans-serif">
+  <title id="b0-saturation-title">B0 output throughput and median first-token latency at 16 and 32 outstanding clients</title><desc id="b0-saturation-desc">At C16 and C32 output throughput was 1018.93 and 1021.06 tokens per second. Median first-token latency was 0.177 and 7.788 seconds. The two panels have separate units and scales.</desc>
+  <text x="30" y="87" fill="#111111" font-size="17">Output rate</text><text x="30" y="108" fill="#5f5f66" font-size="14">tokens/s · axis 0–1,100</text>
+  <text x="407" y="87" fill="#111111" font-size="17">Median TTFT</text><text x="407" y="108" fill="#5f5f66" font-size="14">seconds · axis 0–8</text>
+  <line x1="91" y1="140" x2="91" y2="282" stroke="#5f5f66" /><line x1="463" y1="140" x2="463" y2="282" stroke="#5f5f66" />
+  <g fill="#111111" font-size="15"><text x="30" y="176">C16</text><text x="30" y="246">C32</text><text x="407" y="176">C16</text><text x="407" y="246">C32</text></g>
+  <rect x="91" y="153" width="263" height="28" fill="#6486c9" /><rect x="91" y="223" width="264" height="28" fill="#6486c9" />
+  <rect x="463" y="153" width="7" height="28" fill="#754a94" /><rect x="463" y="223" width="263" height="28" fill="#754a94" />
+  <g fill="#111111" font-size="15"><text x="91" y="202">1,018.93</text><text x="91" y="272">1,021.06</text><text x="463" y="202">0.177</text><text x="625" y="272">7.788</text></g>
+  </svg>
+{% unless include.standalone %}
+</div>
+<p class="blog-figure-reading">Throughput barely changed; first-output wait rose sharply at C32.</p>
+{% endunless %}

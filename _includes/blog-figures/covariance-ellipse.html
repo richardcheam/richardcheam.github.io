@@ -1,0 +1,34 @@
+{% unless include.standalone %}
+<p class="blog-figure-label">SCHEMATIC · EIGENVALUE = VARIANCE ALONG ITS EIGENVECTOR</p>
+<div class="blog-diagram" tabindex="0" role="region" aria-label="{{ include.alt | escape }}">
+{% endunless %}
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 52 780 198" role="img" aria-labelledby="covariance-ellipse-title covariance-ellipse-desc" class="blog-diagram-svg" font-family="Inter, sans-serif">
+<title id="covariance-ellipse-title">Covariance eigenvectors are the axes of the data ellipse</title><desc id="covariance-ellipse-desc">A tilted cloud of embeddings with an ellipse fitted to it. Two arrows leave the mean along the ellipse axes: a long one for the direction of greatest variance and a short one for the least.</desc>
+<defs><marker id="covariance-ellipse-a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#594578" stroke-width="1.6" /></marker></defs>
+<ellipse cx="300" cy="160" rx="135" ry="42" transform="rotate(-22 300 160)" fill="none" stroke="#d5d5dc" stroke-dasharray="4 4" />
+<circle cx="210" cy="205" r="4" fill="#4F5D3A" />
+<circle cx="219" cy="173" r="4" fill="#4F5D3A" />
+<circle cx="252" cy="201" r="4" fill="#4F5D3A" />
+<circle cx="249" cy="154" r="4" fill="#4F5D3A" />
+<circle cx="285" cy="177" r="4" fill="#4F5D3A" />
+<circle cx="283" cy="145" r="4" fill="#4F5D3A" />
+<circle cx="311" cy="175" r="4" fill="#4F5D3A" />
+<circle cx="309" cy="143" r="4" fill="#4F5D3A" />
+<circle cx="341" cy="167" r="4" fill="#4F5D3A" />
+<circle cx="334" cy="125" r="4" fill="#4F5D3A" />
+<circle cx="369" cy="143" r="4" fill="#4F5D3A" />
+<circle cx="373" cy="114" r="4" fill="#4F5D3A" />
+<circle cx="402" cy="132" r="4" fill="#4F5D3A" />
+<circle cx="408" cy="108" r="4" fill="#4F5D3A" />
+<line x1="300" y1="160" x2="430" y2="107" stroke="#594578" stroke-width="1.8" marker-end="url(#covariance-ellipse-a)" />
+<line x1="300" y1="160" x2="317" y2="202" stroke="#594578" stroke-width="1.8" marker-end="url(#covariance-ellipse-a)" />
+<circle cx="300" cy="160" r="3.5" fill="#4F5D3A" />
+<text x="442" y="103" fill="#5f5f66" font-size="14">u₁ · most variance, √λ₁</text>
+<text x="326" y="218" fill="#5f5f66" font-size="14">u₂ · least variance, √λ₂</text>
+<text x="246" y="152" fill="#4F5D3A" font-size="14">mean</text>
+</svg>
+{% unless include.standalone %}
+</div>
+<p class="blog-figure-reading">Ask “how much do embeddings spread along this direction?” and the answer is an eigenvalue</p>
+<p class="blog-figure-reading">The eigenvectors are orthogonal, so they form a frame in which the covariance is diagonal and the cloud is axis-aligned.</p>
+{% endunless %}

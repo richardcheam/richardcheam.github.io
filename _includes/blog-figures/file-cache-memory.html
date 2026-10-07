@@ -1,0 +1,17 @@
+{% unless include.standalone %}
+<p class="blog-figure-label">CONCEPTUAL · OWNERSHIP AFTER LOAD</p>
+<div class="blog-diagram" tabindex="0" role="region" aria-label="{{ include.alt | escape }}">
+{% endunless %}
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 52 780 188" role="img" aria-labelledby="file-cache-memory-title file-cache-memory-desc" class="blog-diagram-svg" font-family="Inter, sans-serif">
+  <title id="file-cache-memory-title">Two possible owners after checkpoint loading</title><desc id="file-cache-memory-desc">A checkpoint file can populate reclaimable file-backed pages, while a loader may construct a separate runtime tensor. A loader retaining its mapping has a different lifetime.</desc>
+  <text x="26" y="86" fill="#111111" font-size="17">Checkpoint on storage</text>
+  <path d="M225 82 H300 M300 82 V130 H348 M300 82 V190 H348" fill="none" stroke="#5f5f66" stroke-width="2" />
+  <circle cx="300" cy="82" r="4" fill="#5f5f66" />
+  <text x="355" y="136" fill="#111111" font-size="17">File-backed pages</text>
+  <text x="355" y="158" fill="#5f5f66" font-size="15">Kernel cache · reclaimable when unused</text>
+  <text x="355" y="196" fill="#111111" font-size="17">Runtime allocation</text>
+  <text x="355" y="218" fill="#5f5f66" font-size="15">Live tensor · lifetime set by serving runtime</text>
+</svg>
+{% unless include.standalone %}
+</div>
+{% endunless %}

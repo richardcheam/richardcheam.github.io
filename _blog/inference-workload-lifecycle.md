@@ -19,8 +19,8 @@ I investigated why an inference service had stopped responding even though its c
 
 Inference workers stopped responding while their container remained alive. A worker log showed the parent-monitor pipe closing, but the surviving records did not identify the first process to exit or any signal sender. The incident showed why container liveness was an incomplete measure of model service.
 
-<figure class="blog-figure blog-figure--wide" tabindex="0">
-  <img src="{{ '/assets/blog/service-lifecycle.svg' | relative_url }}" alt="Observed state: container alive, inference workers unresponsive, parent-monitor pipe closed. The first exiting process and cause remain unknown." loading="lazy">
+<figure class="blog-figure blog-figure--wide">
+  {% include blog-figures/service-lifecycle.html alt="Observed state: container alive, inference workers unresponsive, parent-monitor pipe closed. The first exiting process and cause remain unknown." %}
   <figcaption><strong>Figure 1 · What the surviving record establishes.</strong> Reconstructed set of observations, not a precise timestamped trace. The ordering and cause of the underlying exits remain unresolved. Source: canonical pack, lifecycle incident / SRC-11.</figcaption>
 </figure>
 

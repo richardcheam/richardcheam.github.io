@@ -1,0 +1,19 @@
+{% unless include.standalone %}
+<p class="blog-figure-label">SCHEMATIC · SORTED EIGENVALUES, LOG AXIS</p>
+<div class="blog-diagram" tabindex="0" role="region" aria-label="{{ include.alt | escape }}">
+{% endunless %}
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 52 780 238" role="img" aria-labelledby="eigenvalue-spectrum-title eigenvalue-spectrum-desc" class="blog-diagram-svg" font-family="Inter, sans-serif">
+<title id="eigenvalue-spectrum-title">Two eigenvalue spectra on a log axis</title><desc id="eigenvalue-spectrum-desc">One curve decays gradually across every index. The other falls off a cliff after the first few indices and then flattens near the numerical floor, which is dimensional collapse.</desc>
+<line x1="100" y1="80" x2="100" y2="250" stroke="#5f5f66" /><line x1="100" y1="250" x2="600" y2="250" stroke="#5f5f66" />
+<polyline points="100,92 160,104 220,115 280,125 340,135 400,145 460,156 520,168 600,184" fill="none" stroke="#4F5D3A" stroke-width="2" stroke-linejoin="round" />
+<polyline points="100,90 140,100 180,118 220,160 260,196 310,218 380,228 600,232" fill="none" stroke="#A8503A" stroke-width="2" stroke-linejoin="round" />
+<text x="100" y="72" fill="#5f5f66" font-size="14">log λᵢ</text>
+<text x="610" y="188" fill="#4F5D3A" font-size="14">gradual decay</text>
+<text x="610" y="236" fill="#A8503A" font-size="14">rank cliff</text>
+<text x="350" y="274" fill="#5f5f66" font-size="14" text-anchor="middle">eigenvalue index i</text>
+</svg>
+{% unless include.standalone %}
+</div>
+<p class="blog-figure-reading">The cliff is dimensional collapse: a handful of directions carry everything</p>
+<p class="blog-figure-reading">Log scale is not cosmetic. On a linear axis the whole tail is flattened against zero by the first eigenvalue.</p>
+{% endunless %}
