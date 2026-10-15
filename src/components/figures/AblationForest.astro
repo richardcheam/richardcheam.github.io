@@ -1,0 +1,59 @@
+---
+// Paired CER differences from the registered experiments (report §7), all
+// written as "CER change, negative = better". The 300 h result is reported as
+// a +0.39 pt gain and is flipped here to match. Shaded band: the registered
+// minimum useful effect of 1.0 pt (0.5 pt for the optimiser screen).
+const { alt } = Astro.props;
+const rows = [
+  { label: "Coverage-picked 100 h vs random 100 h", m: -0.56, lo: -0.87, hi: -0.25, bar: 1 },
+  { label: "Coverage-picked 100 h vs matched 100 h", m: -0.26, lo: -0.55, hi: 0.05, bar: 1 },
+  { label: "300 h vs 100 h, same compute", m: -0.39, lo: -0.71, hi: -0.06, bar: 1 },
+  { label: "Muon vs AdamW optimiser", m: -0.23, lo: -0.52, hi: 0.07, bar: 0.5 },
+  { label: "Cosine cool-down vs constant LR", m: 0.34, lo: 0.09, hi: 0.62, bar: 1 },
+];
+const X0 = 330, W = 300, LO = -1.5, HI = 1.0, Y0 = 70, RH = 46;
+const sx = (v: number) => X0 + ((v - LO) / (HI - LO)) * W;
+---
+<div class="blog-diagram af" tabindex="0" role="region" aria-label={alt} data-af>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 400" role="img" aria-labelledby="af-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="af-title">Effect of each training experiment on CER with 95% intervals</title>
+    <rect x={sx(-1)} y={Y0 - 26} width={sx(0) - sx(-1)} height={rows.length * RH + 10} fill="#4F5D3A" fill-opacity="0.06" />
+    <line x1={sx(-1)} x2={sx(-1)} y1={Y0 - 26} y2={Y0 + rows.length * RH - 16} stroke="#4F5D3A" stroke-dasharray="4 3" />
+    <text x={sx(-1) + 4} y={Y0 - 32} font-size="10" fill="#4F5D3A">−1.0 pt: smallest effect worth acting on</text>
+    <line x1={sx(0)} x2={sx(0)} y1={Y0 - 26} y2={Y0 + rows.length * RH - 16} stroke="#2b2b30" />
+    <g font-size="9.5" fill="#5f5f66" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">
+      {[-1.5, -1, -0.5, 0, 0.5, 1].map((v) => <text x={sx(v)} y={Y0 + rows.length * RH} text-anchor="middle">{v > 0 ? `+${v}` : v}</text>)}
+    </g>
+    <text x={sx(-0.25)} y={Y0 + rows.length * RH + 20} font-size="10.5" text-anchor="middle" fill="#2b2b30">CER change in points (← better · worse →)</text>
+    {rows.map((r, i) => (
+      <g data-row transform={`translate(0 ${Y0 + i * RH})`}>
+        <text x="24" y="4" font-size="11.5" fill="#2b2b30">{r.label}</text>
+        <line data-ci x1={sx(r.lo)} x2={sx(r.hi)} y1="0" y2="0" stroke={r.m > 0 ? "#a33b3b" : "#594578"} stroke-width="2.5" />
+        <circle cx={sx(r.m)} cy="0" r="5.5" fill={r.m > 0 ? "#a33b3b" : "#594578"} />
+        {r.bar === 0.5 && <line x1={sx(-0.5)} x2={sx(-0.5)} y1="-10" y2="10" stroke="#4F5D3A" stroke-width="2" />}
+        <text x={sx(HI) + 12} y="4" font-size="10.5" fill="#2b2b30" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">{r.m > 0 ? "+" : ""}{r.m.toFixed(2)} [{r.lo.toFixed(2)}, {r.hi > 0 ? "+" : ""}{r.hi.toFixed(2)}]</text>
+      </g>
+    ))}
+    <g data-missed transform={`translate(24 ${Y0 + rows.length * RH + 46})`}>
+      <text font-size="11" letter-spacing="1" fill="#5f5f66">WHAT CER MISSED IN THE 300 H RUN</text>
+      <text y="22" font-size="11.5" fill="#2b2b30">Rare words mispronounced, per 100, judged by the native listener:</text>
+      <rect x="400" y="10" width={17 * 12} height="14" rx="2" fill="#a33b3b" fill-opacity="0.7" />
+      <text x={404 + 17 * 12} y="22" font-size="11" font-weight="700" fill="#a33b3b">17 <tspan font-weight="400" fill="#5f5f66">with 100 h</tspan></text>
+      <rect x="400" y="28" width={5 * 12} height="14" rx="2" fill="#4F5D3A" fill-opacity="0.8" />
+      <text x={404 + 5 * 12} y="40" font-size="11" font-weight="700" fill="#4F5D3A">5 <tspan font-weight="400" fill="#5f5f66">with 300 h</tspan></text>
+    </g>
+  </svg>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { animate, dur, setupFigure, wait } from "../../lib/figure-motion";
+
+  document.querySelectorAll<HTMLElement>("[data-af]").forEach((root) => {
+    const rows = Array.from(root.querySelectorAll<SVGGElement>("[data-row]")), missed = root.querySelector<SVGGElement>("[data-missed]")!;
+    setupFigure(root, () => { rows.forEach((r) => (r.style.opacity = "0")); missed.style.opacity = "0"; }, async (alive) => {
+      for (const r of rows) { if (!alive()) return; animate(r, { opacity: [0, 1] }, { duration: dur(0.35) }); await wait(0.3); }
+      animate(missed, { opacity: [0, 1] }, { duration: dur(0.5) });
+    });
+  });
+</script>

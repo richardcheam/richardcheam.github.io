@@ -1,0 +1,35 @@
+---
+title: "DecisionOps"
+area: "Workflow Evaluation"
+date: "September 2026"
+order: 2
+headline: "Hiding unsupported evidence stopped two learned policies from guessing a diagnosis, but neither beat a fixed checklist."
+question: "In a diagnostic workflow with fixed tool and decision budgets, can a learned policy choose useful next steps while acting only on evidence it has seen?"
+approach: "Six policies, from a fixed checklist to two learned models with and without evidence masking, run through a deterministic harness on 24 synthetic scenarios, every decision recorded as a replayable trace."
+stack: "Python · GLiClass · Laya · GitHub Actions"
+links:
+  - { label: "Trace viewer", url: "https://richardcheam.github.io/decisionops/" }
+  - { label: "Source code", url: "https://github.com/richardcheam/decisionops" }
+numbers:
+  - { value: "13/13 · 11/11", label: "Fixed order: correct supported diagnoses and correct reviews, both splits" }
+  - { value: "38 → 0 · 48 → 0", label: "Unsupported diagnosis proposals for GLiClass and Laya once evidence was masked" }
+  - { value: "8/13 · 6/13", label: "Correct supported diagnoses for masked Laya and masked GLiClass" }
+---
+
+## What I did
+
+I built a deterministic harness with four fixture tools that return checked-in database, authentication, storage and service-health observations. They never touch live systems. The harness alone decides which actions are allowed, what evidence is visible, and whether a proposal is accepted.
+
+Six policies ran through it: a fixed-order checklist, a rules baseline, and two models, GLiClass and Laya, each with and without **evidence masking** (hiding any diagnosis the visible evidence does not support). They ran on 12 development and 12 evaluation scenarios, and every decision was recorded as a replayable trace. The harness never overrides a model's choice, and the true answers stay hidden from every policy.
+
+## What I found
+
+- **Masking removed unsupported guesses.** Unsupported diagnosis proposals fell from 38 to 0 for GLiClass and from 48 to 0 for Laya, and failed episodes from 19 and 24 to zero.
+- **The checklist still won.** Fixed order got every supported diagnosis and review right on both splits, with no wrong diagnoses. Masked Laya and GLiClass reached 8 and 6 of 13, with 2 and 1 wrong diagnoses.
+- **Supported is not the same as ready.** Masking raised the number of reviews, including unnecessary ones. On one scenario with several faults, masked Laya checked only the database and then diagnosed.
+
+## Limits
+
+The 24 scenarios are inspected synthetic regression cases, not held-out data, so they say nothing about production accuracy. Model scores are uncalibrated and never authorise an action. The two models receive different input formats, so the comparison does not isolate the architecture. No confidence threshold or prompt variants were tuned.
+
+The trace viewer replays the recorded decisions. It runs no live model and performs no remediation.

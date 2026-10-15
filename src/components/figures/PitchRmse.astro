@@ -1,0 +1,82 @@
+---
+// F0 RMSE rewards closeness to one take, not naturalness. Reference: a
+// question rising at the end. A: a natural reading with the same rise, placed
+// a little later. B: a flat monotone at the reference's mean pitch.
+// Contours are synthetic; the RMSE is computed from them frame by frame.
+const { alt } = Astro.props;
+const X0 = 60, Y0 = 280, W = 460, H = 220, FMIN = 90, FMAX = 260;
+---
+<div class="blog-diagram pr" role="region" aria-label={alt} data-pr data-cfg={JSON.stringify({ X0, Y0, W, H, FMIN, FMAX })}>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 330" role="img" aria-labelledby="pr-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="pr-title">Pitch contours and their RMSE against a reference</title>
+    <g stroke="#ececf1">{[100, 140, 180, 220, 260].map((f) => <line x1={X0} x2={X0 + W} y1={Y0 - ((f - FMIN) / (FMAX - FMIN)) * H} y2={Y0 - ((f - FMIN) / (FMAX - FMIN)) * H} />)}</g>
+    <g font-size="9.5" fill="#5f5f66" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">{[100, 140, 180, 220, 260].map((f) => <text x={X0 - 6} y={Y0 - ((f - FMIN) / (FMAX - FMIN)) * H + 3} text-anchor="end">{f}</text>)}</g>
+    <text x="18" y={Y0 - H / 2} font-size="10.5" fill="#2b2b30" transform={`rotate(-90 18 ${Y0 - H / 2})`} text-anchor="middle">F0, Hz</text>
+    {["You’re", "coming", "tomorrow?"].map((w, i) => <text x={X0 + 60 + i * 150} y={Y0 + 20} font-size="12" fill="#2b2b30" text-anchor="middle">{w}</text>)}
+    <path data-c="ref" fill="none" stroke="#2b2b30" stroke-width="2.5" />
+    <path data-c="a" fill="none" stroke="#4F5D3A" stroke-width="2" />
+    <path data-c="b" fill="none" stroke="#a33b3b" stroke-width="2" />
+    <g transform="translate(560 60)">
+      <text font-size="11" letter-spacing="1" fill="#5f5f66">F0 RMSE VS REFERENCE</text>
+      <rect y="22" width="14" height="3" fill="#2b2b30" /><text x="22" y="28" font-size="11" fill="#2b2b30">reference take</text>
+      <rect y="62" width="14" height="3" fill="#4F5D3A" /><text x="22" y="68" font-size="11" fill="#4F5D3A">A · natural, rises later</text>
+      <text data-rmse="a" x="22" y="96" font-size="24" font-weight="700" fill="#4F5D3A" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"></text>
+      <rect y="132" width="14" height="3" fill="#a33b3b" /><text x="22" y="138" font-size="11" fill="#a33b3b">B · flat monotone</text>
+      <text data-rmse="b" x="22" y="166" font-size="24" font-weight="700" fill="#a33b3b" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"></text>
+      <text data-verdict y="206" font-size="10.5" fill="#5f5f66"></text>
+    </g>
+  </svg>
+  <div class="fig-panel">
+    <label>
+      <span class="fig-panel__name">Where A starts its rise<strong data-val></strong></span>
+      <input class="scrub" data-shift type="range" min="0" max="300" step="25" value="250" style="--n: 12; --p: 83.3%" />
+    </label>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { drawStroke, hideStroke, setupFigure, wait } from "../../lib/figure-motion";
+
+  const T = 120; // frames, 10 ms each
+  const ref = (t: number, shift = 0) => {
+    const u = t - 80 - shift / 10; // rise starts at frame 80 (800 ms)
+    const base = 150 - 0.15 * t;
+    return base + (u > 0 ? 90 * (1 - Math.exp(-u / 12)) : 0);
+  };
+  document.querySelectorAll<HTMLElement>("[data-pr]").forEach((root) => {
+    const c = JSON.parse(root.dataset.cfg!);
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const shift = $<HTMLInputElement>("[data-shift]");
+    const sx = (t: number) => c.X0 + (t / (T - 1)) * c.W;
+    const sy = (f: number) => c.Y0 - ((f - c.FMIN) / (c.FMAX - c.FMIN)) * c.H;
+    const path = (f: (t: number) => number) => Array.from({ length: T }, (_, t) => `${t ? "L" : "M"}${sx(t).toFixed(1)} ${sy(f(t)).toFixed(1)}`).join("");
+    const rmse = (f: (t: number) => number) => Math.sqrt(Array.from({ length: T }, (_, t) => (f(t) - ref(t)) ** 2).reduce((s, x) => s + x, 0) / T);
+
+    function frame() {
+      const ms = +shift.value;
+      const A = (t: number) => ref(t, ms) + 4 * Math.sin(t / 7);
+      const mean = Array.from({ length: T }, (_, t) => ref(t)).reduce((s, x) => s + x, 0) / T;
+      const B = () => mean;
+      $('[data-c="ref"]').setAttribute("d", path((t) => ref(t)));
+      $('[data-c="a"]').setAttribute("d", path(A));
+      $('[data-c="b"]').setAttribute("d", path(B));
+      const ra = rmse(A), rb = rmse(B);
+      $('[data-rmse="a"]').textContent = `${ra.toFixed(1)} Hz`;
+      $('[data-rmse="b"]').textContent = `${rb.toFixed(1)} Hz`;
+      $("[data-verdict]").textContent = ra > rb ? "The metric prefers the monotone." : "Here the natural take wins.";
+      $("[data-val]").textContent = `${ms} ms later`;
+      shift.style.setProperty("--p", `${(ms / 300) * 100}%`);
+    }
+    shift.addEventListener("input", frame);
+    frame();
+    const curves = Array.from(root.querySelectorAll<SVGPathElement>("[data-c]"));
+    setupFigure(root, () => { frame(); curves.forEach(hideStroke); }, async (alive) => {
+      for (const p of curves) {
+        if (!alive()) return;
+        await drawStroke(p, 0.9);
+        await wait(0.15);
+      }
+    });
+  });
+</script>

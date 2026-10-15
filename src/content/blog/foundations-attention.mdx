@@ -1,0 +1,449 @@
+---
+title: "Attention: looking back at everything at once"
+date: 2026-10-15
+category: "deep-learning"
+read_time: "32 min"
+series_order: 10
+series: foundations
+featured: false
+excerpt: "A recurrent network has to squeeze a whole sentence into one small state. Attention lets every position look back at every other position directly, choosing how much to take from each. This post builds it from a soft library lookup up to multi-head, masked, scaled dot-product attention, with every number worked by hand."
+question: "How can a network use the whole input at once, instead of one squeezed-down memory of it?"
+my_work: "A concept note. I worked every example by hand, checked every number with a short script, and specified the figures from the standard formulas."
+result: "Attention is a weighted average whose weights come from comparing a query with keys. Dividing the scores by the square root of the vector size keeps softmax from saturating; masking the future makes it usable for generation; several heads let it look for several things at once. Its cost grows with the square of the sequence length."
+evidence_limit: "This explains textbook methods on toy vectors. No experiments; the only random numbers are a seeded demonstration of how dot products spread out."
+lesson: "Attention does not remember; it looks things up. That one change removes the bottleneck and the long gradient chain of recurrent networks, at the price of comparing every position with every other."
+---
+
+import Seq2SeqBottleneck from "../../components/figures/Seq2SeqBottleneck.astro";
+import SoftLookupStepper from "../../components/figures/SoftLookupStepper.astro";
+import ScaledDotProductStepper from "../../components/figures/ScaledDotProductStepper.astro";
+import SqrtDSaturation from "../../components/figures/SqrtDSaturation.astro";
+import CausalMaskStepper from "../../components/figures/CausalMaskStepper.astro";
+import MultiHeadToy from "../../components/figures/MultiHeadToy.astro";
+import AttentionCostExplorer from "../../components/figures/AttentionCostExplorer.astro";
+
+In [the recurrent networks post](/blog/foundations-recurrent-networks/) we read a sequence one piece at a time, carrying a hidden state forward like a note passed down a line of people. [LSTM and GRU](/blog/foundations-lstm-gru/) made that note much better at keeping what matters. But it is still one note, of a fixed size, passed one hop at a time.
+
+This post is about a different idea: instead of remembering everything, **look it up**. Keep every position of the input around, and whenever you need something, compare what you want with what each position offers, and take a blend of the best matches. That is **attention**. It is the heart of the Transformer, which is [the next post](/blog/foundations-transformer/), and of almost every modern language and speech model, including [Pocket TTS](/blog/pocket-tts-calm-explained/).
+
+We need three things from earlier posts. The **dot product** from [the embeddings post](/blog/foundations-embeddings/): multiply matching entries of two vectors and add, so arrows pointing the same way give a big number. **Softmax** from [the loss post](/blog/foundations-loss-gradient-descent/): make every score positive with $e^{z}$, then divide by the total so they add to 1. And **embeddings**: each token is a short list of numbers.
+
+
+## The bottleneck: a whole sentence in one state
+
+In 2014 Sutskever, Vinyals and Le showed that two recurrent networks could translate sentences. The first, the **encoder**, reads the English sentence word by word. Its final hidden state is handed to the second, the **decoder**, which writes the French sentence word by word. This design is called **sequence-to-sequence** (seq2seq). Their networks were deep LSTMs, and it worked remarkably well.
+
+But look at what passes between the two halves: **one vector**. Every word, every name, every bit of grammar in the source sentence has to fit into that single fixed-size list of numbers, whether the sentence has 5 words or 50. A short sentence fits easily. A long one gets squashed, and the early words, which went through the most steps, are the most faded.
+
+Everyday picture: someone reads you a long recipe once, then you must cook it from memory. You will do fine with "boil an egg". With a twenty-step curry you will forget the third spice. What you want is to keep the recipe on the counter and **glance back** at the line you need.
+
+Bahdanau, Cho and Bengio (2015) measured exactly this: the quality of a fixed-vector encoder-decoder dropped as sentences got longer, and adding attention largely removed the drop. Their fix was to keep **all** the encoder's hidden states, one per source word, and let the decoder look back at them at every step.
+
+<figure class="blog-figure blog-figure--wide">
+  <Seq2SeqBottleneck alt="Top row: an encoder reads five source words into hidden states, and only the last state passes through a narrow funnel to the decoder. Bottom row: the same encoder states all stay visible, and the decoder draws lines to each of them with different thicknesses." />
+  <figcaption><strong>Figure 1. One squeezed state versus looking back.</strong> Step through the top row to see every word funnelled into one vector; switch to attention to see the decoder reach every source state directly.</figcaption>
+</figure>
+
+
+## Attention as a soft lookup
+
+In one sentence: compare what you want with what everything offers, turn the comparisons into weights that add up to 1, and take the weighted average of the contents.
+
+### The library picture
+
+You walk into a library with a question: "books about cats". That is your **query**. Every book has a label on its spine: "cats", "dogs", "cat care". Those are the **keys**. Inside each book is its content: the **values**.
+
+A normal lookup (like a Python dictionary) is **hard**: find the one key that matches exactly and return its value. If nothing matches exactly, you get nothing. Attention is a **soft** lookup: every key is scored by how well it matches, and you get back a blend of every value, mixed in proportion to how good the match was. "Cats" and "cat care" both match well, so you get mostly those; "dogs" matches a little, so you get a little of that too.
+
+A search engine works the same way: it scores every page against your words and ranks them. Attention goes one step further and **blends** the top results instead of listing them.
+
+The soft blend matters for one big reason: it is smooth. Change the query a little and the weights change a little, so the gradient from [backpropagation](/blog/foundations-neurons-backprop/) can flow through it. A hard "pick the best" has no useful gradient.
+
+### The four steps
+
+For one query $\mathbf{q}$ and $n$ key-value pairs $(\mathbf{k}_1, \mathbf{v}_1), \dots, (\mathbf{k}_n, \mathbf{v}_n)$:
+
+1. **Score** each key: $s_j = \mathbf{q} \cdot \mathbf{k}_j$.
+2. **Softmax** the scores into weights: $\alpha_j = e^{s_j} / \sum_m e^{s_m}$.
+3. **Blend**: $\mathbf{o} = \sum_j \alpha_j \mathbf{v}_j$.
+
+That is three steps; the fourth is simply "repeat for every query". Written in one line:
+
+$$
+\mathbf{o} = \sum_{j=1}^{n} \alpha_j \, \mathbf{v}_j, \qquad \alpha_j = \frac{e^{\mathbf{q} \cdot \mathbf{k}_j}}{\sum_{m=1}^{n} e^{\mathbf{q} \cdot \mathbf{k}_m}}
+$$
+
+- $\mathbf{q}$ is the query: what we are looking for.
+- $\mathbf{k}_j$ is the key of item $j$: what that item advertises.
+- $\mathbf{v}_j$ is the value of item $j$: what it hands over if chosen.
+- $\alpha_j$ (alpha) is the **attention weight** on item $j$. All the weights are positive and add up to 1.
+- $\mathbf{o}$ is the output: the blended answer.
+- $n$ is how many items there are; $j$ and $m$ count through them.
+
+### Worked by hand
+
+Take the query $\mathbf{q} = (1, 1)$ and three items:
+
+| item | key | value |
+|---|---|---|
+| 1 | $(2, 0)$ | $(10, 0)$ |
+| 2 | $(0, 1)$ | $(0, 10)$ |
+| 3 | $(1, 1)$ | $(5, 5)$ |
+
+**Scores.** $s_1 = 1 \times 2 + 1 \times 0 =$ **2**. $s_2 = 1 \times 0 + 1 \times 1 =$ **1**. $s_3 = 1 \times 1 + 1 \times 1 =$ **2**.
+
+**Softmax.** $e^{2} = 7.389$, $e^{1} = 2.718$, $e^{2} = 7.389$. Total $= 17.496$. Weights: $7.389 / 17.496 =$ **0.422**, $2.718 / 17.496 =$ **0.155**, and **0.422** again.
+
+**Blend.** First number: $0.422 \times 10 + 0.155 \times 0 + 0.422 \times 5 = 4.223 + 0 + 2.112 =$ **6.335**. Second: $0.422 \times 0 + 0.155 \times 10 + 0.422 \times 5 = 0 + 1.554 + 2.112 =$ **3.665**. The output is $(6.335, 3.665)$.
+
+What changed if a number changed? Item 1 and item 3 tie, because their keys give the same dot product with this query, even though they point in different directions (the dot product also counts length). Drag the query toward $(1, 0)$ and item 1 wins: the scores become 2, 0, 1 and the output moves toward $(10, 0)$. Notice the output is always inside the triangle of the three values: a weighted average can never leave it.
+
+<figure class="blog-figure blog-figure--wide">
+  <SoftLookupStepper alt="A 2-D plane with a draggable query arrow and three draggable key arrows. Beside it, a panel steps through the three dot products, the softmax weights as bars, and the output as a point inside the triangle of value points." />
+  <figcaption><strong>Figure 2. A soft lookup, one operation at a time.</strong> Drag the query or any key; Step shows each score, each weight and the weighted sum with the arithmetic written out.</figcaption>
+</figure>
+
+
+## Two ways to score: additive and dot-product
+
+The recipe above leaves one choice open: how to score a query against a key.
+
+### Bahdanau's additive score
+
+Bahdanau, Cho and Bengio scored with a tiny one-hidden-layer network. In their translation model the "query" is the decoder's previous state $\mathbf{s}$ and the "keys" are the encoder states $\mathbf{h}_j$:
+
+$$
+e_j = \mathbf{w}^{\top} \tanh(W\mathbf{s} + U\mathbf{h}_j)
+$$
+
+- $W$ and $U$ are learned matrices that bring $\mathbf{s}$ and $\mathbf{h}_j$ into a shared space.
+- $\tanh$ squashes the sum into $-1$ to $1$, exactly as in [the recurrent post](/blog/foundations-recurrent-networks/).
+- $\mathbf{w}$ is a learned vector that turns the result into one number; $^{\top}$ (transpose) just lays it on its side so this is a dot product.
+
+It is called **additive** because the two inputs are added before the squash. A one-number example with $W = U = w = 1$: decoder state $s = 0.5$, encoder states $h_1 = 1$ and $h_2 = -1$. Scores: $\tanh(1.5) =$ **0.905** and $\tanh(-0.5) =$ **−0.462**. Softmax: $e^{0.905} = 2.472$, $e^{-0.462} = 0.630$, total $3.102$, weights **0.797** and **0.203**. The decoder mostly looks at the first source word.
+
+### The dot-product score
+
+Luong, Pham and Manning (2015) compared several scores and found the plain **dot product** $\mathbf{q} \cdot \mathbf{k}$ works well and is much cheaper: no extra network, just multiply and add. For many queries at once it becomes a single matrix multiplication, which graphics processing units (GPUs) do extremely fast. The Transformer (Vaswani et al., 2017) uses the dot product, with one small fix that we come to next.
+
+
+## Scaled dot-product attention
+
+In one sentence: score every query against every key in one matrix multiplication, shrink the scores by the square root of the vector length, softmax each row, and use the rows to blend the values.
+
+$$
+\operatorname{Attention}(Q, K, V) = \operatorname{softmax}\!\left(\frac{QK^{\top}}{\sqrt{d}}\right) V
+$$
+
+- $Q$ is a table with one **query** per row, one row per token.
+- $K$ is a table with one **key** per row; $V$ one **value** per row.
+- $d$ is the length of each query and key vector (the Transformer paper writes $d_k$).
+- $K^{\top}$ is $K$ flipped so its rows become columns. Then entry $(i, j)$ of $QK^{\top}$ is exactly the dot product of query $i$ with key $j$.
+- $\sqrt{d}$ divides every score. The [next section](#why-divide-by-the-square-root-of-d) explains why.
+- $\operatorname{softmax}$ is applied **to each row separately**, so each row of weights adds up to 1.
+- Multiplying by $V$ blends the values: output row $i$ is query $i$'s weighted average.
+
+It is the soft lookup from before, done for every query at the same time.
+
+### Worked fully by hand on three tokens
+
+Three tokens, each with a 2-D query, key and value ($d = 2$, so $\sqrt{d} = 1.414$). Where these come from is the subject of [a later section](#where-queries-keys-and-values-come-from); for now take them as given.
+
+| token | query | key | value |
+|---|---|---|---|
+| 1 | $(1, 0)$ | $(1, 1)$ | $(2, 0)$ |
+| 2 | $(1, 1)$ | $(0, 1)$ | $(0, 2)$ |
+| 3 | $(2, 1)$ | $(1, 2)$ | $(2, 2)$ |
+
+**Step one: every query against every key.** Nine dot products, one per cell.
+
+- Row 1 (query $(1,0)$): with key 1, $1 \times 1 + 0 \times 1 = 1$; key 2, $1 \times 0 + 0 \times 1 = 0$; key 3, $1 \times 1 + 0 \times 2 = 1$.
+- Row 2 (query $(1,1)$): $1 + 1 = 2$; $0 + 1 = 1$; $1 + 2 = 3$.
+- Row 3 (query $(2,1)$): $2 + 1 = 3$; $0 + 1 = 1$; $2 + 2 = 4$.
+
+$$
+QK^{\top} = \begin{pmatrix} 1 & 0 & 1 \\ 2 & 1 & 3 \\ 3 & 1 & 4 \end{pmatrix}
+$$
+
+**Step two: scale.** Divide every cell by $1.414$:
+
+$$
+\frac{QK^{\top}}{\sqrt{2}} = \begin{pmatrix} 0.707 & 0 & 0.707 \\ 1.414 & 0.707 & 2.121 \\ 2.121 & 0.707 & 2.828 \end{pmatrix}
+$$
+
+**Step three: softmax, row by row.**
+
+- Row 1: $e^{0.707} = 2.028$, $e^{0} = 1$, $e^{0.707} = 2.028$. Total $5.056$. Weights **0.401, 0.198, 0.401**.
+- Row 2: $e^{1.414} = 4.113$, $e^{0.707} = 2.028$, $e^{2.121} = 8.342$. Total $14.484$. Weights **0.284, 0.140, 0.576**.
+- Row 3: $e^{2.121} = 8.342$, $e^{0.707} = 2.028$, $e^{2.828} = 16.919$. Total $27.289$. Weights **0.306, 0.074, 0.620**.
+
+Each row adds to 1 (up to rounding). Every token pays most attention to token 3, whose key $(1, 2)$ is the longest and so matches everything best.
+
+**Step four: blend the values.**
+
+- Row 1: first number $0.401 \times 2 + 0.198 \times 0 + 0.401 \times 2 =$ **1.604**; second $0.401 \times 0 + 0.198 \times 2 + 0.401 \times 2 =$ **1.198**.
+- Row 2: $0.284 \times 2 + 0.576 \times 2 =$ **1.720**; $0.140 \times 2 + 0.576 \times 2 =$ **1.432**.
+- Row 3: $0.306 \times 2 + 0.620 \times 2 =$ **1.851**; $0.074 \times 2 + 0.620 \times 2 =$ **1.389**.
+
+$$
+\text{output} = \begin{pmatrix} 1.604 & 1.198 \\ 1.720 & 1.432 \\ 1.851 & 1.389 \end{pmatrix}
+$$
+
+Each token's new vector is a mixture of all three values, with its own recipe. Notice the output has the same shape as the input: three tokens in, three tokens out. That is why attention layers can be stacked.
+
+<figure class="blog-figure blog-figure--wide">
+  <ScaledDotProductStepper alt="Three small matrices Q, K-transpose and V. A Step button fills the 3 by 3 score grid one cell at a time with the dot product written out, then divides by 1.414, then softmaxes each row into a heat-shaded row of weights, then multiplies by V to fill the 3 by 2 output." />
+  <figcaption><strong>Figure 3. Scaled dot-product attention, cell by cell.</strong> Twenty-one steps: nine dot products, one scaling, three row softmaxes, six output numbers, and two summaries. Every number is the one in the text.</figcaption>
+</figure>
+
+
+## Why divide by the square root of d
+
+In one sentence: dot products of longer vectors spread out more, and big spread makes softmax pick one winner and stop learning; dividing by $\sqrt{d}$ cancels the spread.
+
+### The spread grows with d
+
+Suppose the numbers in queries and keys are random, each with average 0 and spread (standard deviation) 1, which is roughly what a well-initialised network produces. A dot product of two such vectors adds up $d$ products. Each product has average 0 and variance 1, and the variances of independent pieces add, so the dot product has **variance $d$** and standard deviation $\sqrt{d}$. Vaswani et al. (2017) give exactly this argument in a footnote.
+
+Checked with 10,000 random pairs (NumPy, seed 0):
+
+| $d$ | spread of $\mathbf{q} \cdot \mathbf{k}$ | $\sqrt{d}$ | spread after dividing by $\sqrt{d}$ |
+|---|---|---|---|
+| 4 | **1.99** | 2 | 0.99 |
+| 16 | **3.98** | 4 | 0.99 |
+| 64 | **7.99** | 8 | 1.00 |
+| 256 | **16.06** | 16 | 1.00 |
+
+After dividing, the spread is about **1** whatever $d$ is.
+
+### Why big spread hurts: softmax saturates
+
+Softmax only cares about differences between scores. With differences around 1, the weights are a gentle mix. With differences around 8, one weight is nearly 1 and the rest nearly 0: softmax has become a hard max. That is called **saturation**, and it is bad for training: when one weight is almost exactly 1, nudging the scores barely changes anything, so the gradient through the softmax is almost zero ([the loss post](/blog/foundations-loss-gradient-descent/) showed that softmax's slope is largest when the probabilities are spread out).
+
+One draw of a query and three keys (NumPy, seed 42):
+
+- $d = 4$: raw scores $0.56, 2.27, -1.61$; softmax **0.150, 0.833, 0.017**. Scaled by $\sqrt{4} = 2$: $0.28, 1.14, -0.80$; softmax **0.271, 0.638, 0.092**.
+- $d = 64$: raw scores $-1.32, 6.82, -3.89$; softmax **0.0003, 0.9997, 0.0000**. Saturated. Scaled by $\sqrt{64} = 8$: $-0.17, 0.85, -0.49$; softmax **0.223, 0.616, 0.162**.
+
+The scaled $d = 64$ case looks just like the $d = 4$ case. That is the whole point: the size of the vectors no longer decides how sharp attention is. The network can still learn to make attention sharp, by growing its queries and keys, but it starts from a place where gradients flow.
+
+<figure class="blog-figure blog-figure--wide">
+  <SqrtDSaturation alt="A d slider from 1 to 256 above two panels. The left panel is a histogram of dot products from seeded random vectors that widens as d grows, with a toggle to divide by root d that pins it back. The right panel shows three softmax bars that collapse to one bar at high d unless scaling is on." />
+  <figcaption><strong>Figure 4. Why scale by the square root of d.</strong> Raise d with scaling off and watch the histogram widen and softmax snap to a single winner; turn scaling on and both settle. The figure draws its own random vectors, so its numbers differ slightly from the NumPy draws in the text.</figcaption>
+</figure>
+
+
+## Where queries, keys and values come from
+
+In one sentence: each token's embedding is multiplied by three different learned matrices, giving three different views of the same token.
+
+$$
+Q = X W_Q, \qquad K = X W_K, \qquad V = X W_V
+$$
+
+- $X$ is the table of input embeddings, one row per token.
+- $W_Q$, $W_K$, $W_V$ are three learned matrices, trained by gradient descent like any other weight.
+- Row $i$ of $Q$ is token $i$'s question; row $i$ of $K$ is its advertisement; row $i$ of $V$ is what it hands over.
+
+Why three? Because what a word is **looking for** is not the same as what it **offers**, and neither is the same as what it should **pass on**. The word "it" might be looking for a noun; the word "cat" advertises "I am a noun"; and what "cat" passes on is its meaning. One embedding cannot play all three roles well, so the network learns three separate projections.
+
+### Worked
+
+Three tokens with 2-D embeddings $(1, 0)$, $(0, 1)$ and $(1, 1)$, and these matrices:
+
+$$
+W_Q = \begin{pmatrix} 1 & 0 \\ 1 & 1 \end{pmatrix}, \quad W_K = \begin{pmatrix} 1 & 1 \\ 0 & 1 \end{pmatrix}, \quad W_V = \begin{pmatrix} 2 & 0 \\ 0 & 2 \end{pmatrix}
+$$
+
+A row vector times a matrix: the first output number is (first input × top-left) + (second input × bottom-left), the second uses the right column.
+
+- Token 1, $(1, 0)$: query $(1 \times 1 + 0 \times 1, \; 1 \times 0 + 0 \times 1) = (1, 0)$; key $(1, 1)$; value $(2, 0)$.
+- Token 2, $(0, 1)$: query $(0 + 1, \; 0 + 1) = (1, 1)$; key $(0 \times 1 + 1 \times 0, \; 0 \times 1 + 1 \times 1) = (0, 1)$; value $(0, 2)$.
+- Token 3, $(1, 1)$: query $(1 + 1, \; 0 + 1) = (2, 1)$; key $(1 + 0, \; 1 + 1) = (1, 2)$; value $(2, 2)$.
+
+These are exactly the queries, keys and values of the [three-token example](#worked-fully-by-hand-on-three-tokens). $W_V$ here just doubles everything; real ones mix the numbers. If training changed $W_K$, every key would move, every score would change, and so would who attends to whom. That is how attention patterns are learned.
+
+Pocket TTS does exactly this with 1,024-number embeddings and three 1,024 × 1,024 matrices; [its post](/blog/pocket-tts-calm-explained/#the-causal-backbone) shows the shapes.
+
+
+## Self-attention and cross-attention
+
+The same formula is used in two arrangements.
+
+- **Self-attention**: queries, keys and values all come from **the same sequence**. Every word of a sentence looks at every other word of that same sentence. This is what the three-token example did.
+- **Cross-attention**: queries come from **one sequence**, keys and values from **another**. In translation, the French word being written asks the question (query) and the English sentence answers (keys and values). Bahdanau's original attention was cross-attention: decoder looking at encoder.
+
+Everyday picture: self-attention is a group discussion, where everyone listens to everyone in the room. Cross-attention is an interview, where one side asks and the other side answers.
+
+The line can blur. In Pocket TTS the voice recording you want to clone is simply placed at the start of the same sequence, so the model gets cross-attention's effect from ordinary self-attention; [its voice-cloning section](/blog/pocket-tts-calm-explained/#part-3-voice-cloning-attention-over-a-prefix) walks through it.
+
+
+## Causal masking: no peeking at the future
+
+When a model **generates** text or audio one token at a time, token 3 does not exist yet while token 2 is being made. If during training token 2 could attend to token 3, it would learn to copy the answer, and fail as soon as the answer is not there. So we forbid looking forward.
+
+In one sentence: add $-\infty$ to every score where the key comes after the query, so softmax turns those into weights of exactly 0.
+
+$$
+\operatorname{softmax}\!\left(\frac{QK^{\top}}{\sqrt{d}} + M\right) V, \qquad M_{ij} = \begin{cases} 0 & \text{if } j \le i \\ -\infty & \text{if } j > i \end{cases}
+$$
+
+- $M$ is the **mask**, a table the same size as the scores.
+- $i$ is the query's position (the row) and $j$ the key's position (the column).
+- $e^{-\infty} = 0$, so a masked score contributes nothing to the softmax total and gets weight 0.
+
+Why add $-\infty$ before the softmax, rather than zeroing the weights after? Because the remaining weights must still add up to 1. Masking first lets softmax share the full weight among only the allowed positions.
+
+### Worked
+
+For three tokens the mask is
+
+$$
+M = \begin{pmatrix} 0 & -\infty & -\infty \\ 0 & 0 & -\infty \\ 0 & 0 & 0 \end{pmatrix}
+$$
+
+Add it to the scaled scores from before:
+
+- Row 1: $0.707, -\infty, -\infty$. Only one score survives: weights **1, 0, 0**. Token 1 can only look at itself, so its output is its own value, **(2, 0)**.
+- Row 2: $1.414, 0.707, -\infty$. $e^{1.414} = 4.113$, $e^{0.707} = 2.028$, total $6.141$. Weights **0.670, 0.330, 0**. Output: $(0.670 \times 2, \; 0.330 \times 2) =$ **(1.340, 0.660)**.
+- Row 3: nothing masked, so it is unchanged: **0.306, 0.074, 0.620** and output **(1.851, 1.389)**.
+
+Compare row 2 with the unmasked version (0.284, 0.140, 0.576): the weight that was on token 3 has been shared out between tokens 1 and 2, in the same 2.028 : 1 proportion as before.
+
+This is the mask in the Pocket TTS formula, and the reason it can [stream audio](/blog/pocket-tts-calm-explained/#the-causal-backbone): frame $i$ never depends on frames after it.
+
+<figure class="blog-figure blog-figure--wide">
+  <CausalMaskStepper alt="A 3 by 3 score grid with a toggle for the causal mask. With the mask on, Step greys out the upper-right triangle as minus infinity, then softmaxes each row, showing row 1 become 1, 0, 0 and row 2 become 0.670, 0.330, 0." />
+  <figcaption><strong>Figure 5. The causal mask.</strong> Toggle the mask and step through the rows: masked cells become exactly zero and the remaining weights still add to 1.</figcaption>
+</figure>
+
+
+## Multi-head attention
+
+One attention computes one set of weights per token: one idea of "what is relevant". But a word may need several things at once. In "the cat chased it", the word "it" wants to know **which noun it refers to** (cat) and also **what just happened** (chased). One softmax row cannot put most of its weight in two places without blurring both.
+
+In one sentence: run several small attentions side by side, each with its own $W_Q$, $W_K$, $W_V$, then glue their outputs together and mix them with one more matrix.
+
+$$
+\operatorname{MultiHead}(X) = \operatorname{Concat}(\text{head}_1, \dots, \text{head}_h)\, W_O, \qquad \text{head}_i = \operatorname{Attention}(X W_Q^{(i)}, X W_K^{(i)}, X W_V^{(i)})
+$$
+
+- $h$ is the number of **heads**.
+- Each head has its own three projection matrices, marked $^{(i)}$.
+- $\operatorname{Concat}$ lays the heads' outputs side by side into one longer vector.
+- $W_O$ is a learned output matrix that mixes what the heads found.
+
+**Split the dimensions, do not multiply them.** If the model width is $d_{\text{model}} = 512$ and there are $h = 8$ heads, each head works with $512 / 8 =$ **64** numbers. Eight heads of 64 cost about the same as one head of 512, so you get several points of view for free. These are the original Transformer's numbers (Vaswani et al., 2017).
+
+### A toy with two heads
+
+Sentence: "the cat chased it". Look only at the query for "it". Suppose training has produced two heads whose scaled scores for "it" against the four tokens are:
+
+- Head 1 (a "previous word" head): $0, 0, 3, 0$. Softmax: $e^{3} = 20.09$, the others $e^{0} = 1$, total $23.09$. Weights **0.043, 0.043, 0.870, 0.043**. Mostly "chased".
+- Head 2 (a "find the noun" head): $0, 3, 0, 0$. Weights **0.043, 0.870, 0.043, 0.043**. Mostly "cat".
+
+Give each head a one-number value: in head 1 the value is 1 for the action word and 0 otherwise; in head 2 it is 1 for "cat" and 0 otherwise. Head 1 outputs **0.870**, head 2 outputs **0.870**, and the concatenated vector $(0.870, 0.870)$ carries both facts. $W_O$ then mixes them into the next layer's input. A single head would have had to split one row of weights between "cat" and "chased".
+
+These head roles are invented for the toy. Real heads do sometimes learn recognisable jobs like these, but many do not have a clean description.
+
+### Parameter count
+
+Each of $W_Q$, $W_K$, $W_V$ is $d_{\text{model}} \times d_{\text{model}}$ when you stack all heads' pieces together, and so is $W_O$. So one multi-head attention layer has
+
+$$
+4 \times d_{\text{model}}^2
+$$
+
+weights (plus small biases, if used). For $d_{\text{model}} = 512$: $4 \times 512 \times 512 =$ **1,048,576**. For Pocket TTS's width of 1,024: $4 \times 1024^2 =$ **4,194,304** per layer. The number of heads does not change this; it only decides how the width is split.
+
+PyTorch's `nn.MultiheadAttention` uses biases, so it adds $4 \times 512 = 2{,}048$ to the count. Changing the number of heads changes nothing:
+
+```python
+import torch.nn as nn
+
+attn = nn.MultiheadAttention(embed_dim=512, num_heads=8)
+print(sum(p.numel() for p in attn.parameters()))
+for heads in (1, 8, 16):
+    layer = nn.MultiheadAttention(512, heads)
+    print(heads, sum(p.numel() for p in layer.parameters()))
+```
+
+It prints:
+
+```text
+1050624
+1 1050624
+8 1050624
+16 1050624
+```
+
+<figure class="blog-figure blog-figure--wide">
+  <MultiHeadToy alt="The four words 'the cat chased it' in a row. Two coloured arc fans rise from 'it': head 1's thickest arc lands on 'chased', head 2's on 'cat'. Below, two weight rows and the concatenated output vector." />
+  <figcaption><strong>Figure 6. Two heads, two questions.</strong> Step through each head's scores and softmax, then the concatenation. Sliders change each head's peak score; with one head the weight must be shared.</figcaption>
+</figure>
+
+
+## The cost: every position against every position
+
+The score table $QK^{\top}$ has one cell for every pair of positions. With $T$ tokens that is $T \times T = T^2$ cells, each a dot product of length $d$. Double the length and the table gets **four times** bigger.
+
+| tokens $T$ | score cells $T^2$ | memory for one head's table (2 bytes per number) |
+|---|---|---|
+| 10 | 100 | 200 bytes |
+| 100 | 10,000 | 20 KB |
+| 1,000 | 1,000,000 | **2 MB** |
+| 4,000 | 16,000,000 | 32 MB |
+| 10,000 | 100,000,000 | **200 MB** |
+| 100,000 | 10,000,000,000 | **20 GB** |
+
+That is per head, per layer, if the whole table is stored at once. Speech makes this bite quickly: a few minutes of audio at tens of frames per second is already thousands of positions. Clever implementations avoid storing the full table, but the amount of arithmetic still grows as $T^2$.
+
+A recurrent network, in contrast, costs only in proportion to $T$, but it must take $T$ steps one after another. Attention does more total work, but all of it at once, which is why it trains so much faster on GPUs.
+
+### The KV cache, briefly
+
+During generation, each new token needs a query against **all** previous keys and values. Those earlier keys and values never change (the causal mask guarantees the past cannot see the future), so recomputing them every step would be waste. Instead the model stores them: the **key-value (KV) cache**. Each new step computes one new query, key and value, appends the key and value to the cache, and attends over it. The price is memory: the cache grows with every token, for every layer and head. Managing that memory is a large part of serving large models; my [inference engineering series](/blog/kv-offload-correctness/) deals with moving the KV cache between GPU and CPU memory.
+
+<figure class="blog-figure blog-figure--wide">
+  <AttentionCostExplorer alt="A slider for sequence length from 10 to 100,000 on a log scale. A square grid of score cells grows as the square of the length, next to a line that grows only linearly for comparison, with the cell count and memory in bytes printed beside them." />
+  <figcaption><strong>Figure 7. Quadratic cost.</strong> Double the length and the square of scores quadruples. The readout shows cells, bytes for one head and a linear reference.</figcaption>
+</figure>
+
+
+## Attention has no sense of order
+
+Look back at the formula. Every query is compared with every key, and the results are summed. Nothing in it says which token came first. If you shuffle the input tokens, the outputs are shuffled in the same way, but each token's output is otherwise **unchanged**: "the cat chased it" and "it chased the cat" look like the same bag of words. (With the causal mask, order leaks in a little through who can see whom, but only crudely.)
+
+Order obviously matters in language and in sound. The fix is to add information about **position** to each embedding before attention sees it. How to do that, with sine waves or with rotations, is one of the first topics in [the Transformer post](/blog/foundations-transformer/), along with the residual connections and feed-forward layers that turn attention into a full model.
+
+
+## What to remember
+
+- A seq2seq RNN squeezes a whole input into **one vector**; long inputs suffer. Attention keeps every position and looks back at all of them.
+- Attention is a **soft lookup**: score a query against every key, softmax the scores into weights that add to 1, and take the weighted average of the values.
+- Bahdanau's score is a small network (**additive**); the **dot product** is cheaper and is what Transformers use.
+- **Scaled dot-product attention** is $\operatorname{softmax}(QK^{\top}/\sqrt{d})V$. Dividing by $\sqrt{d}$ keeps the scores' spread near 1, so softmax does not saturate and gradients flow.
+- Queries, keys and values are three **learned projections** of the same embeddings. Self-attention uses one sequence; cross-attention takes queries from one and keys and values from another.
+- A **causal mask** adds $-\infty$ to future positions so generation cannot peek.
+- **Multi-head** attention splits the width into several heads that look for different things; one layer has $4 d_{\text{model}}^2$ weights.
+- Cost grows as $T^2$. The **KV cache** saves recomputation during generation at the price of memory. Attention ignores order, so positions must be added.
+
+
+## Try it yourself
+
+- **Figure 1.** Step the top row to the end: the decoder receives only the fifth encoder state. Switch to attention: five lines reach the decoder.
+- **Figure 2.** Set the query to $(1, 1)$ and keys $(2, 0)$, $(0, 1)$, $(1, 1)$. You should see scores **2, 1, 2**, weights **0.422, 0.155, 0.422** and output **(6.335, 3.665)**. Drag the query to $(1, 0)$: scores **2, 0, 1**.
+- **Figure 3.** Step to the end. The scaled score grid should read 0.707, 0, 0.707 / 1.414, 0.707, 2.121 / 2.121, 0.707, 2.828; the weights **0.401, 0.198, 0.401 / 0.284, 0.140, 0.576 / 0.306, 0.074, 0.620**; the output **(1.604, 1.198), (1.720, 1.432), (1.851, 1.389)**.
+- **Figure 4.** Scaling off, set $d$ to 4 and then 64: the histogram's spread should read about **2** and then about **8**. Turn scaling on: both read about **1**. At $d = 64$ unscaled the largest softmax bar should usually be above 0.95.
+- **Figure 5.** Mask on: row 1 shows **1, 0, 0**, row 2 shows **0.670, 0.330, 0**, row 2's output **(1.340, 0.660)**.
+- **Figure 6.** Default peaks 3 and 3: head 1 puts **0.870** on "chased", head 2 puts **0.870** on "cat". Switch to one head: each gets only **0.476**.
+- **Figure 7.** Set $T$ to 1,000: **1,000,000** cells and **2 MB**. Set 2,000: four times as much, **8 MB**.
+
+
+## Sources
+
+- I. Sutskever, O. Vinyals and Q. V. Le (2014). "Sequence to Sequence Learning with Neural Networks." NeurIPS 2014. arXiv:1409.3215. The LSTM encoder-decoder and its single-vector bottleneck.
+- D. Bahdanau, K. Cho and Y. Bengio (2015). "Neural Machine Translation by Jointly Learning to Align and Translate." ICLR 2015. arXiv:1409.0473. Additive attention; shows the fixed-vector model degrading on long sentences.
+- M.-T. Luong, H. Pham and C. D. Manning (2015). "Effective Approaches to Attention-based Neural Machine Translation." EMNLP 2015. arXiv:1508.04025. Dot-product and other scores; global and local attention.
+- A. Vaswani, N. Shazeer, N. Parmar, J. Uszkoreit, L. Jones, A. N. Gomez, Ł. Kaiser and I. Polosukhin (2017). "Attention Is All You Need." NeurIPS 2017. arXiv:1706.03762. Scaled dot-product and multi-head attention, the $\sqrt{d_k}$ variance argument, causal masking in the decoder, $d_{\text{model}} = 512$ with 8 heads.
+

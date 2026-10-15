@@ -1,0 +1,38 @@
+---
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" tabindex="0" role="region" aria-label={alt} data-sl>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 52 780 198" role="img" aria-labelledby="service-lifecycle-title service-lifecycle-desc" class="blog-diagram-svg" font-family="Inter, sans-serif">
+  <title id="service-lifecycle-title">Observed service state and unresolved exit cause</title><desc id="service-lifecycle-desc">The container remained alive while inference stopped. A parent-monitor pipe closed. The first exiting process and signal sender were not identified. Later supervision and cleanup measures addressed recovery.</desc>
+  <line x1="24" y1="55" x2="756" y2="55" stroke="#d5d5dc" />
+  <g fill="#111111" font-size="17"><text data-row="0" x="30" y="99">Container still alive</text><text data-row="1" x="30" y="155">Workers stop responding</text><text data-row="2" x="30" y="211">Parent-monitor pipe closes</text></g>
+  <g fill="#5f5f66" font-size="15"><text data-row="0" x="410" y="99">Outer liveness observed</text><text data-row="1" x="410" y="155">Model readiness lost</text><text data-row="2" x="410" y="211">First exit / sender unknown</text></g>
+  <line data-rule="0" x1="30" y1="118" x2="750" y2="118" stroke="#d5d5dc" /><line data-rule="1" x1="30" y1="174" x2="750" y2="174" stroke="#d5d5dc" />
+</svg>
+<button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { alongPath, animate, drawStroke, dur, hideStroke, setupFigure, wait } from "../../lib/figure-motion";
+
+  // The observations arrive in the order an operator meets them: the container
+  // still looks alive, then the workers are found unresponsive, then the closed
+  // pipe; the cause stays unknown.
+  document.querySelectorAll<HTMLElement>("[data-sl]").forEach((root) => {
+    const row = (k: number) => Array.from(root.querySelectorAll<SVGTextElement>(`[data-row="${k}"]`));
+    const rule = (k: number) => root.querySelector<SVGLineElement>(`[data-rule="${k}"]`)!;
+    setupFigure(root, () => {
+      [0, 1, 2].forEach((k) => row(k).forEach((t) => (t.style.opacity = "0")));
+      [0, 1].forEach((k) => hideStroke(rule(k)));
+    }, async (alive) => {
+      for (let k = 0; k < 3; k++) {
+        if (!alive()) return;
+        const [left, right] = row(k);
+        await animate(left, { opacity: [0, 1], transform: ["translateX(-6px)", "translateX(0px)"] }, { duration: dur(0.4) });
+        await wait(0.35);
+        await animate(right, { opacity: [0, 1] }, { duration: dur(0.4) });
+        if (k < 2) await drawStroke(rule(k), 0.6, "linear");
+      }
+    });
+  });
+</script>

@@ -1,0 +1,4 @@
+---
+layout: null
+---
+{% include blog-figures/centering-changes-the-object.html standalone=true %}

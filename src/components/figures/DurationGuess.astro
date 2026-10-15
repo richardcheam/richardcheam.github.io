@@ -1,0 +1,66 @@
+---
+// F5-TTS review, Figure 6: guessing the length of the new speech. The paper
+// scales the reference length by the ratio of text lengths (Sec 3.1, p. 4).
+// The released inference code measures text in UTF-8 bytes:
+// duration = ref + ref / len(ref_text) * len(gen_text) / speed. Frames at
+// 93.75 per second. The Khmer example strings are mine.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram dg" role="region" aria-label={alt} data-dg>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 300" role="img" aria-labelledby="dg-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="dg-title">The reference clip and the blank space left for new speech, sized by text length</title>
+    <g data-bars></g>
+    <text data-r1 x="20" y="206" font-size="12.5" font-weight="700" fill="#2b2b30"></text>
+    <text data-r2 x="20" y="228" font-size="12" fill="#2b2b30"></text>
+    <text data-r3 x="20" y="250" font-size="12" fill="#2b2b30"></text>
+    <text data-r4 x="20" y="276" font-size="11.5" fill="#5f5f66"></text>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Reference transcript</span><input class="fig-text" data-ref type="text" value="Some call me nature, others call me mother" /></label>
+    <label><span class="fig-panel__name">New text</span><input class="fig-text" data-gen type="text" value="I don't really care what you call me. I've been a silent spectator" /></label>
+    <label><span class="fig-panel__name">Reference length<strong data-vr></strong></span><input class="scrub" data-sec type="range" min="1" max="10" step="0.5" value="3" /></label>
+    <label><span class="fig-panel__name">Speed<strong data-vsp></strong></span><input class="scrub" data-sp type="range" min="0.5" max="2" step="0.1" value="1" /></label>
+    <div><span class="fig-panel__name">Try</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-khmer>Khmer reference, English new text</button>
+    </div></div>
+  </div>
+</div>
+
+<style>
+  .dg .fig-text { font: inherit; font-size: 0.88rem; padding: 0.2rem 0.45rem; border: 1px solid var(--line, #d5d5dc); border-radius: 4px; background: transparent; color: inherit; width: 22rem; max-width: 100%; }
+</style>
+
+<script>
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-dg]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const rIn = $<HTMLInputElement>("[data-ref]"), gIn = $<HTMLInputElement>("[data-gen]"), sec = $<HTMLInputElement>("[data-sec]"), sp = $<HTMLInputElement>("[data-sp]");
+    const mk = (g: Element, tag: string, a: Record<string, string | number>, txt?: string) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, String(a[k])); if (txt !== undefined) e.textContent = txt; g.append(e); return e; };
+    const bytes = (s: string) => new TextEncoder().encode(s).length;
+    function draw() {
+      const R = Math.round(93.75 * +sec.value), speed = +sp.value;
+      const cr = [...rIn.value].length || 1, cg = [...gIn.value].length, br = bytes(rIn.value) || 1, bg = bytes(gIn.value);
+      const byChar = Math.round((R / cr) * cg / speed), byByte = Math.floor((R / br) * bg / speed);
+      const g = $("[data-bars]"); g.replaceChildren();
+      const total = Math.max(R + byChar, R + byByte), W = (f: number) => (f / total) * 700;
+      const row = (y: number, label: string, gen: number, col: string) => {
+        mk(g, "text", { x: 20, y: y - 6, "font-size": 11, "font-weight": 700, fill: "#2b2b30" }, label);
+        mk(g, "rect", { x: 20, y, width: W(R), height: 30, fill: "#594578", "fill-opacity": 0.85 });
+        mk(g, "text", { x: 26, y: y + 19, "font-size": 10.5, fill: "#fff" }, `reference ${R} frames`);
+        mk(g, "rect", { x: 20 + W(R), y, width: W(gen), height: 30, fill: "#f2f2f5", stroke: col, "stroke-dasharray": "4 3" });
+        mk(g, "text", { x: 26 + W(R), y: y + 19, "font-size": 10.5, fill: col }, `new ${gen} frames, ${(gen / 93.75).toFixed(1)} s`);
+      };
+      row(40, "Counting characters (the paper's description)", byChar, "#35588a");
+      row(120, "Counting UTF-8 bytes (the released code)", byByte, "#a33b3b");
+      $("[data-r1]").textContent = `Reference: ${+sec.value} s × 93.75 = ${R} frames; ${cr} characters, ${br} bytes.  New text: ${cg} characters, ${bg} bytes.`;
+      $("[data-r2]").textContent = `By characters: ${R} × ${cg} ÷ ${cr}${speed !== 1 ? ` ÷ ${speed}` : ""} = ${byChar} frames.`;
+      $("[data-r3]").textContent = `By bytes: ${R} × ${bg} ÷ ${br}${speed !== 1 ? ` ÷ ${speed}` : ""} = ${byByte} frames.`;
+      $("[data-r4]").textContent = byChar === byByte || Math.abs(byChar - byByte) < 3 ? "Same script on both sides: the two counts agree." : "Mixed scripts: a Khmer letter is 3 bytes, a Latin letter 1, so the two rules disagree.";
+      $("[data-vr]").textContent = `${sec.value} s`; $("[data-vsp]").textContent = `${speed.toFixed(1)}×`;
+      [sec, sp].forEach((i) => i.style.setProperty("--p", `${((+i.value - +i.min) / (+i.max - +i.min)) * 100}%`));
+    }
+    [rIn, gIn, sec, sp].forEach((i) => i.addEventListener("input", draw));
+    $("[data-khmer]").addEventListener("click", () => { rIn.value = "ខ្ញុំស្រលាញ់ភាសាខ្មែរ"; gIn.value = "I love the Khmer language"; sec.value = "2"; draw(); });
+    draw();
+  });
+</script>

@@ -1,0 +1,60 @@
+---
+// Foundations, neurons post: the forward pass through the tiny 2-2-1 network,
+// one operation per step. Defaults x = (1, 2), y = 1 give z = (1, 0.5),
+// h = (1, 0.5), ŷ = 0.75, L = 0.03125. With x₁ = 2, neuron 2 switches off.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-fwd>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 370" role="img" aria-labelledby="fwd-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="fwd-title">The tiny network computing its prediction one step at a time</title>
+    <g data-net></g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Input x₁ <strong data-vx1></strong></span><input class="scrub" data-x1 type="range" min="-2" max="2" step="0.25" value="1" /></label>
+    <label><span class="fig-panel__name">Input x₂ <strong data-vx2></strong></span><input class="scrub" data-x2 type="range" min="-2" max="2" step="0.25" value="2" /></label>
+    <label><span class="fig-panel__name">Target y <strong data-vy></strong></span><input class="scrub" data-y type="range" min="-2" max="2" step="0.25" value="1" /></label>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { NET0, forward, fmt, par } from "../../lib/tiny-net";
+  import { netSvg } from "../../lib/net-diagram";
+  document.querySelectorAll<HTMLElement>("[data-fwd]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const n = NET0;
+    let x = [1, 2], y = 1;
+    const relu = (z: number, i: number) => z > 0 ? `h${i} = ReLU(${fmt(z)}) = ${fmt(z)}` : `h${i} = ReLU(${fmt(z)}) = 0, because ${fmt(z)} is not positive`;
+    const steps = () => {
+      const f = forward(n, x, y);
+      return [
+        { say: "Hidden neuron 1 multiplies each input by its weight, adds the results, and adds its bias.", math: `z₁ = ${fmt(n.W[0][0])} × ${par(x[0])} + ${fmt(n.W[0][1])} × ${par(x[1])} + ${fmt(n.b[0])} = ${fmt(f.z[0])}` },
+        { say: f.z[0] > 0 ? "ReLU keeps a positive number as it is, so h₁ equals z₁." : "ReLU turns a negative number into zero, so neuron 1 sends nothing on.", math: relu(f.z[0], 1).replace("h1", "h₁") },
+        { say: "Hidden neuron 2 does the same with its own weights and bias.", math: `z₂ = ${par(n.W[1][0])} × ${par(x[0])} + ${fmt(n.W[1][1])} × ${par(x[1])} + ${fmt(n.b[1])} = ${fmt(f.z[1])}` },
+        { say: f.z[1] > 0 ? "z₂ is positive, so ReLU passes it through unchanged." : "z₂ is not positive, so ReLU switches neuron 2 off: it outputs 0.", math: relu(f.z[1], 2).replace("h2", "h₂") },
+        { say: "The output neuron takes a weighted sum of the two hidden outputs plus its bias. It has no activation.", math: `ŷ = ${fmt(n.v[0])} × ${fmt(f.h[0])} + ${par(n.v[1])} × ${fmt(f.h[1])} + ${fmt(n.c)} = ${fmt(f.yh)}` },
+        { say: "Compare the prediction with the target: the error is how far off it is, with a sign.", math: `error = ŷ − y = ${fmt(f.yh)} − ${par(y)} = ${fmt(f.err)}` },
+        { say: "Square the error and halve it. That one number is the loss the network will try to shrink.", math: `L = ½ × ${par(f.err)}² = ½ × ${fmt(f.err * f.err)} = ${fmt(f.L)}` },
+      ];
+    };
+    const plan: [string[], string[]][] = [
+      [["z1"], ["x1", "x2", "w11", "w12", "b1", "z1"]],
+      [["h1"], ["h1", "z1"]],
+      [["z2"], ["x1", "x2", "w21", "w22", "b2", "z2"]],
+      [["h2"], ["h2", "z2"]],
+      [["o"], ["h1", "h2", "v1", "v2", "c", "o"]],
+      [["err"], ["o", "y", "L"]],
+      [["L"], ["L"]],
+    ];
+    function draw(k: number) {
+      const show = new Set(["x1", "x2"]);
+      for (let i = 0; i <= k; i++) plan[i][0].forEach((s) => show.add(s));
+      $("[data-net]").innerHTML = netSvg({ net: n, x, y, f: forward(n, x, y), show, hl: new Set(k >= 0 ? plan[k][1] : []) });
+      $("[data-vx1]").textContent = fmt(x[0]); $("[data-vx2]").textContent = fmt(x[1]); $("[data-vy]").textContent = fmt(y);
+    }
+    const redraw = stepper(root, steps, draw);
+    const bind = (sel: string, set: (v: number) => void) => $<HTMLInputElement>(sel).addEventListener("input", (e) => { set(+(e.target as HTMLInputElement).value); redraw(); });
+    bind("[data-x1]", (v) => (x = [v, x[1]])); bind("[data-x2]", (v) => (x = [x[0], v])); bind("[data-y]", (v) => (y = v));
+  });
+</script>

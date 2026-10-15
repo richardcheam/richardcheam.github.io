@@ -1,0 +1,515 @@
+---
+title: "Whisper: Speech Recognition from 680,000 Hours of the Internet"
+published: true
+date: 2026-10-14
+question: "If you train one speech recogniser on a huge pile of messy internet transcripts, does it work everywhere without being taught each test?"
+excerpt: "Whisper trains a plain encoder-decoder transformer on 680,000 hours of audio paired with web transcripts, in 97 languages and with translation mixed in. One token format covers transcription, translation, timestamps and silence. Without fine-tuning it makes 55% fewer errors than a LibriSpeech model of equal LibriSpeech score, and its error rate in each language tracks how many hours of that language it saw."
+type: paper
+topic: [speech, evaluation]
+tags: [Speech, ASR, Whisper, Weak supervision, Robustness, Multilingual, Speech translation, OpenAI]
+org: "OpenAI"
+authors: "Alec Radford, Jong Wook Kim, Tao Xu, Greg Brockman, Christine McLeavey, Ilya Sutskever"
+source_url: https://arxiv.org/abs/2212.04356
+source_label: "Read the paper (arXiv)"
+source_date: 2022-12-06
+links:
+  - label: "Code and models"
+    url: https://github.com/openai/whisper
+math: true
+tldr:
+  - "**Authors' claim:** trained on 680,000 hours of multilingual, multitask web transcripts, Whisper is competitive with fully supervised systems zero-shot, with no fine-tuning, and approaches human accuracy and robustness (Abstract, p. 1)."
+  - "**The trick:** no new architecture. An off-the-shelf encoder-decoder transformer reads 30-second log-mel windows, and a few special tokens at the start of the text tell the decoder which language, which task and whether to write timestamps (Sec 2.2 to 2.3, p. 3; Fig 1, p. 4)."
+  - "**Evidence:** at equal LibriSpeech test-clean WER (2.7 each), Whisper Large V2 averages a 55.2% relative error reduction over wav2vec 2.0 Large on 13 other datasets (Table 2, p. 6); per-language WER halves for every 16x more training hours, r² = 0.83 (Sec 3.4, p. 7; Fig 3)."
+  - "**My reading:** the data pipeline is the paper. For Khmer, Whisper saw 1.3 hours of transcribed speech and its Fleurs WER is 99.7%: the scaling law explains the failure and says what would fix it."
+---
+import WebTranscriptSieve from "../../components/figures/WebTranscriptSieve.astro";
+import TaskTokenBuilder from "../../components/figures/TaskTokenBuilder.astro";
+import TimestampShift from "../../components/figures/TimestampShift.astro";
+import FallbackLadder from "../../components/figures/FallbackLadder.astro";
+import RobustnessFrontier from "../../components/figures/RobustnessFrontier.astro";
+import LanguageHoursFit from "../../components/figures/LanguageHoursFit.astro";
+import TranslateOrTranscribe from "../../components/figures/TranslateOrTranscribe.astro";
+
+## The question and why it matters
+
+Imagine learning to understand people by watching every captioned video on the internet. Some captions are written carefully by a person. Some are wrong. Some were written by another machine that was guessing. Some are in a different language from the speech. You would still learn a lot, simply because there is so much of it.
+
+That is the bet behind Whisper. It is an **automatic speech recognition (ASR)** system: sound goes in, written words come out. Before Whisper, the strongest recipe had two halves (Sec 1, p. 1):
+
+- **Self-supervised pre-training**, for example wav2vec 2.0: the model listens to a huge amount of audio with no text at all and learns good "listening features". Up to **1,000,000 hours** had been used this way (Sec 1, p. 1).
+- **Fine-tuning** on a small, clean, human-checked dataset, typically about **1,000 hours** (Sec 1, p. 1), to learn how to actually write words.
+
+The authors' complaint is that the second step makes the model good at one test and brittle elsewhere. A model can learn the quirks of one dataset, the same way a student who memorised one teacher's exams struggles with another teacher's (Sec 1, p. 1 to 2). The goal they state is a system that works "out of the box" in many environments with no per-deployment fine-tuning (Sec 1, p. 1).
+
+Their answer is **weak supervision**: use audio with transcripts that are plentiful but imperfect. Earlier weakly supervised datasets reached **10,000** and **30,000 hours** (Sec 1, p. 2). Whisper goes to **680,000 hours**, of which **117,000 hours** cover **96** languages other than English and **125,000 hours** are speech in some language paired with English text, used as translation data (Sec 1, p. 2).
+
+The word **zero-shot** matters everywhere in this paper. It means Whisper is tested on datasets without ever training on their training split (Sec 3.1, p. 5). It is like sitting an exam from a school you never attended.
+
+Here is the plan: how the data was cleaned ([The data: a sieve, not a library](#the-data-a-sieve-not-a-library)), what the model hears ([Thirty seconds of log-mel](#thirty-seconds-of-log-mel)), the single token format that lets one model do many jobs ([One format for many jobs](#one-format-for-many-jobs)), how it handles long recordings ([Long audio: a window that walks](#long-audio-a-window-that-walks)), and then [What the evidence shows](#what-the-evidence-shows).
+
+## The data: a sieve, not a library
+
+Whisper's dataset is audio found on the internet together with its transcript (Sec 2.1, p. 2). The authors keep the text almost raw: no lower-casing, no stripping of punctuation. The model learns to write naturally formatted text directly, which removes a separate **inverse text normalisation** step (turning "sixty eight dollars" back into "$68") (Sec 2.1, p. 2).
+
+Diverse audio is good: noise, cheap microphones, accents all teach robustness. Diverse transcript quality is not (Sec 2.1, p. 2). So the raw pile goes through a sieve with several meshes.
+
+### Mesh one: machine-written transcripts
+
+Many online transcripts were produced by some other ASR system. Training on them would teach Whisper to copy that system's mistakes and style, which the authors call **"transcript-ese"** (Sec 2.1, p. 2). How do you spot a machine transcript without a label saying so? By its habits (Sec 2.1, p. 2):
+
+- It is **all upper-case or all lower-case**. People capitalise names and sentence starts.
+- It has **no complex punctuation**: no commas, no question marks, no exclamation marks.
+- It has **no formatting whitespace**, such as paragraphs.
+- Even with simple rule-based clean-up, tell-tales remain, such as **never** containing a comma.
+
+The paper says it used "many heuristics" of this kind but does not list them all or give thresholds (Sec 2.1, p. 2).
+
+### Mesh two: is the speech in the language the text claims?
+
+An **audio language detector** guesses the spoken language. It was built by fine-tuning a prototype Whisper model on the **VoxLingua107** dataset (Sec 2.1, p. 2). A text language detector, **CLD2** (Compact Language Detector 2, a Google library), guesses the transcript's language. Then (Sec 2.1, p. 2):
+
+- If the two agree, the pair is kept as transcription data.
+- If they disagree and the transcript is English, the pair is kept as **translation** data ("X to English", written X→en in the paper).
+- Otherwise the pair is dropped.
+
+This rule matters later for Khmer and Welsh ([Translation](#translation)).
+
+### Mesh three: duplicates
+
+**Fuzzy de-duplication** of transcript texts removes near-copies and more auto-generated content (Sec 2.1, p. 2). "Fuzzy" means two texts count as duplicates even if they differ by a few characters. The method is not specified.
+
+### Mesh four: ask the first model
+
+After training an initial model, the authors measured its error rate on each **data source**, sorted sources by a mix of high error rate and large size, and inspected them by hand (Sec 2.1, p. 2 to 3). They found partially transcribed audio, misaligned transcripts, and machine captions that slipped through the heuristics, and removed those sources (p. 3).
+
+### Mesh five: keep the test sets clean
+
+They de-duplicated training transcripts against evaluation sets most at risk of overlap, namely **TED-LIUM 3** (Sec 2.1, p. 3). Only that one is named.
+
+### Cutting into pieces
+
+Audio files are cut into **30-second segments**, each paired with the part of the transcript that falls inside it. Segments with no speech are kept at a reduced rate and used to teach **voice activity detection (VAD)**, which means deciding whether anyone is speaking (Sec 2.1, p. 2). The training settings say speechless audio is subsampled by **10x** (Table 17, p. 28).
+
+### What came out
+
+The final mix (Fig 11, p. 27):
+
+| Part | Hours | Share |
+|---|---|---|
+| English speech recognition | **438,218** | 65% |
+| Speech recognition in other languages | **117,113** | 17% |
+| X→en translation | **125,739** | 18% |
+
+One embarrassing leftover shows what the sieve misses: the model learned to guess **speaker names**, because many transcripts start lines with who is talking, but a name can rarely be heard in 30 seconds of audio. The fix was a brief fine-tune on transcripts without speaker labels (Sec 2.4, pp. 4 to 5).
+
+<figure class="blog-figure blog-figure--wide">
+  <WebTranscriptSieve alt="Twelve rows, each an audio language, a text language and a transcript, sorted one by one into five piles: kept as transcription, kept as translation, dropped as machine-made, dropped for a language mismatch, dropped as a duplicate. Buttons switch each filter on and off; counters sum each pile." />
+  <figcaption><strong>Figure 1. The sieve.</strong> Toy rules on made-up pairs; the paper names the cues but not thresholds (Sec 2.1, pp. 2 to 3). Switch a filter off to see what slips through.</figcaption>
+</figure>
+
+## Thirty seconds of log-mel
+
+### What the model hears
+
+All audio is resampled to **16,000 Hz** and turned into an **80-channel log-magnitude mel spectrogram** on **25 ms** windows with a **10 ms** stride (Sec 2.2, p. 3). If those words are new, [/blog/audio-basics/](/blog/audio-basics/) builds a log-mel spectrogram step by step; here, think of a picture of sound with time going right and 80 rows of pitch going up, where brightness is loudness.
+
+The input is scaled to lie between **-1 and 1** with roughly zero mean across the dataset (Sec 2.2, p. 3).
+
+How many columns does a 30-second picture have? One column every 10 ms:
+
+$$
+N_{\text{frames}} = \frac{30\ \text{s}}{0.010\ \text{s}} = 3000
+$$
+
+- $N_{\text{frames}}$: the number of spectrogram columns (time steps).
+- $30\ \text{s}$: the length of one Whisper window.
+- $0.010\ \text{s}$: the hop, the time between the starts of neighbouring columns.
+
+Intuition: like counting fence posts placed every 10 cm along a 3 m fence. Worked example: a 5-second clip gives $5 / 0.01 = 500$ columns. The count 3000 is my arithmetic from the stated window and hop; the paper does not print it.
+
+Whisper always gets a full 30 seconds. A shorter clip is padded with silence to 30 s (the `pad_or_trim` step in the released code); the paper only says the models are trained on 30-second chunks and cannot take longer input at once (Sec 3.8, p. 9).
+
+### The encoder
+
+A small **stem** of two 1-D convolution layers with filter width 3 and the **GELU** (Gaussian Error Linear Unit, a smooth version of "keep positives, zero negatives") activation comes first. The second convolution has **stride 2**, so it keeps every second time step (Sec 2.2, p. 3). Then fixed **sinusoidal position embeddings** are added (a wave pattern that tells each column where it is in time), followed by transformer blocks (Sec 2.2, p. 3).
+
+$$
+N_{\text{enc}} = \frac{N_{\text{frames}}}{s} = \frac{3000}{2} = 1500
+$$
+
+- $N_{\text{enc}}$: the number of positions the encoder transformer works on.
+- $s$: the stride of the second convolution, 2.
+
+Intuition: the stride halves the length, like reading every other word of a sentence to skim it. Each encoder position covers $2 \times 10 = 20$ ms. Worked example: the 5-second clip becomes $500 / 2 = 250$ positions. That 20 ms matches the paper's statement that **20 ms** is "the native time resolution of Whisper models" (Sec 2.3, p. 3); 1500 is my arithmetic.
+
+### The decoder
+
+The decoder is a transformer that writes text one token at a time while looking at the encoder output through **cross-attention** (Fig 1, p. 4). It uses learned position embeddings and **tied input-output token representations**, meaning the same table turns tokens into vectors on the way in and scores tokens on the way out (Sec 2.2, p. 3). Encoder and decoder have the same width and the same number of blocks (Sec 2.2, p. 3).
+
+Text is cut into tokens with the **byte-level BPE (byte pair encoding)** tokenizer from GPT-2 for English-only models. For multilingual models the vocabulary was refitted, same size, so other languages are not chopped into tiny fragments (Sec 2.2, p. 3). Keep that detail in mind for Khmer ([My interpretation](#my-interpretation)).
+
+The architecture is deliberately off the shelf, so that results come from data and scale, not model tricks (Sec 2.2, p. 3).
+
+### Model sizes
+
+| Model | Layers | Width | Heads | Parameters |
+|---|---|---|---|---|
+| Tiny | 4 | 384 | 6 | **39M** |
+| Base | 6 | 512 | 8 | **74M** |
+| Small | 12 | 768 | 12 | **244M** |
+| Medium | 24 | 1024 | 16 | **769M** |
+| Large | 32 | 1280 | 20 | **1550M** |
+
+(Table 1, p. 5.) "Layers" is per side (encoder and decoder each), since the two have the same number of blocks (Sec 2.2, p. 3).
+
+Width divided by heads is 64 for every row (384/6, 512/8, 768/12, 1024/16, 1280/20), which readers can check by hand. That is my observation.
+
+### Training
+
+Data parallel training in **FP16** (16-bit floating point) with dynamic loss scaling, activation checkpointing, **AdamW**, gradient norm clipping, warmup over the first **2048** updates then linear decay to zero (Sec 2.4, p. 4). Batch size **256** segments for $2^{20}$ = **1,048,576** updates, which is two to three passes over the data (Sec 2.4, p. 4; Table 17, p. 28). No data augmentation or regularisation; the diversity of the data is meant to do that job (Sec 2.4, p. 4).
+
+**Large V2** is a later model: **2.5x** more epochs plus SpecAugment, Stochastic Depth and BPE Dropout (footnote 3, p. 4; Table 18, p. 28). Most reported results use Large V2 (footnote 3, p. 4).
+
+
+
+## One format for many jobs
+
+A traditional speech pipeline has separate parts: one for "is someone talking?", one for "which language?", one for words, one for timing. Whisper squeezes them into one decoder by writing the job description as the first few tokens of the output (Sec 2.3, p. 3). It is like the header of a form: before you write the answer, you tick boxes for language and task.
+
+The order is (Sec 2.3, p. 3; Fig 1, p. 4):
+
+1. Optionally, **previous text**: transcript of the audio before this window, behind a `<|startofprev|>` marker (Fig 1 labels it PREV). With some probability the training example includes it; Table 17 gives the rate as **50%** (p. 28).
+2. `<|startoftranscript|>`: "the answer starts here".
+3. A **language tag**, one token per language, **99** in total, for example `<|en|>`. The training targets for this tag come from the VoxLingua107 detector. If there is no speech, the model writes `<|nospeech|>` instead.
+4. A **task tag**: `<|transcribe|>` (write what was said, in that language) or `<|translate|>` (write it in English).
+5. `<|notimestamps|>` if timing is not wanted.
+6. The text. In timestamp mode, each caption is wrapped in a start-time token before and an end-time token after.
+7. An end token, `<|endoftext|>` in the released tokenizer.
+
+The loss is computed on every token except the previous text (Sec 2.3, p. 3). So the model is graded on choosing the language tag too: language identification is just another next token.
+
+### Timestamp tokens
+
+Times are measured from the start of the current window and rounded to the nearest **20 ms**, and each value gets its own vocabulary token (Sec 2.3, p. 3).
+
+$$
+k = \operatorname{round}\!\left(\frac{t}{0.02\ \text{s}}\right)
+$$
+
+- $t$: a time in seconds, measured from the start of the current 30-second window.
+- $0.02\ \text{s}$: the 20 ms step.
+- $\operatorname{round}$: nearest whole number.
+- $k$: the index of the timestamp token; the token shows $k \times 0.02$ s.
+
+Intuition: a ruler with a tick every 20 ms; each tick has a name. Worked example: a word starts at $t = 1.234$ s. $1.234 / 0.02 = 61.7$, which rounds to $62$, so the token reads $62 \times 0.02 = 1.24$ s. From 0 to 30 s that ruler has $30/0.02 + 1 = 1501$ ticks; that count is my arithmetic, not stated in the paper; the released tokenizer has exactly 1,501 timestamp tokens.
+
+### Cut-off sentences
+
+If the last caption only partly fits inside the window, in timestamp mode the model writes only its **start** time and stops, signalling that the next window should begin there. Without timestamps, the audio is cut so that segment is excluded (Sec 2.3, p. 3). This is the hook that makes [Long audio: a window that walks](#long-audio-a-window-that-walks) work.
+
+<figure class="blog-figure blog-figure--wide">
+  <TaskTokenBuilder alt="A row of tokens assembling left to right: optional previous text, start of transcript, a language tag, a task tag, optional no-timestamps, timestamp tokens around the text, end of text. Buttons switch language, task, timestamps, previous text and silence; a box rounds any time to a timestamp token." />
+  <figcaption><strong>Figure 2. One format for many jobs.</strong> Order and roles from Sec 2.3 (p. 3) and Fig 1 (p. 4); token spellings from the released tokenizer; sentences are toy examples.</figcaption>
+</figure>
+
+## Long audio: a window that walks
+
+Whisper hears 30 seconds at a time, but meetings last an hour. The strategy is **buffered transcription**: transcribe a window, look at the last complete timestamp the model wrote, move the window so it starts there, repeat (Sec 3.8, p. 9). Think of reading a long scroll through a letterbox: you slide the letterbox to just after the last sentence you finished.
+
+The danger: one bad window can push the next one to the wrong place, and errors snowball (Sec 4.5, p. 12). So the authors add heuristics, all from Sec 4.5 (pp. 12 to 13):
+
+- **Beam search with 5 beams**, scored by log probability, because repetition loops happen more often with greedy decoding.
+- **Temperature fallback**: start at temperature 0; if the output fails a check, raise temperature by **0.2**, up to **1.0**, and try again.
+- The two checks: **average log probability** below **-1**, or **gzip compression ratio** above **2.4**.
+- **Previous-text conditioning** only when temperature is below **0.5**.
+- **Voice activity**: `<|nospeech|>` probability alone is not enough; call a window silent when no-speech probability is above **0.6** and average log probability is below **-1**.
+- **Initial timestamp constraint**: the first timestamp must be between **0.0 and 1.0 s**, so the model cannot skip the first words.
+
+### Temperature
+
+The decoder produces a score $z_i$ for each possible next token $i$. Temperature reshapes the scores into probabilities:
+
+$$
+p_i = \frac{e^{z_i / T}}{\sum_j e^{z_j / T}}
+$$
+
+- $z_i$: the raw score (logit) of token $i$.
+- $T$: temperature, a positive number. $T = 0$ is taken to mean "always pick the top token" (Sec 4.5, p. 12).
+- $e$: Euler's number, about 2.718.
+- $\sum_j$: add up over all tokens $j$, so the probabilities total 1.
+- $p_i$: the probability of picking token $i$.
+
+Intuition: low temperature is a cautious student who always gives their first guess; high temperature is a student willing to try their second and third guesses. Worked example with three tokens, scores $z = (2, 1, 0)$ at $T = 1$: $e^2 = 7.389$, $e^1 = 2.718$, $e^0 = 1$, total $11.107$, so $p = (0.665, 0.245, 0.090)$. At $T = 0.5$ the scores double to $(4, 2, 0)$: $54.60, 7.389, 1$, total $62.99$, $p = (0.867, 0.117, 0.016)$. Lower temperature, sharper choice.
+
+### Average log probability
+
+$$
+\bar{\ell} = \frac{1}{N} \sum_{n=1}^{N} \ln p(y_n \mid y_{<n}, \text{audio})
+$$
+
+- $N$: the number of tokens generated.
+- $y_n$: the $n$-th token written.
+- $y_{<n}$: all tokens before it.
+- $p(y_n \mid \dots)$: the model's probability for the token it actually wrote.
+- $\ln$: natural logarithm; it is 0 for probability 1 and gets more negative as probability drops.
+- $\bar{\ell}$: the average, a confidence score.
+
+Intuition: how sure was the model, on average, about each word it wrote? Worked example: three tokens with probabilities 0.5, 0.25 and 0.5. $\ln 0.5 = -0.693$, $\ln 0.25 = -1.386$. Average $= (-0.693 - 1.386 - 0.693)/3 = -0.924$. That is above $-1$, so it passes. If the middle token had probability 0.1 ($\ln 0.1 = -2.303$), the average is $-1.230$, below $-1$: fall back.
+
+### Compression ratio
+
+$$
+r = \frac{\text{bytes of the text}}{\text{bytes after gzip compression}}
+$$
+
+- Numerator: the length of the transcript as stored.
+- Denominator: its length after gzip, a standard compressor that replaces repeated chunks with short "copy from back there" notes.
+- $r$: how much the text shrank.
+
+Intuition: a normal sentence has few exact repeats and shrinks a little. A model stuck in a loop ("thank you thank you thank you ...") shrinks enormously, because every repeat becomes a tiny note. A ratio above **2.4** is the alarm (Sec 4.5, p. 12). Worked example (with the toy compressor of [Toy experiments](#toy-experiments), not real gzip): "abcabcabcabc" is 12 characters. The toy writes 3 literal letters (a, b, c) at 1 byte each, then one "copy 9 characters from 3 back" note at 3 bytes: 6 bytes. $r = 12/6 = 2.0$. Doubling the repeats to 24 characters gives 3 literals plus one 21-character copy, $24/6 = 4.0$: over the alarm. Real zlib, which the released code uses, adds a small header, so very short strings come out lower than this toy; Figure 4 computes the real thing.
+
+### Does each heuristic help?
+
+Average WER over seven long-form datasets (Table 7, p. 13):
+
+| Decoding | Average WER |
+|---|---|
+| Greedy decoding only | **11.0** |
+| + Beam search | 10.6 |
+| + Temperature fallback | 10.6 |
+| + Voice activity detection | 10.2 |
+| + Previous text conditioning | 10.0 |
+| + Initial timestamp constraint | **10.0** |
+
+The gains are uneven across datasets (p. 13). For example, the first column (TED-LIUM3) goes 3.95, 4.16, 4.16, 3.56, 3.42, 3.51, and the last (CORAAL) goes 22.0, 20.0, 20.0, 19.4, 18.1, 19.1 (Table 7, p. 13). The authors call these heuristics "a workaround for the noisy predictions of the model" (p. 13).
+
+<figure class="blog-figure blog-figure--wide">
+  <TimestampShift alt="A 100-second timeline of 14 numbered captions and, below, successive 30-second windows, each listing the captions it heard and marking with a red tick the caption it cut off, where the next window starts. A slider adds timestamp drift; captions never fully heard turn red." />
+  <figcaption><strong>Figure 3. A window that walks.</strong> Scripted captions, not a model. Strategy from Sec 3.8 (p. 9) and Sec 2.3 (p. 3).</figcaption>
+</figure>
+
+<figure class="blog-figure blog-figure--wide">
+  <FallbackLadder alt="A ladder of temperatures from 0.0 to 1.0. At each tried rung a candidate transcript appears with its compression ratio and average log probability, green if within the limits and red if not. A text box computes the compression ratio of any text you type." />
+  <figcaption><strong>Figure 4. The fallback ladder.</strong> Limits 2.4 and −1, steps of 0.2 (Sec 4.5, pp. 12 to 13). Ratios computed live with your browser’s zlib; candidate texts and probabilities are toy values.</figcaption>
+</figure>
+
+## Grading fairly: the text normaliser
+
+**Word error rate (WER)** counts substitutions, deletions and insertions against the reference, divided by reference words; [/blog/speech-evaluation-metrics/](/blog/speech-evaluation-metrics/) explains it from scratch. The catch: WER punishes harmless style differences. A zero-shot model never saw a dataset's transcription style, so it gets punished more (Sec 3.2, p. 5).
+
+The authors built a **text normaliser** by repeatedly looking at where naive WER penalised Whisper unfairly (Sec 3.2, p. 5; Appendix C, p. 21). For English it removes bracketed phrases, fillers like "hmm" and "um", expands contractions, standardises numbers and currency ("Ten thousand dollars" becomes "$10000"-style Arabic numerals), and more (Appendix C, p. 21). For some datasets WER drops by **up to 50 percent**, often because of a single quirk such as references splitting contractions with a space (Sec 3.2, p. 5).
+
+Worked example: reference "you are right", hypothesis "you're right". Without normalisation, 1 substitution ("you're" for "you") plus 1 deletion ("are"): 2 errors over 3 words, WER 66.7%. After expanding contractions both read "you are right": WER 0%.
+
+The authors flag the risk that the normaliser is tuned to Whisper's habits. They compare with the independent **FairSpeech** normaliser: similar effect on most datasets, but a bigger drop for Whisper on **WSJ**, **CallHome** and **Switchboard** (contractions and spoken numbers) (Sec 4.4, p. 12; Fig 10, p. 12). The [speech evaluation post](/blog/speech-evaluation-metrics/) has an interactive version of this effect.
+
+## What the evidence shows
+
+### Effective robustness
+
+Two ideas (Sec 3.3, p. 6):
+
+- **Overall robustness**: average performance over many datasets.
+- **Effective robustness** (from Taori et al. 2020): how much better a model does out of distribution than you would **expect** from its score on a reference dataset. The reference here is LibriSpeech; 12 other datasets test the rest.
+
+The setup is a fair race. Take a supervised model trained on LibriSpeech and a Whisper model with the same LibriSpeech score. Then compare them elsewhere. The relative error reduction is:
+
+$$
+\text{RER} = \frac{W_{\text{ref}} - W_{\text{whisper}}}{W_{\text{ref}}} \times 100\%
+$$
+
+- $W_{\text{ref}}$: WER of the supervised LibriSpeech model, here wav2vec 2.0 Large without a language model.
+- $W_{\text{whisper}}$: WER of Whisper Large V2 on the same dataset.
+- RER: the fraction of the reference model's errors that Whisper avoids.
+
+Intuition: if a friend misspells 10 words in a test and you misspell 3, you made 70% fewer mistakes. Worked example from Table 2 (p. 6), Common Voice: $(29.9 - 9.0)/29.9 = 0.699$, so **69.9%**, which matches the table.
+
+Table 2 (p. 6), WER in %:
+
+| Dataset | wav2vec 2.0 Large (no LM) | Whisper Large V2 | RER % |
+|---|---|---|---|
+| LibriSpeech Clean | 2.7 | 2.7 | 0.0 |
+| Artie | 24.5 | 6.2 | 74.7 |
+| Common Voice | 29.9 | 9.0 | 69.9 |
+| Fleurs En | 14.6 | 4.4 | 69.9 |
+| Tedlium | 10.5 | 4.0 | 61.9 |
+| CHiME6 | 65.8 | 25.5 | 61.2 |
+| VoxPopuli En | 17.9 | 7.3 | 59.2 |
+| CORAAL | 35.6 | 16.2 | 54.5 |
+| AMI IHM | 37.0 | 16.9 | 54.3 |
+| Switchboard | 28.3 | 13.8 | 51.2 |
+| CallHome | 34.8 | 17.6 | 49.4 |
+| WSJ | 7.7 | 3.9 | 49.4 |
+| AMI SDM1 | 67.6 | 36.4 | 46.2 |
+| LibriSpeech Other | 6.2 | 5.2 | 16.1 |
+| Average | 29.3 | 12.8 | **55.2** |
+
+A hand check worth showing: the **55.2** is the mean of the 13 per-dataset RERs excluding LibriSpeech Clean (they sum to 717.9; $717.9 / 13 = 55.2$). It is not the RER of the two averages, which would be $(29.3 - 12.8)/29.3 = 56.3\%$. That reading is mine; the paper says "average relative error reduction of 55.2%" (p. 6).
+
+Two more cited points:
+
+- Whisper's best LibriSpeech test-clean WER is **2.5**, "relatively unremarkable", about mid-2019 state of the art (Sec 3.3, p. 6). State of the art then was **1.4** (Sec 3.3, p. 5).
+- The smallest Whisper, **39M** parameters with **6.7** WER on LibriSpeech test-clean, is "roughly competitive" with the best supervised LibriSpeech model on other datasets (p. 6).
+
+Figure 2 (p. 6) plots average WER on Common Voice, CHiME-6 and TED-LIUM (y) against LibriSpeech dev-clean WER (x). Supervised LibriSpeech models sit far above the line $y = x$: they make "roughly twice as many errors as a human on other datasets" while matching or beating that human on LibriSpeech. The fitted frontier of zero-shot Whisper models includes the 95% confidence interval of one human transcriber (one of the authors, "Alec") (Fig 2 caption, p. 6). The exact coordinates of each dot are not printed, so Figure 5 re-plots Table 2 instead.
+
+The authors' reading of the human gap (Sec 3.3, p. 5): humans are tested out of distribution (they never trained on LibriSpeech), while LibriSpeech models are tested in distribution. Same test, different skill.
+
+<figure class="blog-figure blog-figure--wide">
+  <RobustnessFrontier alt="Two bars, wav2vec 2.0 Large and Whisper Large V2, both at 2.7 WER on LibriSpeech, rising to their WER on a chosen dataset. A clickable list of the 13 datasets with each one’s relative error reduction drawn as a bar." />
+  <figcaption><strong>Figure 5. Same exam score, different skill.</strong> All values from Table 2 (p. 6).</figcaption>
+</figure>
+
+### Close to human transcribers
+
+On **25** recordings from Kincaid46, Whisper was compared with 4 commercial ASR services, 1 computer-assisted human service and 4 purely human services (Sec 3.9, p. 10; Fig 7). The computer-assisted service's aggregate WER is **1.15 percentage points** better than Whisper's; pure human services are "only a fraction of a percentage point" better (p. 10). Per-system numbers are only annotated on the chart.
+
+### Noise
+
+With white noise or pub noise added to LibriSpeech test-clean, many LibriSpeech-trained models beat Whisper when noise is low (**40 dB** signal-to-noise ratio, SNR), but all degrade faster and are worse than Whisper under pub noise below **10 dB** SNR (Sec 3.7, p. 9; Fig 5, p. 8). 14 comparison models were used (p. 9).
+
+### Long-form
+
+On seven long-form datasets (minutes to hours each), Whisper beats the best open-source model (NVIDIA STT Conformer-CTC Large) on all of them and, in most cases, 4 commercial services queried on 1 September 2022 (Sec 3.8, pp. 9 to 10; Fig 6, p. 9). The authors note commercial systems may have trained on these public sets (p. 10). Per-dataset numbers are in the appendix, Table 16 (p. 26).
+
+### Multilingual recognition
+
+Zero-shot Whisper scores **7.3** WER on Multilingual LibriSpeech (MLS) and **13.6** on VoxPopuli (Table 3, p. 7). On VoxPopuli it trails XLS-R (**10.6**), mSLAM (**9.1**) and Maestro (**8.1**), beating only VP-10K+FT (**15.3**) (Table 3, p. 7). The text states Whisper outperforms XLS-R, mSLAM and Maestro on MLS (p. 7). Their guess: VoxPopuli was in the other models' pre-training and has about **10x** more supervised data per language than MLS's **10 hours** (p. 7).
+
+### More hours, fewer errors: the scaling line
+
+The most useful plot in the paper for anyone working on a small language. For each language on **Fleurs**, plot WER against the hours of training data Whisper had in that language, both on log scales (Fig 3, p. 7). The points fall near a line, with squared correlation **r² = 0.83**, and the slope means **"WER halves for every 16x increase in training data"** (Sec 3.4, p. 7).
+
+The fit is:
+
+$$
+\log_{10} W = a + b \log_{10} H
+$$
+
+- $W$: word error rate for a language, in %.
+- $H$: hours of transcribed training audio in that language.
+- $a$: the intercept, where the line sits.
+- $b$: the slope, how fast WER falls as hours rise.
+
+What does "halves per 16x" say about $b$? Multiplying $H$ by 16 multiplies $W$ by $16^b$. Setting $16^b = 0.5$ gives $b = \log 0.5 / \log 16 = -0.25$. So $W \propto H^{-0.25}$. The paper gives the halving rule, not $b$; $-0.25$ is my arithmetic from it.
+
+Intuition: each time you want to cut errors in half, you need sixteen times the data. Worked example: a language at **40%** WER with 100 hours would be expected near **20%** at 1,600 hours and **10%** at 25,600 hours.
+
+And $r^2 = 0.83$ means: of the spread of log-WER across languages, about 83% lines up with log-hours; the rest is other things. The biggest under-performers are languages with their own scripts and far from the Indo-European majority, for example Hebrew, Telugu, Chinese and Korean; the authors suggest linguistic distance, a byte-level BPE tokenizer poorly suited to these scripts, or data quality (Sec 3.4, p. 7).
+
+The same story holds when the whole dataset is shrunk: a Medium model trained on 0.5% to 100% of the data improves at every step (Table 6, p. 11):
+
+| Hours | English WER | Multilingual WER | X→en BLEU |
+|---|---|---|---|
+| 3,405 | 30.5 | 92.4 | 0.2 |
+| 6,811 | 19.6 | 72.7 | 1.7 |
+| 13,621 | 14.4 | 56.6 | 7.9 |
+| 27,243 | 12.3 | 45.0 | 13.9 |
+| 54,486 | 10.9 | 36.4 | 19.2 |
+| 681,070 | **9.9** | **29.2** | **24.8** |
+
+From 54,486 to the full set (a **12.5x** jump) English WER drops only about 1 point and multilingual WER about 7 (Sec 4.2, p. 11). The authors leave open whether the models are under-trained or the data is running out of lessons (p. 11). English recognition also shows diminishing returns with model size, while other tasks keep improving (Sec 4.1, p. 10; Fig 8, p. 10).
+
+On multitask interference: small joint models are worse at English than English-only models at the same compute (English gets only **65%** of the joint compute), but large joint models win (Sec 4.3, pp. 11 to 12; Fig 9, p. 12).
+
+<figure class="blog-figure blog-figure--wide">
+  <LanguageHoursFit alt="A log-log scatter of Fleurs word error rate against training hours for eight languages, Khmer in red at 1.3 hours and 99.7 percent, with a line fitted to the eight points and a dashed line for the paper’s halving rule. A slider projects Khmer to more hours along the rule." />
+  <figcaption><strong>Figure 6. More hours, fewer errors.</strong> Eight points read from Fig 11 (p. 27) and Table 13 (p. 24); the paper fits all Fleurs languages with training data. The Khmer projection is my extrapolation.</figcaption>
+</figure>
+
+### Where Khmer sits
+
+From the appendix:
+
+- Training data for Khmer: **1.3 hours** of transcribed speech and **672 hours** of Khmer→English translation data (Fig 11, p. 27).
+- Fleurs WER for Khmer: **100.6** (Tiny), **101.6** (Base), **104.4** (Small), **98.9** (Medium), **96.0** (Large), **99.7** (Large V2) (Table 13, p. 24).
+- Fleurs Khmer→English BLEU: **0.1** (Tiny), **0.1** (Base), **0.5** (Small), **3.3** (Medium), **5.2** (Large), **6.1** (Large V2) (Table 14, p. 25).
+
+A WER near 100% means roughly as many errors as reference words: the transcript is close to useless. WER can exceed 100% because insertions count too.
+
+My extrapolation, clearly labelled: by the halving rule, going from about 100% to about 25% WER needs two halvings, $16 \times 16 = 256$ times the data, so roughly $1.3 \times 256 \approx 333$ hours. Treat this as a cartoon: Khmer has its own script, which is exactly the kind of language the paper says falls below the line (Sec 3.4, p. 7).
+
+<figure class="blog-figure blog-figure--wide">
+  <TranslateOrTranscribe alt="Bars on a log scale for Khmer and Welsh: hours of transcription data and hours of translation data, with translation scores. Below, a toy pool of English audio where a slider sets how often the language detector mislabels it, and the mislabelled hours that would land in a small language’s translation pile." />
+  <figcaption><strong>Figure 7. Which pile did it go into?</strong> Hours from Fig 11 (p. 27) and Sec 3.5 (p. 8); BLEU from Table 14 (p. 25) and Sec 3.5. The pool is a toy.</figcaption>
+</figure>
+
+### Translation
+
+On **CoVoST2** X→en, zero-shot Whisper reaches **29.1** BLEU overall, a new state of the art without using CoVoST2 training data (Sec 3.5, p. 8; Table 4, p. 8). **BLEU** (bilingual evaluation understudy) scores 0 to 100 by how many word sequences match a reference translation; higher is better. By resource group (Table 4, p. 8):
+
+| Model | High | Mid | Low | All |
+|---|---|---|---|---|
+| XMEF-X | 34.2 | 20.2 | 5.9 | 14.7 |
+| XLS-R (2B) | 36.1 | 27.7 | 15.1 | 22.1 |
+| mSLAM-CTC (2B) | 37.8 | 29.6 | 18.5 | 24.8 |
+| Maestro | **38.2** | 31.3 | 18.4 | 25.2 |
+| Zero-shot Whisper | 36.2 | **32.6** | **25.2** | **29.1** |
+
+The low-resource gain over mSLAM is **6.7** BLEU (p. 8). The authors credit **68,000 hours** of X→en data for these languages versus **861 hours** in CoVoST2 (p. 8).
+
+On Fleurs repurposed for translation, the hours-vs-BLEU correlation is weak, **r² = 0.24** (Fig 4, p. 7; Sec 3.5, p. 8). The example of why: **Welsh** supposedly has **9,000 hours** of translation data, 4th largest, yet scores only **13** BLEU. Most of it was English audio with English captions that the language detector mislabelled as Welsh, so the sieve's rule filed it under translation (Sec 3.5, p. 8). Mesh two of [the sieve](#the-data-a-sieve-not-a-library) cut the wrong way.
+
+### Language identification
+
+On Fleurs, Whisper gets **64.5%** accuracy against **77.7%** for mSLAM-CTC and **71.4%** for w2v-bert-51 (Table 5, p. 8). It has no training data for **20 of the 102** Fleurs languages, capping accuracy at **80.4%**; on the **82** overlapping languages it reaches **80.3%** (Sec 3.6, p. 8).
+
+## Limitations the authors name
+
+From Sec 6 (pp. 13 to 14):
+
+- **Decoding failures** that are "decidedly non-human": **repeat loops**, missing the first or last few words of a segment, and **complete hallucination**, a transcript unrelated to the audio (p. 14). The Sec 4.5 heuristics help but do not cure this.
+- **Low-resource languages** remain poor; most languages have under **1,000 hours**, because collection was English-centric (p. 14).
+- **No fine-tuning study**: only zero-shot is evaluated (p. 14).
+- Unknown whether robustness comes from the encoder, the decoder (an audio-conditioned language model) or both (p. 14).
+- No self-supervision or self-training; they might still help (p. 14).
+
+Things I would add (my reading, not the paper's):
+
+- The filtering heuristics are described in words, without thresholds or counts of what each removed, so the data pipeline cannot be reproduced.
+- The dataset itself is not released, only the models and code (p. 2).
+- The human comparison uses 25 recordings and, in Fig 2, one human.
+- The normaliser was developed by looking at Whisper's own errors; Sec 4.4 checks this only against one other normaliser.
+
+## Toy experiments
+
+I cannot train Whisper here. These toys run in the page with no trained model, and each one isolates one mechanism. None is a reproduction.
+
+**Toy 1, the sieve ([Figure 1](#the-data-a-sieve-not-a-library)).** Twelve made-up pairs of (audio language, text language, transcript). Rules in order: (a) machine-transcript cue: the text has cased letters and is entirely upper-case or lower-case, or is longer than 20 words with no comma; (b) language match: keep as transcription if audio and text languages agree, as translation if the text is English and the audio is not, otherwise drop; (c) fuzzy duplicate: drop if the edit distance to an already kept transcript is at most 10% of the length. Result: **6** kept as transcription, **2** as translation, **2** machine-made, **1** mismatch, **1** duplicate (the same sentence with "volcanos" for "volcanoes", one edit apart).
+
+**Toy 2, the token assembler ([Figure 2](#one-format-for-many-jobs)).** One caption, "the cat sat", from 0.40 s to 1.56 s. English, transcribe, timestamps on gives 7 tokens: start of transcript, `<|en|>`, `<|transcribe|>`, `<|0.40|>`, the text, `<|1.56|>`, end. Rounding check: 1.234 s becomes token 62, read as 1.24 s.
+
+**Toy 3, the walking window ([Figure 3](#long-audio-a-window-that-walks)).** Fourteen scripted captions over 100 s. Each 30-second window keeps the captions fully inside it, and the next window starts at the cut-off caption's start time. With no drift every caption is heard exactly once. Add drift and a late start tick makes the next window miss the beginning of a caption, which then is never fully heard: the snowball the authors warn about (Sec 4.5, p. 12).
+
+**Toy 4, the fallback ladder ([Figure 4](#long-audio-a-window-that-walks)).** Three canned candidates. At $T = 0$ a looping sentence compresses far beyond 2.4 under real zlib. At 0.2 the loop is gone but the token probabilities 0.5, 0.1, 0.3, 0.6 average to $\ln$-probability **−1.18**, below −1. At 0.4 both checks pass.
+
+**Toy 5, effective robustness ([Figure 5](#effective-robustness)).** Table 2 only. The mean of the 13 per-dataset reductions is **55.2%**; the reduction of the two averages is **56.3%**.
+
+**Toy 6, the hours line ([Figure 6](#more-hours-fewer-errors-the-scaling-line)).** Eight languages whose hours and Large V2 WER I read from Fig 11 (p. 27) and Table 13 (p. 24): Khmer (1.3 h, 99.7%), Kannada (3.8, 37.0), Kazakh (12, 37.7), Armenian (13, 44.6), Icelandic (16, 38.2), Croatian (91, 13.4), Hungarian (379, 17.0), Indonesian (1,014, 7.1). A least-squares line on log scales is fitted live; eight points will not reproduce the paper's $r^2 = 0.83$, and the figure says so.
+
+**Toy 7, which pile ([Figure 7](#translation)).** A pool of 100,000 hours of English audio with English captions. If the language detector mislabels a fraction $e$, then $100{,}000 	imes e$ hours land in some other language's translation pile: at $e = 1\%$, 1,000 hours, more than Khmer's real 672.
+
+## My interpretation
+
+1. **The data pipeline is the paper.** The architecture is admitted to be standard (Sec 2.2, p. 3). What is new is a 680,000-hour pile and the sieve that made it usable. The paper describes the sieve only in words, which is the part I would most want to copy and cannot.
+2. **Effective robustness is the right yardstick.** Table 2 holds LibriSpeech fixed at 2.7 and still finds 55.2% fewer errors elsewhere. Benchmarks you trained on measure memory; zero-shot benchmarks measure skill.
+3. **The scaling line is a budget.** "WER halves per 16x data" turns a vague wish ("more Khmer data") into arithmetic.
+4. **For Khmer, Whisper is a warning, not a tool.** With **1.3 hours** of Khmer transcription data and **99.7%** WER on Fleurs (Fig 11, p. 27; Table 13, p. 24), out-of-the-box Whisper cannot transcribe Khmer, nor serve as an automatic judge of Khmer TTS output. My Khmer project ([/blog/khmer-tts-fine-tuning/](/blog/khmer-tts-fine-tuning/)) does not use Whisper: it filters with rules (duplicate audio, speaking rate) and a separately chosen ASR judge. Whisper's sieve and my filters are cousins: both use cheap statistics to reject transcripts that cannot belong to their audio. The 672 hours of Khmer translation data is a curious detail: there is far more Khmer audio with English captions than with Khmer captions in this corpus, and some of it may be mislabelled like Welsh.
+5. **Timestamps are a side product with a long life.** Moshi uses Whisper's word timestamps to align text and audio for training (see [/paper-reviews/moshi/](/paper-reviews/moshi/)). That only works for languages where Whisper hears well, which again excludes Khmer.
+6. **The heuristics show where the model is weak.** Temperature fallback and compression checks exist because the decoder can loop and hallucinate (Sec 6, p. 14). Same disease as VALL-E's skips and repeats ([/paper-reviews/vall-e/](/paper-reviews/vall-e/)): an autoregressive decoder that sometimes trusts its own text more than the audio.
+
+## Open questions
+
+- How much of each filtering mesh mattered? No ablation separates them.
+- Is the flattening from 54,000 to 680,000 hours under-training or data exhaustion (Sec 4.2, p. 11)?
+- Would fine-tuning on a few hundred hours of clean Khmer move Khmer onto the scaling line, or does the script and tokenizer keep it below?
+- Does the byte-level BPE vocabulary, refitted but the same size (Sec 2.2, p. 3), fragment Khmer script badly enough to matter? Counting tokens per Khmer syllable would be a cheap first test.
+- Can the long-form heuristics be learned instead of hand-tuned (the authors suggest fine-tuning or reinforcement learning, p. 14)?
+
+## Related
+
+- [/blog/audio-basics/](/blog/audio-basics/)
+- [/blog/speech-evaluation-metrics/](/blog/speech-evaluation-metrics/)
+- [/paper-reviews/moshi/](/paper-reviews/moshi/)
+- [/paper-reviews/vall-e/](/paper-reviews/vall-e/)
+- [/blog/khmer-tts-fine-tuning/](/blog/khmer-tts-fine-tuning/)

@@ -1,0 +1,4 @@
+---
+layout: null
+---
+{% include blog-figures/covariance-entries.html standalone=true %}

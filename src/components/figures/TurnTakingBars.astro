@@ -1,0 +1,67 @@
+---
+// Moshi review, Figure 8: Table 9 (p. 30). Seconds of IPU, pause, gap and
+// overlap in generated dialogues, next to the 1,000-prompt ground truth.
+// "Distance" is my summary: the sum of absolute differences from the ground
+// truth over the four columns.
+const { alt } = Astro.props;
+const rows = [
+  { name: "dGSLM (best non-cascaded)", v: [41.4, 13.8, 10.7, 6.1], ppl: 195.9 },
+  { name: "Cascaded", v: [54.8, 0.0, 5.3, 0.0], ppl: 45.9 },
+  { name: "Moshi, temperature 0.8", v: [35.1, 13.2, 12.5, 1.2], ppl: 41.9 },
+  { name: "Moshi, temperature 0.9", v: [44.7, 9.1, 7.5, 2.2], ppl: 56.7 },
+  { name: "Moshi, temperature 1.0", v: [50.8, 7.0, 4.5, 4.1], ppl: 79.3 },
+];
+const truth = { v: [51.1, 6.4, 4.2, 3.3], ppl: 59.6 };
+---
+<div class="blog-diagram ttt" role="region" aria-label={alt} data-ttt data-rows={JSON.stringify(rows)} data-truth={JSON.stringify(truth)}>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 330" role="img" aria-labelledby="ttt-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="ttt-title">Turn-taking statistics of generated dialogues against real ones</title>
+    <g data-bars></g>
+    <text data-r1 x="20" y="282" font-size="12.5" font-weight="700" fill="#2b2b30"></text>
+    <text data-r2 x="20" y="304" font-size="12" fill="#2b2b30"></text>
+    <text x="20" y="324" font-size="11" fill="#5f5f66">Values from Table 9 (p. 30). Distance = sum of the four gaps to the ground truth, in seconds (my summary).</text>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Compare with real conversations</span><div class="fig-chips">
+      {rows.map((r, i) => <button type="button" class="fig-chip" data-row={i} aria-pressed={i === 4 ? "true" : "false"}>{r.name}</button>)}
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { setupFigure, tween, wait } from "../../lib/figure-motion";
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-ttt]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const rows: { name: string; v: number[]; ppl: number }[] = JSON.parse(root.dataset.rows!);
+    const truth: { v: number[]; ppl: number } = JSON.parse(root.dataset.truth!);
+    const labels = ["IPU (speech)", "Pause (within a speaker)", "Gap (between speakers)", "Overlap (both talking)"], maxes = [60, 15, 15, 7];
+    const mk = (g: Element, tag: string, a: Record<string, string | number>, txt?: string) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, String(a[k])); if (txt) e.textContent = txt; g.append(e); return e; };
+    let shown = rows[4].v.slice(), sel = 4;
+    function draw() {
+      const g = $("[data-bars]"); g.replaceChildren();
+      labels.forEach((l, k) => {
+        const y = 20 + k * 62, W = (v: number) => (v / maxes[k]) * 480;
+        mk(g, "text", { x: 20, y: y + 14, "font-size": 11.5, "font-weight": 700, fill: "#2b2b30" }, l);
+        mk(g, "rect", { x: 220, y, width: W(truth.v[k]), height: 18, fill: "#b9b9c2" });
+        mk(g, "text", { x: 226 + W(truth.v[k]), y: y + 13, "font-size": 10.5, fill: "#5f5f66" }, `real ${truth.v[k].toFixed(1)} s`);
+        mk(g, "rect", { x: 220, y: y + 22, width: Math.max(0.5, W(shown[k])), height: 18, fill: "#594578" });
+        mk(g, "text", { x: 226 + W(shown[k]), y: y + 35, "font-size": 10.5, "font-weight": 700, fill: "#594578" }, `${shown[k].toFixed(1)} s`);
+      });
+      const r = rows[sel], dist = r.v.reduce((a, v, k) => a + Math.abs(v - truth.v[k]), 0);
+      $("[data-r1]").textContent = `${r.name}: ${dist.toFixed(1)} s away from real conversations.`;
+      $("[data-r2]").textContent = `Transcript perplexity ${r.ppl} (real: ${truth.ppl}; lower reads more like DialoGPT's text). ${sel === 1 ? "The cascade never pauses and never overlaps." : sel === 4 ? "Closest timing; wordier text." : sel === 2 ? "Smoothest text; stiffest timing." : ""}`;
+    }
+    async function pick(i: number) {
+      const from = shown.slice(), to = rows[i].v; sel = i;
+      root.querySelectorAll("[data-row]").forEach((b, j) => b.setAttribute("aria-pressed", String(j === i)));
+      await tween(0.6, (e) => { shown = from.map((v, k) => v + (to[k] - v) * e); draw(); });
+    }
+    root.querySelectorAll<HTMLButtonElement>("[data-row]").forEach((b) => b.addEventListener("click", () => pick(+b.dataset.row!)));
+    draw();
+    setupFigure(root, () => { shown = rows[1].v.slice(); sel = 1; draw(); }, async (alive) => {
+      for (const i of [1, 2, 3, 4]) { if (!alive()) return; await pick(i); await wait(1.2); }
+    });
+  });
+</script>

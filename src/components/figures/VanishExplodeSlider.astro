@@ -1,0 +1,56 @@
+---
+// Foundations, recurrent networks post: gradient size w_h^k against steps
+// back k. w_h 0.5: k 20 = 0.00000095. 0.9: k 30 = 0.0424. 1.1: k 30 = 17.45.
+// 1.5: k 20 = 3,325. The tanh toggle multiplies in the slopes of the
+// memory-fade run (w_x = 1, s = 1).
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-vanish>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 270" role="img" aria-labelledby="ve-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="ve-title">Gradient size against steps back on a logarithmic scale, vanishing or exploding</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Recurrent weight w_h <strong data-vw></strong></span><input class="scrub" data-w type="range" min="0.1" max="2" step="0.05" value="0.5" /></label>
+    <div><span class="fig-panel__name">tanh slopes</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-t="0" aria-pressed="true">Ignore (slopes = 1)</button>
+      <button type="button" class="fig-chip" data-t="1" aria-pressed="false">Include</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt } from "../../lib/tiny-net";
+  import { INK, MUTED, GOLD, NEG, JADE } from "../../lib/net-diagram";
+  import { txt } from "../../lib/plot";
+  const K = 30;
+  const show = (v: number) => (v >= 0.001 && v < 1e6 ? fmt(v, v < 1 ? 4 : 2) : v.toExponential(2).replace("e-", " × 10^−").replace(/^-/, "−").replace(/^-/, "−").replace("e+", " × 10^"));
+  document.querySelectorAll<HTMLElement>("[data-vanish]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    let wh = 0.5, tanh = false;
+    const setW = (v: number) => { wh = v; $<HTMLInputElement>("[data-w]").value = String(v); };
+    const curve = () => {
+      if (!tanh) return Array.from({ length: K + 1 }, (_, k) => wh ** k);
+      const hs = [Math.tanh(1)]; for (let t = 1; t <= K; t++) hs.push(Math.tanh(wh * hs[t - 1]));
+      const out = [1]; let p = 1; for (let k = 1; k <= K; k++) { p *= wh * (1 - hs[K - k + 1] ** 2); out.push(p); } return out;
+    };
+    const steps = () => [0.5, 0.9, 1, 1.1, 1.5].map((v) => { const c = (() => { const save = wh; wh = v; const r = curve(); wh = save; return r; })(); return { say: v === 1 ? "Only w_h = 1 passes the gradient back unchanged." : v < 1 ? `w_h = ${v}: every step back shrinks the gradient.` : `w_h = ${v}: every step back grows it.`, math: `w_h = ${v}:  10 steps back ${show(c[10])},  20 steps ${show(c[20])},  30 steps ${show(c[30])}`, enter: () => setW(v) }; });
+    function draw() {
+      const c = curve(), lx = (k: number) => 70 + (k / K) * 430, ly = (v: number) => 30 + ((6 - Math.log10(Math.max(1e-10, Math.min(1e6, v)))) / 16) * 210;
+      let s = `<rect x="70" y="30" width="430" height="${ly(1) - 30}" fill="${NEG}" fill-opacity="0.04"/><rect x="70" y="${ly(1)}" width="430" height="${240 - ly(1)}" fill="${JADE}" fill-opacity="0.04"/>`;
+      [1e6, 1e3, 1, 1e-3, 1e-6, 1e-10].forEach((v) => (s += `<line x1="70" x2="500" y1="${ly(v)}" y2="${ly(v)}" stroke="${v === 1 ? INK : "#eef0f0"}"/>` + txt(64, ly(v) + 4, v >= 1 ? fmt(v) : `10^${Math.round(Math.log10(v))}`, `font-size="10" text-anchor="end" fill="${MUTED}"`)));
+      [0, 10, 20, 30].forEach((k) => (s += txt(lx(k), 256, String(k), `font-size="10.5" text-anchor="middle" fill="${MUTED}"`)));
+      s += txt(70, 18, `Gradient size against steps back, w_h = ${fmt(wh, 2)}${tanh ? " (with tanh slopes)" : ""}`, `font-size="12" font-weight="700" fill="${INK}"`) + txt(495, 46, "explode", `font-size="10.5" text-anchor="end" fill="${NEG}"`) + txt(495, 232, "vanish", `font-size="10.5" text-anchor="end" fill="${JADE}"`);
+      s += `<polyline fill="none" stroke="${GOLD}" stroke-width="2.6" points="${c.map((v, k) => `${lx(k).toFixed(1)},${ly(v).toFixed(1)}`).join(" ")}"/>`;
+      [10, 20, 30].forEach((k, i) => (s += `<circle cx="${lx(k)}" cy="${ly(c[k])}" r="4.5" fill="${GOLD}"/>` + txt(530, 70 + i * 34, `${k} steps back`, `font-size="11.5" fill="${MUTED}"`) + txt(640, 70 + i * 34, show(c[k]), `font-size="13" font-weight="700" fill="${INK}"`)));
+      s += txt(530, 190, tanh ? "tanh slopes can only shrink a factor," : "With slopes ignored the curve is w_h^k:", `font-size="11" fill="${MUTED}"`) + txt(530, 206, tanh ? "so they push the curve down." : "a straight line on a log scale.", `font-size="11" fill="${MUTED}"`);
+      $("[data-draw]").innerHTML = s;
+      $("[data-vw]").textContent = fmt(wh, 2);
+    }
+    const redraw = stepper(root, steps, draw, { delay: 2 });
+    $<HTMLInputElement>("[data-w]").addEventListener("input", (e) => { wh = +(e.target as HTMLInputElement).value; redraw(); });
+    root.querySelectorAll<HTMLButtonElement>("[data-t]").forEach((b) => b.addEventListener("click", () => { tanh = b.dataset.t === "1"; root.querySelectorAll("[data-t]").forEach((o) => o.setAttribute("aria-pressed", String(o === b))); redraw(); }));
+  });
+</script>

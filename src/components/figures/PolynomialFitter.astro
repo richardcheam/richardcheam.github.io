@@ -1,0 +1,52 @@
+---
+// Foundations, regularisation post: least-squares polynomial fits of degree
+// 0 to 7 to eight noisy samples of sin(2πx). Training / validation MSE:
+// d1 0.441/0.246, d3 0.036/0.058, d7 0.000/0.090 (src/lib/poly.ts).
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-polyfit>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 300" role="img" aria-labelledby="pf-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="pf-title">Polynomial fits of rising degree to eight points, with training and validation error</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Degree d <strong data-vd></strong></span><input class="scrub" data-d type="range" min="0" max="7" step="1" value="3" /></label>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt } from "../../lib/tiny-net";
+  import { INK, MUTED, JADE, NEG, GOLD } from "../../lib/net-diagram";
+  import { frame, txt } from "../../lib/plot";
+  import { fit, mse, predict, TRAIN_X, TRAIN_Y, VAL_X, VAL_Y } from "../../lib/poly";
+  const FITS = Array.from({ length: 8 }, (_, d) => { const w = fit(d); return { w, tr: mse(w, TRAIN_X, TRAIN_Y), va: mse(w, VAL_X, VAL_Y) }; });
+  const SAY = ["Degree 0: one flat line at the average. It ignores x completely.", "Degree 1: a straight line. It cannot bend, so it misses the wave on both sets: underfitting.", "Degree 2: one bend is still not enough for an up-and-down wave.", "Degree 3: two bends, enough for the wave. Both errors are small and close: a good fit.", "Degree 4: training error barely moves; validation error starts to rise.", "Degree 5: the curve begins to chase individual points.", "Degree 6: training error is almost zero.", "Degree 7: eight weights for eight points. It threads every training point exactly, training error 0, by swinging between them: overfitting."];
+  document.querySelectorAll<HTMLElement>("[data-polyfit]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    let d = 3;
+    const setD = (v: number) => { d = v; $<HTMLInputElement>("[data-d]").value = String(v); };
+    const steps = () => FITS.map((f, k) => ({ say: SAY[k], math: `weights: ${f.w.map((x) => fmt(x, 3)).join(", ")}\ntraining MSE ${fmt(f.tr, 4)}, validation MSE ${fmt(f.va, 4)}`, enter: () => setD(k) }));
+    function draw() {
+      const F = frame({ l: 40, t: 30, w: 400, h: 240, x0: 0, x1: 1, y0: -2, y1: 2 }), f = FITS[d];
+      let s = `<clipPath id="pf-clip"><rect x="40" y="30" width="400" height="240"/></clipPath>` + F.grid([0, 0.5, 1], [-2, -1, 0, 1, 2], 1);
+      s += txt(40, 18, `Degree ${d} fit to 8 training points`, `font-size="12" font-weight="700" fill="${INK}"`);
+      s += `<g clip-path="url(#pf-clip)">` + F.curve((x) => Math.sin(2 * Math.PI * x), `stroke="#cfd5d4" stroke-width="2" stroke-dasharray="5 4"`) + F.curve((x) => predict(f.w, x), `stroke="${JADE}" stroke-width="2.8"`, 300) + `</g>`;
+      TRAIN_X.forEach((x, i) => (s += `<circle cx="${F.X(x)}" cy="${F.Y(TRAIN_Y[i])}" r="5.5" fill="${INK}"/>`));
+      VAL_X.forEach((x, i) => (s += `<circle cx="${F.X(x)}" cy="${F.Y(VAL_Y[i])}" r="5" fill="#fff" stroke="${NEG}" stroke-width="2"/>`));
+      s += `<circle cx="52" cy="290" r="4.5" fill="${INK}"/>` + txt(62, 294, "training", `font-size="11" fill="${MUTED}"`) + `<circle cx="130" cy="290" r="4.5" fill="#fff" stroke="${NEG}" stroke-width="2"/>` + txt(140, 294, "validation", `font-size="11" fill="${MUTED}"`) + `<line x1="220" x2="244" y1="290" y2="290" stroke="#cfd5d4" stroke-width="2" stroke-dasharray="5 4"/>` + txt(250, 294, "true curve (hidden from the model)", `font-size="11" fill="${MUTED}"`);
+      // Error against degree.
+      const E = frame({ l: 500, t: 40, w: 230, h: 180, x0: -0.3, x1: 7.3, y0: 0, y1: 0.65 });
+      s += txt(500, 18, "Mean squared error against degree", `font-size="12" font-weight="700" fill="${INK}"`) + E.grid([0, 1, 2, 3, 4, 5, 6, 7], [0, 0.2, 0.4, 0.6], 1);
+      s += `<polyline fill="none" stroke="${INK}" stroke-width="2" points="${FITS.map((g, k) => `${E.X(k)},${E.Y(g.tr)}`).join(" ")}"/><polyline fill="none" stroke="${NEG}" stroke-width="2" points="${FITS.map((g, k) => `${E.X(k)},${E.Y(g.va)}`).join(" ")}"/>`;
+      s += `<line x1="${E.X(d)}" x2="${E.X(d)}" y1="40" y2="220" stroke="${GOLD}" stroke-dasharray="3 3"/><circle cx="${E.X(d)}" cy="${E.Y(f.tr)}" r="5" fill="${INK}"/><circle cx="${E.X(d)}" cy="${E.Y(f.va)}" r="5" fill="${NEG}"/>`;
+      s += txt(500, 254, `training ${fmt(f.tr, 4)}`, `font-size="12.5" font-weight="700" fill="${INK}"`) + txt(620, 254, `validation ${fmt(f.va, 4)}`, `font-size="12.5" font-weight="700" fill="${NEG}"`);
+      s += txt(500, 274, `largest weight size: ${fmt(Math.max(...f.w.map(Math.abs)), 1)}`, `font-size="11.5" fill="${MUTED}"`);
+      $("[data-draw]").innerHTML = s;
+      $("[data-vd]").textContent = String(d);
+    }
+    const redraw = stepper(root, steps, draw, { delay: 2.2 });
+    $<HTMLInputElement>("[data-d]").addEventListener("input", (e) => { d = +(e.target as HTMLInputElement).value; redraw(); });
+  });
+</script>

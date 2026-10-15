@@ -1,0 +1,77 @@
+---
+import Base from "../../layouts/Base.astro";
+import ReviewCard from "../../components/ReviewCard.astro";
+import { reviewTopics, reviewTypes } from "../../data/reviewTopics";
+import { publishedReviews } from "../../lib/content";
+
+const reviews = await publishedReviews();
+---
+<Base title="Paper Reviews" heading>
+  <section class="page-intro" data-reveal>
+    <p class="section-eyebrow">Paper Reviews</p>
+    <h2>Research takeaways worth keeping</h2>
+    <p class="section-description">
+      Close readings of research papers and technical reports, with the authors’ claims, their evidence, and my interpretation kept distinct.
+    </p>
+  </section>
+
+  <section class="section-block reading-path" data-reveal>
+    <header class="section-head">
+      <h2>Where to start with speech</h2>
+    </header>
+    <p class="section-description">New to speech models? This order builds each idea before the next one needs it. Blog posts explain the basics; reviews read the papers.</p>
+    <ol class="reading-path__list">
+      <li><a href="/blog/audio-basics/">What a computer hears</a>: samples, frames and mel spectrograms</li>
+      <li><a href="/blog/residual-vector-quantization/">Residual vector quantization</a>: turning sound into tokens</li>
+      <li><a href="/paper-reviews/soundstream/">SoundStream</a>: the neural codec most others descend from</li>
+      <li><a href="/paper-reviews/vall-e/">VALL-E</a>: text to speech as next-token prediction</li>
+      <li><a href="/paper-reviews/flow-matching/">Flow Matching</a>: the training loss behind today's fast generators</li>
+      <li><a href="/paper-reviews/f5-tts/">F5-TTS</a>: flow matching applied to speech, with no aligner</li>
+      <li><a href="/paper-reviews/whisper/">Whisper</a>: speech recognition from 680,000 hours of the web</li>
+      <li><a href="/paper-reviews/moshi/">Moshi</a>: one model that listens while it talks</li>
+      <li><a href="/paper-reviews/dsm/">Delayed Streams Modeling</a>: streaming recognition and speech on one clock</li>
+      <li><a href="/paper-reviews/moshirag/">MoshiRAG</a>: looking facts up without breaking the conversation</li>
+      <li><a href="/blog/pocket-tts-calm-explained/">Pocket TTS</a> and <a href="/blog/khmer-tts-fine-tuning/">its Khmer fine-tuning</a>: putting it together</li>
+    </ol>
+  </section>
+
+  <section class="section-block" id="reviews-library" data-reveal>
+    <header class="section-head">
+      <h2>Browse the reviews</h2>
+    </header>
+
+    {reviews.length > 0 ? (
+      <>
+        <div class="review-filters" data-reveal>
+          <input class="filter-input" id="paper-reviews-search-input" data-filter-input type="search" placeholder="Search reviews" aria-label="Search reviews" />
+          <div class="facet-row" role="group" aria-labelledby="facet-type-label">
+            <span class="facet-row__label" id="facet-type-label">Type</span>
+            <a class="facet-chip" data-facet-link data-facet="type" data-facet-value="" href="/paper-reviews/#reviews-library">All</a>
+            {reviewTypes.map((t) => {
+              const n = reviews.filter((r) => r.data.type === t.key).length;
+              return n > 0 && <a class="facet-chip" data-facet-link data-facet="type" data-facet-value={t.key} href={`/paper-reviews/?type=${encodeURIComponent(t.key)}#reviews-library`}>{t.long_label}s <span class="facet-chip__count">{n}</span></a>;
+            })}
+          </div>
+          <div class="facet-row" role="group" aria-labelledby="facet-topic-label">
+            <span class="facet-row__label" id="facet-topic-label">Topic</span>
+            <a class="facet-chip" data-facet-link data-facet="topic" data-facet-value="" href="/paper-reviews/#reviews-library">All</a>
+            {reviewTopics.map((t) => {
+              const n = reviews.filter((r) => r.data.topic.includes(t.key)).length;
+              return n > 0 && <a class="facet-chip" data-facet-link data-facet="topic" data-facet-value={t.key} href={`/paper-reviews/?topic=${encodeURIComponent(t.key)}#reviews-library`}>{t.label} <span class="facet-chip__count">{n}</span></a>;
+            })}
+          </div>
+          <p class="facet-count" data-filter-count aria-live="polite">{reviews.length} {reviews.length === 1 ? "entry" : "entries"}</p>
+          <p class="filter-empty" data-filter-empty hidden>Nothing matches these filters yet.</p>
+        </div>
+        <div class="review-grid">
+          {reviews.map((r) => <ReviewCard review={r} featured={r.data.featured} filterable />)}
+        </div>
+      </>
+    ) : (
+      <div class="review-empty">
+        <h3>No reviews published yet</h3>
+        <p>Future reviews will trace a paper’s question, method, evidence, and limitations, followed by what I take from it.</p>
+      </div>
+    )}
+  </section>
+</Base>

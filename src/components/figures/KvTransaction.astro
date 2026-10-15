@@ -1,0 +1,50 @@
+---
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" tabindex="0" role="region" aria-label={alt} data-kvt>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 52 780 173" role="img" aria-labelledby="kv-transaction-title kv-transaction-desc" class="blog-diagram-svg" font-family="Inter, sans-serif">
+  <title id="kv-transaction-title">Grouped KV allocation as a transaction</title><desc id="kv-transaction-desc">Reserve all required groups, then commit ownership. If a later group fails, restore every earlier mutation. Release only after dependent transfers complete.</desc>
+  <g fill="#111111" font-size="17"><text data-st="reserve" x="34" y="96">Reserve groups</text><text data-st="commit" x="292" y="96">Commit request ownership</text><text data-st="use" x="590" y="96">Use KV</text><text data-st="rollback" x="292" y="192">Rollback every mutation</text></g>
+  <path data-edge="commit" d="M175 91 H273" fill="none" stroke="#5f5f66" stroke-width="2" /><path data-edge="use" d="M515 91 H570" fill="none" stroke="#5f5f66" stroke-width="2" /><path data-edge="fail" d="M175 111 V183 H273" fill="none" stroke="#5f5f66" stroke-width="2" />
+  <text data-st="fails" x="35" y="166" fill="#754a94" font-size="15">Later group fails</text>
+  <path data-edge="release" d="M620 110 V182 H570" fill="none" stroke="#5f5f66" stroke-width="2" />
+  <text data-st="release" x="480" y="211" fill="#5f5f66" font-size="15">Release after transfers finish</text>
+  </svg>
+<button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+<p class="blog-figure-reading">Partial ownership must never survive a failed attempt.</p>
+
+<script>
+  import { alongPath, animate, drawStroke, dur, hideStroke, setupFigure, wait } from "../../lib/figure-motion";
+
+  // Two attempts through the same allocator. The first succeeds: reserve,
+  // commit, use, then release only after transfers finish. The second fails on
+  // a later group and takes the rollback path, so no partial ownership survives.
+  document.querySelectorAll<HTMLElement>("[data-kvt]").forEach((root) => {
+    const svg = root.querySelector("svg")!;
+    const st = (k: string) => root.querySelector<SVGTextElement>(`[data-st="${k}"]`)!;
+    const edge = (k: string) => root.querySelector<SVGPathElement>(`[data-edge="${k}"]`)!;
+    const all = ["reserve", "commit", "use", "rollback", "fails", "release"];
+    const edges = ["commit", "use", "fail", "release"];
+    const token = () => { const c = document.createElementNS("http://www.w3.org/2000/svg", "circle"); c.setAttribute("r", "5.5"); c.setAttribute("fill", "#754a94"); svg.append(c); return c; };
+    const go = async (k: string, s = 0.6) => {
+      const c = token();
+      await Promise.all([drawStroke(edge(k), s, "linear"), animate(c, { transform: alongPath(edge(k), 24) }, { duration: dur(s), ease: "linear" })]);
+      c.remove();
+    };
+    const on = (k: string) => animate(st(k), { opacity: [0, 1] }, { duration: dur(0.3) });
+    setupFigure(root, () => {
+      all.forEach((k) => (st(k).style.opacity = "0"));
+      edges.forEach((k) => hideStroke(edge(k)));
+      svg.querySelectorAll("circle[r='5.5']").forEach((c) => c.remove());
+    }, async (alive) => {
+      await on("reserve");
+      await go("commit"); if (!alive()) return; await on("commit");
+      await go("use"); if (!alive()) return; await on("use");
+      await go("release", 0.7); if (!alive()) return; await on("release");
+      await wait(0.5); if (!alive()) return;
+      await on("fails");
+      await go("fail", 0.8); if (!alive()) return; await on("rollback");
+    });
+  });
+</script>

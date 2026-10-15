@@ -1,0 +1,111 @@
+---
+// RVQ post, Figure 3: the worked example. Three codebooks of four entries,
+// each half the size of the last. Each stage picks the entry nearest to what
+// is still missing, then the view zooms 2x onto the new leftover.
+// Default z = (3, 1.5): squared error 11.25, 3.25, 0.25, 0; indices 1, 2, 2.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram rz" role="region" aria-label={alt} data-rz>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 400" role="img" aria-labelledby="rz-title" class="blog-diagram-svg" font-family="Inter, sans-serif" style="touch-action: none">
+    <title id="rz-title">Three codebooks each fixing what the previous one missed, with the view zooming in on the leftover</title>
+    <defs><clipPath id="rz-clip"><rect x="20" y="20" width="360" height="360" /></clipPath></defs>
+    <rect x="20" y="20" width="360" height="360" fill="none" stroke="#ececf1" />
+    <g clip-path="url(#rz-clip)">
+      <g data-grid></g>
+      <g data-world></g>
+    </g>
+    <text data-zoom x="372" y="372" font-size="10.5" text-anchor="end" fill="#5f5f66"></text>
+    <text x="410" y="36" font-size="11.5" font-weight="700" fill="#2b2b30">Stage by stage</text>
+    <g data-table></g>
+    <text data-sum x="410" y="250" font-size="12.5" font-weight="700" fill="#2b2b30"></text>
+    <text data-bits x="410" y="274" font-size="12" fill="#2b2b30"></text>
+    <text data-one x="410" y="296" font-size="11.5" fill="#5f5f66"></text>
+    <text x="410" y="340" font-size="11" fill="#a33b3b">● the frame z (drag it)</text>
+    <text x="410" y="358" font-size="11" fill="#594578">◆ entries of the current codebook</text>
+    <text x="410" y="376" font-size="11" fill="#4F5D3A">→ entries chosen so far, tip to tail</text>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Stages</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-next>Next stage</button>
+      <button type="button" class="fig-chip" data-back>Back</button>
+      <button type="button" class="fig-chip" data-home>Reset to (3, 1.5)</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { setupFigure, tween, wait } from "../../lib/figure-motion";
+  import { rvq, TOY_BOOKS, type P2 } from "../../lib/vq-math";
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-rz]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    let z: P2 = [3, 1.5], st = 3, view = { cx: 0, cy: 0, s: 25 };
+    const mk = (g: Element, tag: string, a: Record<string, string | number>, txt?: string) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, String(a[k])); if (txt !== undefined) e.textContent = txt; g.append(e); return e; };
+    const X = (v: number) => 200 + (v - view.cx) * view.s, Y = (v: number) => 200 - (v - view.cy) * view.s;
+    const target = (n: number) => { const ch = rvq(z, TOY_BOOKS); const c = n === 0 ? [0, 0] : ch[Math.min(n, 3) - 1].zh; return { cx: n >= 3 ? ch[1].zh[0] : c[0], cy: n >= 3 ? ch[1].zh[1] : c[1], s: 25 * 2 ** Math.min(n, 2) }; };
+    const fmt = (v: number) => (Math.abs(v) < 1e-9 ? "0" : Number.isInteger(v) ? String(v) : v.toFixed(2).replace(/0$/, ""));
+    const pt = (p: P2) => `(${fmt(p[0])}, ${fmt(p[1])})`;
+    function draw() {
+      const ch = rvq(z, TOY_BOOKS), g = $("[data-world]"), gg = $("[data-grid]"); g.replaceChildren(); gg.replaceChildren();
+      // Grid lines every unit (or half unit when zoomed in).
+      const stepU = view.s >= 50 ? 0.5 : 1;
+      for (let v = -12; v <= 12; v += stepU) {
+        mk(gg, "line", { x1: X(v), x2: X(v), y1: 20, y2: 380, stroke: v === 0 ? "#d5d5dc" : "#f2f2f5" });
+        mk(gg, "line", { y1: Y(v), y2: Y(v), x1: 20, x2: 380, stroke: v === 0 ? "#d5d5dc" : "#f2f2f5" });
+      }
+      // Current codebook around the sum so far.
+      if (st < 3) {
+        const base = st === 0 ? [0, 0] : ch[st - 1].zh;
+        TOY_BOOKS[st].forEach((c, j) => {
+          const p: P2 = [base[0] + c[0], base[1] + c[1]];
+          mk(g, "line", { x1: X(base[0]), y1: Y(base[1]), x2: X(p[0]), y2: Y(p[1]), stroke: "#594578", "stroke-opacity": 0.25 });
+          mk(g, "path", { d: `M${X(p[0])} ${Y(p[1]) - 8} l8 8 l-8 8 l-8 -8 z`, fill: "#594578", "fill-opacity": 0.85 });
+          mk(g, "text", { x: X(p[0]) + 11, y: Y(p[1]) - 8, "font-size": 10.5, "font-weight": 700, fill: "#594578" }, String(j + 1));
+        });
+        mk(g, "line", { x1: X(base[0]), y1: Y(base[1]), x2: X(z[0]), y2: Y(z[1]), stroke: "#a33b3b", "stroke-dasharray": "4 3", "stroke-width": 1.5 });
+      }
+      // Chosen entries, tip to tail from the origin.
+      let from: P2 = [0, 0];
+      ch.slice(0, st).forEach((c) => {
+        mk(g, "line", { x1: X(from[0]), y1: Y(from[1]), x2: X(c.zh[0]), y2: Y(c.zh[1]), stroke: "#4F5D3A", "stroke-width": 3 });
+        mk(g, "circle", { cx: X(c.zh[0]), cy: Y(c.zh[1]), r: 3.5, fill: "#4F5D3A" });
+        from = c.zh;
+      });
+      mk(g, "circle", { cx: X(z[0]), cy: Y(z[1]), r: 6, fill: "#a33b3b", style: "cursor: move" });
+      // Table.
+      const gt = $("[data-table]"); gt.replaceChildren();
+      ["stage", "index", "entry", "leftover", "error²"].forEach((h, i) => mk(gt, "text", { x: 410 + [0, 50, 100, 190, 300][i], y: 62, "font-size": 10.5, "font-weight": 700, fill: "#5f5f66" }, h));
+      mk(gt, "text", { x: 410, y: 86, "font-size": 11.5, fill: "#2b2b30" }, "none");
+      mk(gt, "text", { x: 600, y: 86, "font-size": 11.5, fill: "#2b2b30" }, pt(z));
+      mk(gt, "text", { x: 710, y: 86, "font-size": 11.5, "font-weight": 700, fill: "#2b2b30" }, fmt(z[0] ** 2 + z[1] ** 2));
+      ch.forEach((c, i) => {
+        const y = 110 + i * 24, on = i < st;
+        [String(i + 1), on ? String(c.k + 1) : "", on ? pt(TOY_BOOKS[i][c.k]) : "", on ? pt(c.r) : "", on ? fmt(c.err) : ""].forEach((t, k) => mk(gt, "text", { x: 410 + [0, 50, 100, 190, 300][k], y, "font-size": 11.5, fill: on ? "#2b2b30" : "#b9b9c2", "font-weight": k === 4 ? 700 : 400 }, t || "…"));
+      });
+      const zh = st ? ch[st - 1].zh : [0, 0] as P2;
+      $("[data-sum]").textContent = `Rebuilt so far: ${pt(zh)}${st === 3 && ch[2].err < 1e-9 ? ", exactly z" : ""}`;
+      $("[data-bits]").textContent = `Sent: ${st ? ch.slice(0, st).map((c) => c.k + 1).join(", ") : "nothing"}, ${2 * st} bits from ${4 * Math.max(st, 1)} stored entries.`;
+      $("[data-one]").textContent = st ? `One codebook giving the same ${2 * st} bits would need ${2 ** (2 * st)} entries.` : "Each codebook has 4 entries, so each index is 2 bits.";
+      $("[data-zoom]").textContent = `zoom ${view.s / 25}×`;
+    }
+    async function go(n: number) {
+      const from = { ...view }; st = n; const to = target(n);
+      draw();
+      await tween(0.8, (e) => { view = { cx: from.cx + (to.cx - from.cx) * e, cy: from.cy + (to.cy - from.cy) * e, s: from.s * (to.s / from.s) ** e }; draw(); });
+    }
+    $("[data-next]").addEventListener("click", () => go(Math.min(3, st + 1)));
+    $("[data-back]").addEventListener("click", () => go(Math.max(0, st - 1)));
+    $("[data-home]").addEventListener("click", () => { z = [3, 1.5]; go(0); });
+    const svg = root.querySelector("svg")!;
+    let drag = false;
+    const move = (e: PointerEvent) => { const r = svg.getBoundingClientRect(), px = ((e.clientX - r.left) / r.width) * 780, py = ((e.clientY - r.top) / r.height) * 400; if (px > 380) return; z = [Math.round(((px - 200) / view.s + view.cx) * 20) / 20, Math.round(((200 - py) / view.s + view.cy) * 20) / 20]; draw(); };
+    svg.addEventListener("pointerdown", (e) => { const r = svg.getBoundingClientRect(); if (((e.clientX - r.left) / r.width) * 780 > 380) return; drag = true; svg.setPointerCapture(e.pointerId); move(e); });
+    svg.addEventListener("pointermove", (e) => { if (drag) move(e); });
+    svg.addEventListener("pointerup", () => { drag = false; });
+    view = target(3); draw();
+    setupFigure(root, () => { z = [3, 1.5]; st = 0; view = target(0); draw(); }, async (alive) => {
+      for (let n = 1; n <= 3; n++) { await wait(1.1); if (!alive()) return; await go(n); }
+    });
+  });
+</script>

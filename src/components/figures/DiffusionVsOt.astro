@@ -1,0 +1,91 @@
+---
+// Figure 6: the same 200 noise grains (seed 7) pushed to the 8-point ring by
+// the VP diffusion path (left) and the OT path (right). "One data point each"
+// draws the per-example paths psi_t(x0) = a_t c + sigma_t x0 for a random
+// centre c; "True field" integrates the marginal ODE (Eq 8) with RK4,
+// 200 steps for OT and 4000 for VP, which is stiff near t = 1.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram dvo" role="region" aria-label={alt} data-dvo>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 470" role="img" aria-labelledby="dvo-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="dvo-title">Trajectories under the diffusion path and the optimal transport path</title>
+    <text x="30" y="20" font-size="11.5" font-weight="700" fill="#2b2b30">Diffusion path (VP)</text>
+    <text x="410" y="20" font-size="11.5" font-weight="700" fill="#2b2b30">Optimal transport path</text>
+    <rect x="30" y="30" width="340" height="340" fill="none" stroke="#ececf1" />
+    <rect x="410" y="30" width="340" height="340" fill="none" stroke="#ececf1" />
+    <g data-p0></g>
+    <g data-p1></g>
+    <text data-a0 x="30" y="394" font-size="12" fill="#2b2b30"></text>
+    <text data-b0 x="30" y="414" font-size="12" fill="#2b2b30"></text>
+    <text data-a1 x="410" y="394" font-size="12" fill="#2b2b30"></text>
+    <text data-b1 x="410" y="414" font-size="12" fill="#2b2b30"></text>
+    <text data-note x="30" y="446" font-size="11.5" fill="#5f5f66"></text>
+    <text data-note2 x="30" y="462" font-size="11.5" fill="#5f5f66"></text>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Time t<strong data-vt></strong></span><input class="scrub" data-scrub type="range" min="0" max="200" step="1" value="200" /></label>
+    <div><span class="fig-panel__name">Velocity</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-mode="cond" aria-pressed="false">One data point each</button>
+      <button type="button" class="fig-chip" data-mode="marg" aria-pressed="true">True field</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { setupFigure, tween } from "../../lib/figure-motion";
+  import { integrate, noiseCloud, coeffs, rng, RING, RING_COLORS, REF_STEPS, straightness, median, T_END, type Vec, type Path } from "../../lib/flow-math";
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-dvo]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const scrub = $<HTMLInputElement>("[data-scrub]");
+    const P = (panel: number) => ({ X: (v: number) => 30 + panel * 380 + 170 + v * 30, Y: (v: number) => 200 - v * 30 });
+    const paths: Path[] = ["vp", "ot"];
+    const x0s = noiseCloud(200, 7), r = rng(11), pick = x0s.map(() => Math.floor(r() * 8));
+    // Trajectories at 201 time samples, per panel and per mode.
+    const data: Record<string, Vec[][]> = {};
+    paths.forEach((p) => {
+      data[p + "cond"] = x0s.map((x0, i) => Array.from({ length: 201 }, (_, k) => { const c = coeffs(p, (k / 200) * T_END), m = RING[pick[i]]; return [c.a * m[0] + c.s * x0[0], c.a * m[1] + c.s * x0[1]] as Vec; }));
+      data[p + "marg"] = x0s.map((x0) => integrate(p, x0, REF_STEPS[p], "rk4", true, REF_STEPS[p] / 200));
+    });
+    const dest = (tr: Vec[]) => { const e = tr[tr.length - 1]; let b = 0, d = 1e9; RING.forEach((c, k) => { const q = Math.hypot(e[0] - c[0], e[1] - c[1]); if (q < d) { d = q; b = k; } }); return b; };
+    const stats: Record<string, { st: number; arc: number[][] }> = {};
+    for (const key in data) {
+      const arc = data[key].map((tr) => { const a = [0]; for (let k = 1; k < tr.length; k++) a.push(a[k - 1] + Math.hypot(tr[k][0] - tr[k - 1][0], tr[k][1] - tr[k - 1][1])); return a.map((v) => v / (a[a.length - 1] || 1)); });
+      stats[key] = { st: median(data[key].map(straightness)), arc };
+    }
+    let mode = "marg";
+    const els = paths.map((_, pi) => {
+      const g = $(`[data-p${pi}]`), { X, Y } = P(pi);
+      RING.forEach((c) => { const e = document.createElementNS(NS, "circle"); e.setAttribute("cx", String(X(c[0]))); e.setAttribute("cy", String(Y(c[1]))); e.setAttribute("r", "10"); e.setAttribute("fill", "#ececf1"); g.append(e); });
+      const trails = x0s.map(() => { const e = document.createElementNS(NS, "path"); e.setAttribute("fill", "none"); e.setAttribute("stroke-width", "0.8"); e.setAttribute("stroke-opacity", "0.45"); g.append(e); return e; });
+      const dots = x0s.map(() => { const e = document.createElementNS(NS, "circle"); e.setAttribute("r", "2.2"); g.append(e); return e; });
+      return { trails, dots };
+    });
+    function draw(k: number) {
+      paths.forEach((p, pi) => {
+        const tr = data[p + mode], { X, Y } = P(pi);
+        tr.forEach((pts, i) => {
+          const col = RING_COLORS[mode === "cond" ? pick[i] : dest(pts)];
+          let d = ""; for (let j = 0; j <= k; j += 2) d += `${j ? "L" : "M"}${X(pts[j][0]).toFixed(1)} ${Y(pts[j][1]).toFixed(1)}`;
+          d += `L${X(pts[k][0]).toFixed(1)} ${Y(pts[k][1]).toFixed(1)}`;
+          els[pi].trails[i].setAttribute("d", d); els[pi].trails[i].setAttribute("stroke", col);
+          els[pi].dots[i].setAttribute("cx", X(pts[k][0]).toFixed(1)); els[pi].dots[i].setAttribute("cy", Y(pts[k][1]).toFixed(1)); els[pi].dots[i].setAttribute("fill", col);
+        });
+        const s = stats[p + mode], done = s.arc.reduce((a, arc) => a + arc[k], 0) / s.arc.length;
+        $(`[data-a${pi}]`).textContent = `Share of the trip travelled by t = ${(k / 200).toFixed(2)}: ${(done * 100).toFixed(0)}%`;
+        $(`[data-b${pi}]`).textContent = `Straightness (median, 1 = a ruler line): ${s.st.toFixed(3)}`;
+      });
+      $("[data-note]").textContent = mode === "cond" ? "One data point each: every OT grain rides a ruler-straight line at constant speed." : "True field: grains feel every data point at once, so even OT trips bend a little.";
+      $("[data-note2]").textContent = mode === "cond" ? "Diffusion grains also end in the right place, but they leave most of the trip for the end." : "The bigger difference is timing: drag to t = 0.5 and compare the shares travelled.";
+      scrub.value = String(k); scrub.style.setProperty("--p", `${(k / 200) * 100}%`);
+      $("[data-vt]").textContent = (k / 200).toFixed(2);
+    }
+    scrub.addEventListener("input", () => draw(+scrub.value));
+    root.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach((b) => b.addEventListener("click", () => {
+      mode = b.dataset.mode!; root.querySelectorAll("[data-mode]").forEach((o) => o.setAttribute("aria-pressed", String(o === b))); draw(+scrub.value);
+    }));
+    draw(200);
+    setupFigure(root, () => draw(0), async (alive) => { await tween(5, (e) => { if (alive()) draw(Math.round((1 - Math.cbrt(1 - e)) * 200)); }); });
+  });
+</script>

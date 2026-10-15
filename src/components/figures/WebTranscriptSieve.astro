@@ -1,0 +1,81 @@
+---
+// Whisper review, Figure 1: Toy 1, the data sieve (Sec 2.1, pp. 2 to 3).
+// Twelve made-up (audio language, transcript) pairs pass three meshes:
+// machine-transcript cues (all one case, or a long text with no comma), the
+// language match with its translation reroute, and fuzzy de-duplication
+// (edit distance at most 10% of the length). Thresholds are the toy's own.
+const { alt } = Astro.props;
+const cards = [
+  ["en", "en", "Hello, everyone. Today we look at volcanoes."],
+  ["fr", "fr", "Bonjour, je m'appelle Marie."],
+  ["en", "en", "THIS IS ALL CAPS WITH NO PUNCTUATION AT ALL"],
+  ["en", "en", "this is all lowercase and has no commas or capitals anywhere"],
+  ["de", "en", "The weather is nice today, isn't it?"],
+  ["km", "en", "I love the Khmer language."],
+  ["es", "fr", "Il fait beau aujourd'hui."],
+  ["en", "en", "Hello, everyone. Today we look at volcanos."],
+  ["ja", "ja", "こんにちは、元気ですか。"],
+  ["en", "en", "Well, I think so. Don't you?"],
+  ["es", "es", "¿Dónde está la estación, por favor?"],
+  ["en", "en", "Wait, what? No, really, tell me."],
+];
+---
+<div class="blog-diagram wts" role="region" aria-label={alt} data-wts data-cards={JSON.stringify(cards)}>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 470" role="img" aria-labelledby="wts-title" class="blog-diagram-svg" font-family="Inter, 'Noto Sans JP', sans-serif">
+    <title id="wts-title">Twelve audio and transcript pairs sorted by the filtering rules into kept and dropped piles</title>
+    <g data-rows></g>
+    <g data-sum></g>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Meshes</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-m="0" aria-pressed="true">Machine-transcript cues</button>
+      <button type="button" class="fig-chip" data-m="1" aria-pressed="true">Language match</button>
+      <button type="button" class="fig-chip" data-m="2" aria-pressed="true">Fuzzy duplicates</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { setupFigure, wait } from "../../lib/figure-motion";
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-wts]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const C: string[][] = JSON.parse(root.dataset.cards!);
+    const mk = (g: Element, tag: string, a: Record<string, string | number>, txt?: string) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, String(a[k])); if (txt !== undefined) e.textContent = txt; g.append(e); return e; };
+    const on = [true, true, true];
+    const BINS = [["kept: transcription", "#4F5D3A"], ["kept: translation", "#35588a"], ["dropped: machine-made", "#a33b3b"], ["dropped: language mismatch", "#b8722c"], ["dropped: duplicate", "#8a8a94"]];
+    const edit = (a: string, b: string) => { const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]); for (let j = 1; j <= b.length; j++) d[0][j] = j; for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++) d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); return d[a.length][b.length]; };
+    function sort() {
+      const kept: string[] = [];
+      return C.map(([au, tx, text]) => {
+        const cased = /[A-Za-z]/.test(text), words = text.split(/\s+/).length;
+        if (on[0] && cased && (text === text.toUpperCase() || text === text.toLowerCase() || (words > 20 && !text.includes(",")))) return { bin: 2, why: text === text.toUpperCase() ? "all upper-case" : text === text.toLowerCase() ? "all lower-case" : "long, no comma" };
+        let bin = 0, why = `${au} audio, ${tx} text`;
+        if (on[1] && au !== tx) { if (tx === "en") { bin = 1; why = `${au} audio, English text`; } else return { bin: 3, why: `${au} audio, ${tx} text` }; }
+        if (on[2]) { const dup = kept.find((k) => edit(k, text) <= 0.1 * Math.max(k.length, text.length)); if (dup) return { bin: 4, why: `${edit(dup, text)} edits from a kept text` }; }
+        kept.push(text); return { bin, why };
+      });
+    }
+    let shown = C.length;
+    function draw() {
+      const res = sort(), g = $("[data-rows]"); g.replaceChildren();
+      mk(g, "text", { x: 20, y: 20, "font-size": 11.5, "font-weight": 700, fill: "#2b2b30" }, "Audio / text language, then the transcript");
+      mk(g, "text", { x: 560, y: 20, "font-size": 11.5, "font-weight": 700, fill: "#2b2b30" }, "Where it went");
+      C.forEach(([au, tx, text], i) => {
+        const y = 32 + i * 30, done = i < shown, r = res[i];
+        mk(g, "rect", { x: 20, y, width: 520, height: 26, rx: 4, fill: done ? BINS[r.bin][1] : "#f2f2f5", "fill-opacity": done ? 0.12 : 1 });
+        mk(g, "text", { x: 28, y: y + 17, "font-size": 10.5, "font-weight": 700, fill: "#2b2b30", "font-family": "ui-monospace, monospace" }, `${au}/${tx}`);
+        mk(g, "text", { x: 78, y: y + 17, "font-size": 11, fill: "#2b2b30" }, text.length > 62 ? text.slice(0, 60) + "…" : text);
+        if (done) { mk(g, "text", { x: 560, y: y + 12, "font-size": 10.5, "font-weight": 700, fill: BINS[r.bin][1] }, BINS[r.bin][0]); mk(g, "text", { x: 560, y: y + 24, "font-size": 9.5, fill: "#5f5f66" }, r.why); }
+      });
+      const gs = $("[data-sum]"); gs.replaceChildren();
+      BINS.forEach(([n, c], k) => { const cnt = res.slice(0, shown).filter((r) => r.bin === k).length, x = 20 + k * 150; mk(gs, "rect", { x, y: 404, width: 140, height: 34, rx: 4, fill: c, "fill-opacity": 0.15, stroke: c }); mk(gs, "text", { x: x + 10, y: 426, "font-size": 18, "font-weight": 700, fill: c }, String(cnt)); mk(gs, "text", { x: x + 34, y: 425, "font-size": 9.5, fill: "#2b2b30" }, n.replace("dropped: ", "").replace("kept: ", "")); });
+      mk(gs, "text", { x: 20, y: 460, "font-size": 11, fill: "#5f5f66" }, "Toy rules and data. Whisper's real mix after filtering: 438,218 h English, 117,113 h other languages, 125,739 h translation (Fig 11, p. 27).");
+      root.querySelectorAll("[data-m]").forEach((b) => b.setAttribute("aria-pressed", String(on[+b.getAttribute("data-m")!])));
+    }
+    root.querySelectorAll<HTMLButtonElement>("[data-m]").forEach((b) => b.addEventListener("click", () => { on[+b.dataset.m!] = !on[+b.dataset.m!]; shown = C.length; draw(); }));
+    draw();
+    setupFigure(root, () => { shown = 0; draw(); }, async (alive) => { for (let i = 1; i <= C.length; i++) { await wait(0.35); if (!alive()) return; shown = i; draw(); } });
+  });
+</script>

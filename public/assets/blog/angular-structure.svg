@@ -1,0 +1,4 @@
+---
+layout: null
+---
+{% include blog-figures/angular-structure.html standalone=true %}

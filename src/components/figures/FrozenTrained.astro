@@ -1,0 +1,77 @@
+---
+// What fine-tuning changes. Gradients flow back from the loss into the flow
+// head, the transformer and the new Khmer text embedding, and stop at Mimi,
+// which stays frozen. Config flags are the project's (report Table 3).
+const { alt } = Astro.props;
+const blocks = [
+  { k: "emb", x: 40, y: 60, w: 170, h: 84, t: "Text embedding", s: "new · 4,000 rows", c: "#8a6a1f", flag: "reset_text_embedding: true" },
+  { k: "tf", x: 270, y: 60, w: 190, h: 150, t: "24-layer transformer", s: "from English weights", c: "#594578", flag: "start_from_pretrained: true" },
+  { k: "fh", x: 540, y: 60, w: 130, h: 64, t: "Flow head", s: "from English weights", c: "#594578", flag: "freeze_head: false" },
+  { k: "enc", x: 40, y: 168, w: 170, h: 64, t: "Mimi encoder", s: "frozen", c: "#5f5f66", flag: "latents precomputed" },
+  { k: "dec", x: 540, y: 168, w: 130, h: 64, t: "Mimi decoder", s: "frozen", c: "#5f5f66", flag: "never trained" },
+];
+---
+<div class="blog-diagram ft" role="region" aria-label={alt} data-frz>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 320" role="img" aria-labelledby="ft-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="ft-title">Trained and frozen parts of Pocket TTS during fine-tuning</title>
+    <text x="40" y="44" font-size="10.5" fill="#5f5f66">Khmer text → SentencePiece</text>
+    <text x="40" y="250" font-size="10.5" fill="#5f5f66">↑ voice prompt audio</text>
+    <path d="M210 92 H270 M210 200 H240 V150 H270 M460 92 H540 M605 124 V168" fill="none" stroke="#2b2b30" stroke-width="1.5" />
+    {blocks.map((b) => (
+      <g data-block={b.k}>
+        <rect x={b.x} y={b.y} width={b.w} height={b.h} rx="7" fill={b.c} fill-opacity={b.c === "#5f5f66" ? 0.06 : 0.1} stroke={b.c} stroke-width="1.5" stroke-dasharray={b.c === "#5f5f66" ? "4 3" : ""} />
+        <text x={b.x + 12} y={b.y + 22} font-size="12" font-weight="700" fill={b.c === "#5f5f66" ? "#2b2b30" : b.c}>{b.t}</text>
+        <text x={b.x + 12} y={b.y + 40} font-size="10.5" fill="#5f5f66">{b.s}</text>
+        <text x={b.x + 12} y={b.y + b.h - 8} font-size="9" fill="#5f5f66" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">{b.flag}</text>
+      </g>
+    ))}
+    <g data-grid transform="translate(162 92)"></g>
+    <rect x="700" y="74" width="60" height="36" rx="6" fill="#2b2b30" />
+    <text x="730" y="96" font-size="11" font-weight="700" fill="#fff" text-anchor="middle">loss</text>
+    <path d="M670 92 H700" stroke="#2b2b30" stroke-width="1.5" />
+    <text x="605" y="250" font-size="10.5" fill="#5f5f66" text-anchor="middle">→ 24 kHz audio</text>
+    <path data-pulse fill="none" stroke="#a33b3b" stroke-width="3" stroke-linecap="round" d="M730 74 C 730 30, 605 30, 605 60 M605 60 C 605 30, 365 30, 365 60 M365 60 C 365 30, 115 30, 115 60" />
+    <text data-stop x="115" y="290" font-size="11" font-weight="600" fill="#a33b3b" text-anchor="middle"></text>
+    <text data-steps x="40" y="290" font-size="11" fill="#2b2b30"></text>
+    <text x="760" y="290" font-size="11" text-anchor="end" fill="#2b2b30"><tspan font-weight="700">316,015,874</tspan> trainable parameters · full fine-tuning, no LoRA</text>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Training</span><div class="fig-chips"><button type="button" class="fig-chip" data-step>Run a training step</button></div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { animate, dur, drawStroke, hideStroke, setupFigure, wait } from "../../lib/figure-motion";
+  import { rng } from "../../lib/eval-math";
+
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-frz]").forEach((root) => {
+    const pulse = root.querySelector<SVGPathElement>("[data-pulse]")!, grid = root.querySelector<SVGGElement>("[data-grid]")!;
+    const r = rng(9), cells: SVGRectElement[] = [];
+    // The new embedding table: random at step 0, settling into structure.
+    for (let i = 0; i < 4; i++) for (let j = 0; j < 7; j++) {
+      const c = document.createElementNS(NS, "rect");
+      Object.entries({ x: j * 6, y: i * 9, width: 5, height: 8, fill: "#8a6a1f" }).forEach(([k, v]) => c.setAttribute(k, String(v)));
+      grid.append(c); cells.push(c);
+    }
+    const noise = cells.map(() => r()), target = cells.map((_, k) => 0.25 + 0.7 * Math.abs(Math.sin((k % 7) * 0.9 + Math.floor(k / 7))));
+    let steps = 0;
+    const paint = () => cells.forEach((c, k) => { const a = Math.min(1, steps / 4); c.setAttribute("fill-opacity", String(noise[k] * (1 - a) + target[k] * a)); });
+    async function step() {
+      hideStroke(pulse);
+      await drawStroke(pulse, 1.1, "linear");
+      steps++; paint();
+      root.querySelector("[data-steps]")!.textContent = `steps: ${steps}`;
+      const s = root.querySelector<SVGTextElement>("[data-stop]")!;
+      s.textContent = "";
+      root.querySelectorAll<SVGGElement>('[data-block="enc"],[data-block="dec"]').forEach((b) => animate(b, { opacity: [1, 0.45, 1] }, { duration: dur(0.6) }));
+      await wait(0.2);
+      animate(pulse, { opacity: [1, 0] }, { duration: dur(0.5) });
+    }
+    root.querySelector("[data-step]")!.addEventListener("click", () => { pulse.style.opacity = "1"; step(); });
+    setupFigure(root, () => { steps = 0; paint(); hideStroke(pulse); pulse.style.opacity = "1"; root.querySelector("[data-steps]")!.textContent = ""; }, async (alive) => {
+      for (let i = 0; i < 3; i++) { if (!alive()) return; pulse.style.opacity = "1"; await step(); await wait(0.3); }
+    });
+  });
+</script>

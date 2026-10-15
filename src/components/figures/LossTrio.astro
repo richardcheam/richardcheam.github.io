@@ -1,0 +1,91 @@
+---
+// Foundations, loss post: squared error, absolute error and cross-entropy for
+// one example, with value and slope. Defaults y = 3, ŷ = 5, q = 0.5: SE 4
+// (slope 4), AE 2 (slope 1), CE 0.693 (slope −2). Outlier mode: one constant
+// guess c for 2, 3, 4, 15; MSE is smallest at the mean 6 (27.5), MAE at the
+// median, any c from 3 to 4 (3.5 at c = 3.5).
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-losstrio>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 300" role="img" aria-labelledby="lt-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="lt-title">Squared error, absolute error and cross-entropy, each with its value and slope</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Show</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-mode="one" aria-pressed="true">One example</button>
+      <button type="button" class="fig-chip" data-mode="out" aria-pressed="false">Outlier data</button>
+    </div></div>
+    <label data-one><span class="fig-panel__name">Target y <strong data-v="y"></strong></span><input class="scrub" data-k="y" type="range" min="0" max="6" step="0.5" value="3" /></label>
+    <label data-one><span class="fig-panel__name">Prediction ŷ <strong data-v="yh"></strong></span><input class="scrub" data-k="yh" type="range" min="0" max="6" step="0.1" value="5" /></label>
+    <label data-one><span class="fig-panel__name">Probability of the true class q <strong data-v="q"></strong></span><input class="scrub" data-k="q" type="range" min="0.01" max="1" step="0.01" value="0.5" /></label>
+    <label data-out hidden><span class="fig-panel__name">Constant guess c <strong data-v="c"></strong></span><input class="scrub" data-k="c" type="range" min="0" max="16" step="0.5" value="6" /></label>
+  </div>
+</div>
+
+<script>
+  import { fmt, par } from "../../lib/tiny-net";
+  import { INK, MUTED, JADE, NEG, GOLD } from "../../lib/net-diagram";
+  import { frame, txt } from "../../lib/plot";
+  const DATA = [2, 3, 4, 15];
+  document.querySelectorAll<HTMLElement>("[data-losstrio]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const p: Record<string, number> = { y: 3, yh: 5, q: 0.5, c: 6 };
+    let mode: "one" | "out" = "one";
+    // One panel: a curve, a dot at the current point, and its tangent.
+    function panel(l: number, title: string, f: (x: number) => number, df: (x: number) => number, x: number, x0: number, x1: number, y1: number, col: string, valTxt: string, slopeTxt: string, xLabel: string, xs: number[]) {
+      const b = { l, t: 46, w: 200, h: 170, x0, x1, y0: 0, y1 }, F = frame(b);
+      let s = txt(l, 22, title, `font-size="12.5" font-weight="700" fill="${INK}"`);
+      s += F.grid(xs, [0, y1 / 2, y1].map((v) => Math.round(v * 10) / 10));
+      s += F.curve(f, `stroke="${col}" stroke-width="2.5"`, 200, x0 + 1e-6, x1);
+      const fx = f(x), d = df(x), h = (x1 - x0) * 0.12;
+      if (Number.isFinite(d)) s += `<line x1="${F.X(x - h)}" y1="${F.clampY(fx - d * h)}" x2="${F.X(x + h)}" y2="${F.clampY(fx + d * h)}" stroke="${GOLD}" stroke-width="2.5"/>`;
+      s += `<circle cx="${F.X(x)}" cy="${F.clampY(fx)}" r="6" fill="${col}" stroke="#fff" stroke-width="2"/>`;
+      s += txt(l + b.w / 2, 252, xLabel, `font-size="11" text-anchor="middle" fill="${MUTED}"`);
+      s += txt(l, 274, valTxt, `font-size="12.5" font-weight="700" fill="${INK}"`);
+      s += txt(l, 292, slopeTxt, `font-size="12" font-weight="700" fill="${GOLD}"`);
+      return s;
+    }
+    function drawOne() {
+      const e = p.yh - p.y, ae = Math.abs(e), sg = e > 0 ? 1 : e < 0 ? -1 : 0;
+      let s = panel(50, "Squared error (ŷ − y)²", (x) => (x - p.y) ** 2, (x) => 2 * (x - p.y), p.yh, 0, 6, 36, JADE, `= ${par(e)}² = ${fmt(e * e)}`, `slope 2 × ${par(e)} = ${fmt(2 * e)}`, "prediction ŷ", [0, 2, 4, 6]);
+      s += panel(300, "Absolute error |ŷ − y|", (x) => Math.abs(x - p.y), (x) => Math.sign(x - p.y), p.yh, 0, 6, 6, "#3E6E9E", `= |${fmt(e)}| = ${fmt(ae)}`, e === 0 ? "slope undefined at 0 (0 is used)" : `slope ${sg > 0 ? "+1" : "−1"}, whatever the size`, "prediction ŷ", [0, 2, 4, 6]);
+      s += panel(550, "Cross-entropy −ln q", (x) => -Math.log(x), (x) => -1 / x, p.q, 0, 1, 5, NEG, `= −ln ${fmt(p.q, 2)} = ${fmt(-Math.log(p.q), 3)}`, `slope −1 / q = ${fmt(-1 / p.q, 3)}`, "probability q of the right answer", [0, 0.5, 1]);
+      return s;
+    }
+    function drawOut() {
+      const mse = (c: number) => DATA.reduce((t, d) => t + (c - d) ** 2, 0) / 4, mae = (c: number) => DATA.reduce((t, d) => t + Math.abs(c - d), 0) / 4;
+      let s = txt(50, 22, "Targets 2, 3, 4, 15 and one guess c for all of them", `font-size="12.5" font-weight="700" fill="${INK}"`);
+      // Number line with the data and the guess.
+      const L = frame({ l: 60, t: 40, w: 640, h: 20, x0: 0, x1: 16, y0: 0, y1: 1 });
+      s += `<line x1="${L.X(0)}" x2="${L.X(16)}" y1="60" y2="60" stroke="#cfd5d4"/>`;
+      for (let v = 0; v <= 16; v += 2) s += txt(L.X(v), 76, fmt(v), `font-size="10.5" text-anchor="middle" fill="${MUTED}"`);
+      DATA.forEach((d) => (s += `<circle cx="${L.X(d)}" cy="60" r="6" fill="${d === 15 ? NEG : INK}"/>`));
+      s += `<line x1="${L.X(p.c)}" x2="${L.X(p.c)}" y1="44" y2="76" stroke="${GOLD}" stroke-width="3"/>` + txt(L.X(p.c), 40, `c = ${fmt(p.c)}`, `font-size="11.5" font-weight="700" text-anchor="middle" fill="${GOLD}"`);
+      // MSE and MAE as functions of c.
+      const A = frame({ l: 60, t: 110, w: 290, h: 130, x0: 0, x1: 16, y0: 0, y1: 80 }), B = frame({ l: 430, t: 110, w: 290, h: 130, x0: 0, x1: 16, y0: 0, y1: 8 });
+      s += txt(60, 102, "Mean squared error", `font-size="12" font-weight="700" fill="${JADE}"`) + txt(430, 102, "Mean absolute error", `font-size="12" font-weight="700" fill="#3E6E9E"`);
+      s += A.grid([0, 4, 8, 12, 16], [0, 40, 80], 0) + B.grid([0, 4, 8, 12, 16], [0, 4, 8], 0);
+      s += A.curve(mse, `stroke="${JADE}" stroke-width="2.5"`) + B.curve(mae, `stroke="#3E6E9E" stroke-width="2.5"`);
+      s += `<line x1="${A.X(6)}" x2="${A.X(6)}" y1="110" y2="240" stroke="${JADE}" stroke-dasharray="3 3"/>` + txt(A.X(6) + 4, 236, "mean 6", `font-size="10.5" fill="${JADE}"`);
+      s += `<rect x="${B.X(3)}" y="110" width="${B.X(4) - B.X(3)}" height="130" fill="#3E6E9E" fill-opacity="0.08"/>` + txt(B.X(4) + 4, 236, "median: any c from 3 to 4", `font-size="10.5" fill="#3E6E9E"`);
+      s += `<circle cx="${A.X(p.c)}" cy="${A.clampY(mse(p.c))}" r="6" fill="${GOLD}" stroke="#fff" stroke-width="2"/><circle cx="${B.X(p.c)}" cy="${B.clampY(mae(p.c))}" r="6" fill="${GOLD}" stroke="#fff" stroke-width="2"/>`;
+      const sq = DATA.map((d) => fmt((p.c - d) ** 2)), ab = DATA.map((d) => fmt(Math.abs(p.c - d)));
+      s += txt(60, 274, `MSE = (${sq.join(" + ")}) / 4 = ${fmt(mse(p.c))}`, `font-size="12" font-weight="700" fill="${INK}"`);
+      s += txt(430, 274, `MAE = (${ab.join(" + ")}) / 4 = ${fmt(mae(p.c))}`, `font-size="12" font-weight="700" fill="${INK}"`);
+      s += txt(60, 293, "The outlier 15 drags the squared-error guess towards it; the absolute-error guess barely moves.", `font-size="11" fill="${MUTED}"`);
+      return s;
+    }
+    function draw() {
+      $("[data-draw]").innerHTML = mode === "one" ? drawOne() : drawOut();
+      root.querySelectorAll<HTMLElement>("[data-v]").forEach((el) => (el.textContent = fmt(p[el.dataset.v!], 2)));
+      root.querySelectorAll<HTMLElement>("[data-one]").forEach((el) => (el.hidden = mode !== "one"));
+      root.querySelectorAll<HTMLElement>("[data-out]").forEach((el) => (el.hidden = mode !== "out"));
+    }
+    root.querySelectorAll<HTMLInputElement>("[data-k]").forEach((inp) => inp.addEventListener("input", () => { p[inp.dataset.k!] = +inp.value; draw(); }));
+    root.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach((b) => b.addEventListener("click", () => {
+      mode = b.dataset.mode as "one" | "out"; root.querySelectorAll("[data-mode]").forEach((o) => o.setAttribute("aria-pressed", String(o === b))); draw();
+    }));
+    draw();
+  });
+</script>

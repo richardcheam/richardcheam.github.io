@@ -1,0 +1,469 @@
+---
+title: "The Transformer: attention, residuals and positions"
+date: 2026-10-15
+category: "deep-learning"
+read_time: "34 min"
+series_order: 11
+series: foundations
+featured: false
+excerpt: "Attention on its own is one clever layer. The Transformer stacks it with a small feed-forward network, wraps each in a residual connection and a normalisation, and adds a sense of position. This post builds every part from scratch and runs a whole block on three tokens by hand."
+question: "How do attention, residual connections, normalisation and positions fit together into the model behind almost every modern language and speech system?"
+my_work: "A concept note. I worked every example by hand, checked every number with a short NumPy script, and specified the figures from the standard formulas."
+result: "A Transformer block is attention plus a feed-forward network, each added back onto a residual highway. On a ten-layer toy stack the gradient reaching the input is 0.0007 without residual connections and 2.58 with them. The relative position trick of RoPE makes a query-key score depend only on the distance between tokens. A 12-layer, 768-wide model with a 50,257-token vocabulary has 124,439,808 parameters, and the arithmetic fits on one page."
+evidence_limit: "This explains textbook methods on toy vectors. No experiments; the toy weights are chosen by hand for easy arithmetic, not learned."
+lesson: "The Transformer is not one new idea but four old ones arranged carefully: attention to mix tokens, a feed-forward network to think about each token, residual additions to keep gradients alive, and positions so order is not lost."
+---
+
+import TransformerBlockStepper from "../../components/figures/TransformerBlockStepper.astro";
+import ResidualGradientDepth from "../../components/figures/ResidualGradientDepth.astro";
+import FeedForwardStepper from "../../components/figures/FeedForwardStepper.astro";
+import SinusoidalHeatmap from "../../components/figures/SinusoidalHeatmap.astro";
+import RopeRotation from "../../components/figures/RopeRotation.astro";
+import ToyTransformerPass from "../../components/figures/ToyTransformerPass.astro";
+import ParameterCounter from "../../components/figures/ParameterCounter.astro";
+
+In [the attention post](/blog/foundations-attention/) we built a layer that lets every token look at every other token and take a weighted blend of what it finds. At the end of that post we hit a problem: attention has **no sense of order**. Shuffle the tokens and each one gets exactly the same blend.
+
+In 2017 Vaswani and colleagues published "Attention Is All You Need" and showed that a model built mostly from attention, with no recurrence at all, could translate better and train faster than the recurrent models of the day. They called it the **Transformer**. Almost every model in Richard's speech posts is one: [Pocket TTS](/blog/pocket-tts-calm-explained/#the-causal-backbone) has a 6-layer Transformer backbone, [Mimi](/blog/mimi-codec-explained/#the-encoder-transformer) hides a small one inside its encoder, [Whisper](/paper-reviews/whisper/#the-encoder) is a pair of them, and [Moshi](/paper-reviews/moshi/#helium-the-text-brain) sits on a 7-billion-parameter one called Helium.
+
+This post puts the pieces together. We already have most of them:
+
+- **Attention**, with queries, keys, values, masks and heads, from [post 10](/blog/foundations-attention/).
+- **Layer normalisation and RMSNorm**, and the choice between pre-norm and post-norm, from [post 5](/blog/foundations-normalisation/).
+- **Embeddings**, the table that turns a token number into a vector, from [post 6](/blog/foundations-embeddings/).
+- **Vanishing gradients**, the reason deep stacks are hard to train, from [post 8](/blog/foundations-recurrent-networks/).
+
+The new pieces are the **residual connection**, the **feed-forward network**, and **positions**. Then we run a whole block by hand and count the parameters of a real model.
+
+
+## The block diagram
+
+In one sentence: turn tokens into vectors, add where each one sits, pass them through a stack of identical blocks that each mix and then think, and turn the final vectors into scores for the next token.
+
+Here is the whole machine, top to bottom:
+
+1. **Embedding.** Each token number picks a row of a learned table: one vector of $d$ numbers per token ($d$ is the **model width**).
+2. **Positions.** Add a position vector to each token vector, so "dog bites man" and "man bites dog" look different. (Some models, like those using RoPE, inject position inside attention instead; [see below](#rotary-position-embeddings).)
+3. **N blocks**, all the same shape, each with two sub-layers:
+   - an **attention sub-layer**, where tokens exchange information;
+   - a **feed-forward sub-layer**, where each token is processed on its own.
+   
+   Each sub-layer is wrapped in a **residual connection** (its output is added to its input) and a **normalisation**.
+4. **Output head.** A final normalisation, then one linear layer that turns each $d$-number vector into one score per word in the vocabulary. Softmax turns the scores into probabilities ([post 2](/blog/foundations-loss-gradient-descent/)).
+
+Everyday picture: a meeting with $N$ rounds. In each round everyone first **listens** to everyone else (attention), then **thinks quietly** on their own notes (feed-forward). Nobody throws their notes away: each round only **adds** comments to the margin (the residual connection). The normaliser makes sure nobody is shouting.
+
+One fact to hold onto: every block takes in $T$ vectors of width $d$ and gives back $T$ vectors of width $d$ ($T$ is the number of tokens). Same shape in, same shape out. That is why blocks can be stacked like plates.
+
+We use the **pre-norm** arrangement throughout, which most modern models use ([post 5](/blog/foundations-normalisation/#pre-norm-and-post-norm) explains why). For one block, with input $x$:
+
+$$
+h = x + \text{Attention}(\text{Norm}(x))
+$$
+
+$$
+y = h + \text{FFN}(\text{Norm}(h))
+$$
+
+- $x$ is the list of token vectors coming in.
+- $\text{Norm}$ is layer norm or RMSNorm, applied to each token's vector separately.
+- $\text{Attention}$ is multi-head self-attention ([post 10](/blog/foundations-attention/#multi-head-attention)).
+- $h$ is the halfway result, after the first residual addition.
+- $\text{FFN}$ is the feed-forward network, [explained below](#the-feed-forward-network).
+- $y$ is what leaves the block and enters the next one.
+
+The original 2017 model used **post-norm** instead: $\text{Norm}(x + \text{Attention}(x))$. Same parts, different order.
+
+<figure class="blog-figure blog-figure--wide">
+  <TransformerBlockStepper alt="A vertical block diagram: embedding plus position at the bottom, then a block with a norm, attention, an add node, a norm, a feed-forward network and a second add node, then a final norm and output head. A marker moves up one operation per step, and a side panel names the operation and its input and output shapes." />
+  <figcaption><strong>Figure 1. One token's trip through a block.</strong> Press Step to follow one vector from the embedding table to the output scores. The shape stays 3 tokens by width d inside every block; only the head changes it.</figcaption>
+</figure>
+
+
+## Residual connections
+
+In one sentence: instead of asking a layer to produce the whole new vector, ask it for a **correction**, and add that correction to what you already had.
+
+$$
+y = x + F(x)
+$$
+
+- $x$ is the input to the layer.
+- $F$ is whatever the layer computes (attention, a feed-forward network, a convolution).
+- $y$ is the output: the input, plus the change $F$ suggests.
+
+The path that carries $x$ straight to the addition is called the **skip connection** or **shortcut**. Picture editing a document with tracked changes: each editor adds notes, but the original text is always still there. A bad editor can at worst add nothing.
+
+### Where it came from
+
+He, Zhang, Ren and Sun introduced residual networks (**ResNets**) for image recognition in 2016 (CVPR; arXiv 1512.03385). They had noticed something strange: a plain 56-layer convolutional network did **worse** than a 20-layer one, even on its own training data. More layers should never hurt on training data, because the extra layers could just learn to pass things through unchanged. But learning "do nothing" turned out to be hard for a stack of weights and activations. With a shortcut, "do nothing" is easy: $F(x) = 0$. Their residual networks trained well at **152** layers and won the ImageNet competition of 2015. Vaswani and colleagues borrowed the idea for the Transformer.
+
+### Why it helps the gradient
+
+Recall from [post 1](/blog/foundations-neurons-backprop/) that backpropagation multiplies one local slope per layer. Take the derivative of $y = x + F(x)$:
+
+$$
+\frac{dy}{dx} = 1 + F'(x)
+$$
+
+- $\frac{dy}{dx}$ is how much $y$ moves when $x$ moves a little.
+- The $1$ comes from the shortcut: $x$ passes straight through.
+- $F'(x)$ is the slope of the layer itself.
+
+Without the shortcut, each layer contributes $F'(x)$ to the chain. If $F'$ is around $0.5$, ten layers give $0.5^{10}$: that is the [vanishing gradient](/blog/foundations-recurrent-networks/#vanishing-and-exploding-gradients) we met in recurrent networks. With the shortcut, each layer contributes $1 + F'(x)$. Even if $F'$ is tiny, the factor is close to 1, not close to 0. The gradient always has a clean road back.
+
+### Worked by hand on a scalar stack
+
+Take a stack of one-number layers. Each layer computes $F(x) = \tanh(0.5\,x)$, whose slope is $F'(x) = 0.5\,(1 - \tanh^2(0.5\,x))$. Start at $x_0 = 1$.
+
+**Plain stack** ($x_{k+1} = F(x_k)$). Each link multiplies the gradient by $F'(x_k)$:
+
+| layer | input $x_k$ | slope $F'(x_k)$ | running gradient |
+|---|---|---|---|
+| 1 | 1.0000 | 0.3932 | 0.3932 |
+| 2 | 0.4621 | 0.4742 | 0.1865 |
+| 3 | 0.2270 | 0.4936 | 0.0920 |
+| 4 | 0.1130 | 0.4984 | 0.0459 |
+| 5 | 0.0565 | 0.4996 | **0.0229** |
+
+For layer 1: $\tanh(0.5) = 0.4621$, so the slope is $0.5 \times (1 - 0.4621^2) = 0.5 \times 0.7864 = 0.3932$. After five layers only about **2 percent** of the gradient reaches the input. After 10 layers it is **0.00072**; after 20, **0.0000007**.
+
+**Residual stack** ($x_{k+1} = x_k + F(x_k)$). Each link multiplies by $1 + F'(x_k)$:
+
+| layer | input $x_k$ | slope $F'(x_k)$ | factor $1 + F'$ | running gradient |
+|---|---|---|---|---|
+| 1 | 1.0000 | 0.3932 | 1.3932 | 1.3932 |
+| 2 | 1.4621 | 0.3055 | 1.3055 | 1.8188 |
+| 3 | 2.0858 | 0.1966 | 1.1966 | 2.1763 |
+| 4 | 2.8649 | 0.1020 | 1.1020 | 2.3984 |
+| 5 | 3.7570 | 0.0446 | 1.0446 | **2.5053** |
+
+Layer 1: $x_1 = 1 + 0.4621 = 1.4621$, and the factor is $1 + 0.3932 = 1.3932$. The gradient never shrinks. After 10 layers it is **2.576**, after 20 layers **2.577**: once $x$ grows, $\tanh$ flattens, $F'$ goes to 0 and each factor settles at exactly 1.
+
+What would change: if the layers were plain linear with slope $0.5$ ($F(x) = 0.5x$), the residual factor would be $1.5$ every time, and ten layers would give $1.5^{10} = 57.7$: an **exploding** gradient. Real Transformers avoid that by keeping branches small at the start (normalisation before each branch, small initial weights, and in Mimi a learned scale [starting at 0.01](/blog/mimi-codec-explained/#the-encoder-transformer)). The shortcut gives the gradient a floor of about 1; the normalisation keeps it from growing.
+
+<figure class="blog-figure blog-figure--wide">
+  <ResidualGradientDepth alt="Two rows of boxes, one per layer. The top row is a plain stack and the bottom row has a skip arrow around each box. Under each box the local factor and the running gradient are printed, and a bar on the right shows the final gradient on a log scale. A depth slider adds or removes layers." />
+  <figcaption><strong>Figure 2. The gradient with and without shortcuts.</strong> Each step walks the gradient back one layer and multiplies by F′ (plain) or 1 + F′ (residual). At depth 5 the defaults end at 0.0229 and 2.5053; at depth 10, 0.00072 and 2.576.</figcaption>
+</figure>
+
+
+## The feed-forward network
+
+In one sentence: after the tokens have talked to each other, each token goes through the same small two-layer network on its own, to process what it just heard.
+
+$$
+\text{FFN}(x) = \phi(x W_1 + b_1)\, W_2 + b_2
+$$
+
+- $x$ is one token's vector, $d$ numbers long.
+- $W_1$ is a $d \times d_{\text{ff}}$ matrix that **widens** the vector to $d_{\text{ff}}$ numbers, and $b_1$ is a bias of $d_{\text{ff}}$ numbers.
+- $\phi$ is the activation function, applied number by number.
+- $W_2$ is a $d_{\text{ff}} \times d$ matrix that **narrows** it back to $d$, and $b_2$ a bias of $d$ numbers.
+- $d_{\text{ff}}$ is the hidden width, usually $4d$. In the 2017 model $d = 512$ and $d_{\text{ff}} = 2{,}048$; [Pocket TTS](/blog/pocket-tts-calm-explained/#the-causal-backbone) uses $4 \times 1024$.
+
+This is exactly the two-layer network from [post 1](/blog/foundations-neurons-backprop/), applied to every token separately with the **same** weights. Attention mixes information **between** tokens; the feed-forward network works **within** each token. Everyday picture: attention is the group discussion, the feed-forward network is each person going home and thinking it over.
+
+Why widen then narrow? The wide middle gives room for many feature detectors at once (each of the $d_{\text{ff}}$ hidden units can fire for a different pattern), and narrowing keeps the block's output the same shape as its input so it can be added back.
+
+### The activation: ReLU or GELU
+
+The 2017 Transformer used **ReLU** (rectified linear unit): $\text{ReLU}(z) = \max(0, z)$, keep positives, zero out negatives. BERT and GPT switched to **GELU**, the Gaussian error linear unit of Hendrycks and Gimpel (2016, arXiv 1606.08415):
+
+$$
+\text{GELU}(z) = z \cdot \Phi(z)
+$$
+
+- $\Phi(z)$ is the probability that a standard bell-curve random number is below $z$: near 0 for very negative $z$, $0.5$ at $z = 0$, near 1 for large $z$.
+
+So GELU multiplies each input by a soft "how positive is it" switch. It is a smoothed ReLU: $\text{GELU}(1) = 0.841$, $\text{GELU}(-1) = -0.159$, $\text{GELU}(2) = 1.955$. Big positives pass almost unchanged, big negatives go to 0, and near zero the curve bends smoothly instead of having a corner. (Helium, Moshi's backbone, uses a gated variant with SiLU, a close cousin; [see the Moshi review](/paper-reviews/moshi/#helium-the-text-brain).)
+
+### Worked on a tiny vector
+
+Take $d = 2$ and $d_{\text{ff}} = 4$ (that is $2d$ rather than $4d$, to keep the table small). Input $x = (1, -1)$.
+
+$$
+W_1 = \begin{pmatrix} 1 & 0 & 1 & -1 \\ 0 & 1 & 1 & 1 \end{pmatrix}, \quad
+b_1 = (0, 0, 0, 0.5), \quad
+W_2 = \begin{pmatrix} 1 & 0 \\ 0 & 1 \\ 0.5 & 0.5 \\ -1 & 1 \end{pmatrix}, \quad b_2 = (0, 0)
+$$
+
+**Widen.** Each hidden unit is a column of $W_1$ dotted with $x$, plus its bias:
+
+- unit 1: $1 \times 1 + 0 \times (-1) + 0 = 1$
+- unit 2: $0 \times 1 + 1 \times (-1) + 0 = -1$
+- unit 3: $1 \times 1 + 1 \times (-1) + 0 = 0$
+- unit 4: $(-1) \times 1 + 1 \times (-1) + 0.5 = -1.5$
+
+**Activate (ReLU).** $(1, -1, 0, -1.5)$ becomes $(1, 0, 0, 0)$. Only unit 1 fires.
+
+**Narrow.** Output $= 1 \times (1, 0) + 0 + 0 + 0 =$ **(1, 0)**.
+
+With GELU instead, the hidden values are $(0.841, -0.159, 0, -0.100)$ and the output is **(0.942, −0.259)**: the negative units leak a little.
+
+What would change: raise $b_1$'s last entry from $0.5$ to $2.5$ and unit 4 becomes $0.5$, which ReLU passes, adding $0.5 \times (-1, 1)$ to give $(0.5, 0.5)$.
+
+### Parameter count
+
+$W_1$ has $d \times 4d = 4d^2$ numbers, $W_2$ another $4d^2$, plus biases $4d + d$:
+
+$$
+\text{FFN parameters} = 8d^2 + 5d
+$$
+
+For $d = 768$: $8 \times 589{,}824 + 3{,}840 =$ **4,722,432**. Compare attention's $4d^2 + 4d =$ **2,362,368** ([post 10](/blog/foundations-attention/#parameter-count)). The feed-forward network holds about **two thirds** of every block's weights.
+
+<figure class="blog-figure blog-figure--wide">
+  <FeedForwardStepper alt="A narrow column of two numbers fans out through lines to a column of four hidden units, through an activation curve, and back into a column of two outputs. Each Step highlights one hidden unit's weights and prints its sum, then the activation, then each output's sum." />
+  <figcaption><strong>Figure 3. Widen, activate, narrow.</strong> With x = (1, −1) the hidden sums are 1, −1, 0, −1.5; ReLU keeps only the first, and the output is (1, 0). Switch to GELU to get (0.942, −0.259).</figcaption>
+</figure>
+
+
+## Giving attention a sense of order
+
+Attention compares every token with every other token, but nothing in the comparison says **where** a token sits. Two fixes are common: **add** a position vector to each token before the first block, or **rotate** queries and keys inside attention.
+
+### Sinusoidal positions
+
+Vaswani and colleagues added a fixed pattern of waves. For position $p$ and dimension pair $i$:
+
+$$
+PE(p, 2i) = \sin\!\left(\frac{p}{10000^{2i/d}}\right), \qquad
+PE(p, 2i+1) = \cos\!\left(\frac{p}{10000^{2i/d}}\right)
+$$
+
+- $p$ is the position: 0 for the first token, 1 for the next, and so on.
+- $d$ is the model width; dimensions come in pairs, $2i$ and $2i+1$.
+- $10000^{2i/d}$ is a stretch factor: the first pair has stretch 1 (a fast wave), later pairs are stretched more and more (slow waves).
+
+Everyday picture: a clock. The second hand moves fast and tells apart moments close together; the hour hand moves slowly and tells apart moments far apart. Reading all hands together gives a unique time. Each dimension pair is one hand.
+
+**Worked for $d = 4$.** There are two pairs. Pair 0 has stretch $10000^{0} = 1$. Pair 1 has stretch $10000^{2/4} = 10000^{0.5} = 100$. So the four numbers at position $p$ are $\sin p$, $\cos p$, $\sin(p/100)$, $\cos(p/100)$ (angles in radians):
+
+| position | $\sin p$ | $\cos p$ | $\sin(p/100)$ | $\cos(p/100)$ |
+|---|---|---|---|---|
+| 0 | 0 | 1 | 0 | 1 |
+| 1 | 0.8415 | 0.5403 | 0.0100 | 1.0000 |
+| 2 | 0.9093 | −0.4161 | 0.0200 | 0.9998 |
+| 3 | 0.1411 | −0.9900 | 0.0300 | 0.9996 |
+
+The first pair swings a lot from one position to the next; the second pair barely moves over four positions but would separate positions 0 and 300. These four numbers are added to the token's embedding. Whisper's encoder [uses these fixed waves](/paper-reviews/whisper/#the-encoder).
+
+Why sine and cosine together? A shift by $k$ positions turns each pair by a fixed angle, which is a rotation. That makes "three positions later" the same simple change everywhere, a hint of what RoPE does directly.
+
+### Learned positions
+
+The simplest alternative: a second embedding table with one learned row per position, up to a maximum length. BERT and GPT-2 do this, and so does Whisper's decoder ([Whisper review](/paper-reviews/whisper/#the-decoder)). Vaswani and colleagues tried both and found nearly identical results. The cost: a learned table knows nothing beyond its last row, so a model trained with 1,024 positions has no vector for position 1,025.
+
+<figure class="blog-figure blog-figure--wide">
+  <SinusoidalHeatmap alt="A heatmap with positions 0 to 63 down the side and dimensions 0 to 15 across, coloured from blue for minus one to orange for plus one. Left columns stripe quickly, right columns change slowly. A position slider highlights one row and prints its values; a width chip switches between d = 4, 16 and 64." />
+  <figcaption><strong>Figure 4. Waves at many speeds.</strong> Each column is one dimension; fast waves on the left, slow ones on the right. In the d = 4 mode, position 1 reads 0.8415, 0.5403, 0.0100, 1.0000.</figcaption>
+</figure>
+
+### Rotary position embeddings
+
+Su and colleagues introduced **rotary position embeddings** (RoPE) in RoFormer (arXiv 2104.09864, 2021; journal version in Neurocomputing, 2024). Instead of adding anything to the tokens, RoPE **rotates** each query and key by an angle proportional to its position, just before the dot product.
+
+In one sentence: turn the query by its position times a fixed angle, turn the key by its position times the same angle, and the dot product only feels the difference.
+
+For one pair of numbers $(a, b)$ at position $m$, rotation by angle $m\theta$ is:
+
+$$
+R(m\theta)\begin{pmatrix} a \\ b \end{pmatrix} = \begin{pmatrix} a\cos m\theta - b\sin m\theta \\ a\sin m\theta + b\cos m\theta \end{pmatrix}
+$$
+
+- $m$ is the token's position.
+- $\theta$ is the angle per position for this pair (like the sinusoidal stretch: fast for the first pair, slow for later ones).
+- The output is the same arrow, same length, turned anticlockwise by $m\theta$.
+
+Why the score only depends on the gap: rotating both arrows by the same extra amount does not change the angle between them, and the dot product depends only on the two lengths and that angle. A query at position $m$ and a key at position $n$ end up separated by their original angle plus $(m - n)\theta$. Picture two people on a merry-go-round: wherever it has turned, the distance between them is the same.
+
+**Worked in 2-D.** Take $\theta = 30°$ (a toy angle chosen for easy cosines), query $q = (1, 0)$, key $k = (2, 1)$. Unrotated, $q \cdot k = 2$.
+
+- Query at position 1, key at 0. Rotate $q$ by $30°$: $(\cos 30°, \sin 30°) = (0.866, 0.5)$. $k$ is unchanged. Dot: $0.866 \times 2 + 0.5 \times 1 =$ **2.232**.
+- Query at position 3, key at 2. Rotate $q$ by $90°$: $(0, 1)$. Rotate $k$ by $60°$: $(2 \times 0.5 - 1 \times 0.866,\ 2 \times 0.866 + 1 \times 0.5) = (0.134, 2.232)$. Dot: $0 \times 0.134 + 1 \times 2.232 =$ **2.232**.
+- Query at 5, key at 4: $q \to (-0.866, 0.5)$, $k \to (-1.866, 1.232)$. Dot: $1.616 + 0.616 =$ **2.232**.
+
+Same gap of 1, same score, wherever the pair sits. A gap of 2 (positions 2 and 0, or 4 and 2) gives **1.866** every time; a gap of −1 (query at 0, key at 1) gives **1.232**. The score depends on the order too, not just the distance.
+
+Real models split each query and key into $d/2$ pairs, each with its own angle $\theta_i = 10000^{-2i/d}$, the same ladder of speeds as the sinusoidal clock. RoPE adds no parameters. Helium (Moshi's backbone) and Mimi's encoder Transformer use it ([Moshi review](/paper-reviews/moshi/#helium-the-text-brain), [Mimi post](/blog/mimi-codec-explained/#the-encoder-transformer)).
+
+<figure class="blog-figure blog-figure--wide">
+  <RopeRotation alt="A circle with a query arrow and a key arrow. Two draggable markers on a number line set the query and key positions; the arrows rotate by position times the angle. A readout prints the rotated coordinates and their dot product, and a strip lists the dot product for every pair with the same gap." />
+  <figcaption><strong>Figure 5. Rotation keeps only the gap.</strong> Drag both positions together and the arrows spin, but the dot product stays 2.232 for a gap of 1 (θ = 30°, q = (1, 0), k = (2, 1)).</figcaption>
+</figure>
+
+
+## A full forward pass by hand
+
+Now one whole pre-norm block on three tokens, "the cat sat", with $d = 2$. Toy simplifications, to keep every number on the page: one attention head; the query, key and value matrices and the output projection are all the identity (each vector is its own query, key and value); no mask (every token sees all three, as in an encoder); RMSNorm without its learned gain and with $\epsilon = 0$; a feed-forward width of 4; no biases. Numbers are rounded to three or four places.
+
+**Step one: embedding plus position.** Token vectors $(1, 0)$, $(0, 1)$, $(1, 1)$; learned position vectors $(0, 0)$, $(0.5, 0)$, $(0, 0.5)$. Add:
+
+$$
+x = \begin{pmatrix} 1 & 0 \\ 0.5 & 1 \\ 1 & 1.5 \end{pmatrix}
+$$
+
+**Step two: normalise (RMSNorm).** For each row, divide by the root mean square $\sqrt{(a^2 + b^2)/2}$ ([post 5](/blog/foundations-normalisation/#rmsnorm)):
+
+- the: $\sqrt{(1 + 0)/2} = 0.7071$, so $(1.4142, 0)$
+- cat: $\sqrt{(0.25 + 1)/2} = 0.7906$, so $(0.6325, 1.2649)$
+- sat: $\sqrt{(1 + 2.25)/2} = 1.2748$, so $(0.7845, 1.1767)$
+
+**Step three: attention.** Scores are dot products divided by $\sqrt{2} = 1.4142$. Row "the": $1.4142 \times 1.4142 / 1.4142 = 1.4142$; with cat $1.4142 \times 0.6325 / 1.4142 = 0.6325$; with sat $0.7845$. All scores:
+
+$$
+\begin{pmatrix} 1.4142 & 0.6325 & 0.7845 \\ 0.6325 & 1.4142 & 1.4033 \\ 0.7845 & 1.4033 & 1.4142 \end{pmatrix}
+$$
+
+Softmax each row ([post 10](/blog/foundations-attention/#worked-fully-by-hand-on-three-tokens)). Row "the": $e^{1.4142} = 4.113$, $e^{0.6325} = 1.882$, $e^{0.7845} = 2.191$, total $8.186$, weights **0.502, 0.230, 0.268**. Rows "cat" and "sat": **0.187, 0.409, 0.404** and **0.211, 0.392, 0.397**.
+
+Blend the normalised vectors. For "the": $0.502 \times (1.4142, 0) + 0.230 \times (0.6325, 1.2649) + 0.268 \times (0.7845, 1.1767) = (1.066, 0.606)$. All three:
+
+$$
+\text{Attn} = \begin{pmatrix} 1.066 & 0.606 \\ 0.840 & 0.993 \\ 0.858 & 0.963 \end{pmatrix}
+$$
+
+**Step four: first residual add.** $h = x + \text{Attn}$. For "the": $(1 + 1.066, 0 + 0.606) = (2.066, 0.606)$.
+
+$$
+h = \begin{pmatrix} 2.066 & 0.606 \\ 1.340 & 1.993 \\ 1.858 & 2.463 \end{pmatrix}
+$$
+
+"the" started with nothing in its second number; it now holds $0.606$ borrowed from "cat" and "sat".
+
+**Step five: normalise again.** Root mean squares $1.522$, $1.698$, $2.181$, giving
+
+$$
+\text{Norm}(h) = \begin{pmatrix} 1.357 & 0.398 \\ 0.789 & 1.174 \\ 0.852 & 1.129 \end{pmatrix}
+$$
+
+**Step six: feed-forward network.** Weights
+
+$$
+W_1 = \begin{pmatrix} 1 & -1 & 0 & 1 \\ 0 & 1 & -1 & 1 \end{pmatrix}, \qquad
+W_2 = \begin{pmatrix} 0.5 & 0 \\ 0 & 0.5 \\ -0.5 & 0 \\ 0 & -0.5 \end{pmatrix}
+$$
+
+For "the", $(1.357, 0.398)$: hidden sums $1.357$, $-1.357 + 0.398 = -0.959$, $-0.398$, $1.357 + 0.398 = 1.755$. ReLU gives $(1.357, 0, 0, 1.755)$. Narrow: $(0.5 \times 1.357,\ -0.5 \times 1.755) = (0.679, -0.877)$. All three:
+
+$$
+\text{FFN} = \begin{pmatrix} 0.679 & -0.877 \\ 0.395 & -0.789 \\ 0.426 & -0.852 \end{pmatrix}
+$$
+
+**Step seven: second residual add.** $y = h + \text{FFN}$:
+
+$$
+y = \begin{pmatrix} 2.744 & -0.272 \\ 1.735 & 1.203 \\ 2.284 & 1.611 \end{pmatrix}
+$$
+
+Three tokens of width 2 in, three of width 2 out, ready for the next block. In a trained model the weights are learned, not chosen; the steps are exactly these.
+
+<figure class="blog-figure blog-figure--wide">
+  <ToyTransformerPass alt="Three columns of token vectors labelled the, cat and sat. Seven steps fill in embedding plus position, the first norm, the attention score grid and weights, the first add, the second norm, the feed-forward hidden units and the final add, each with the arithmetic for the highlighted token printed underneath." />
+  <figcaption><strong>Figure 6. A whole block, three tokens, every number.</strong> Step through the seven operations. With the defaults, "the" goes (1, 0) to (2.066, 0.606) after attention and to (2.744, −0.272) after the feed-forward network.</figcaption>
+</figure>
+
+
+## Three shapes of Transformer
+
+The same block comes in three arrangements.
+
+- **Encoder-only.** No mask: every token sees the whole input in both directions. Good for understanding a whole text at once. Example: **BERT** (Devlin and colleagues, 2019, arXiv 1810.04805), trained by hiding some words and guessing them from both sides.
+- **Decoder-only.** Causal mask ([post 10](/blog/foundations-attention/#causal-masking-no-peeking-at-the-future)): each token sees only itself and the past. Good for generating. Examples: **GPT** (Radford and colleagues, 2018) and **GPT-2** (2019); Moshi's Helium is [decoder-only](/paper-reviews/moshi/#helium-the-text-brain); Pocket TTS's backbone is a [causal stack](/blog/pocket-tts-calm-explained/#the-causal-backbone) that predicts one audio frame at a time.
+- **Encoder-decoder.** An encoder reads the input fully; a decoder writes the output with a causal mask and adds a **cross-attention** sub-layer that looks at the encoder's output ([post 10](/blog/foundations-attention/#self-attention-and-cross-attention)). The original 2017 Transformer was this, for translation. **Whisper** (Radford and colleagues, 2023, arXiv 2212.04356) is one too: the encoder reads 30 seconds of log-mel spectrogram and the decoder [writes text tokens](/paper-reviews/whisper/#the-decoder).
+
+
+## Training and generating
+
+A decoder-only model is trained by **next-token prediction**: at every position, predict the token that comes next, scored with cross-entropy ([post 2](/blog/foundations-loss-gradient-descent/)). The input during training is the real text, not the model's own guesses; that is called **teacher forcing**. The full story of tokens and language models is in [post 15](/blog/foundations-language-models/).
+
+Why training is fast: with the causal mask, one forward pass over a 1,000-token sentence produces 1,000 predictions at once, each seeing only its own past. All positions are computed together as big matrix products, which graphics processors love. A recurrent network has to walk the 1,000 steps one after another.
+
+Why generating is slow: at generation time the next token does not exist until the model has produced it. So the model predicts token 1, appends it, predicts token 2, appends it, one at a time. The [KV cache](/blog/foundations-attention/#the-kv-cache-briefly) saves recomputing the past, but the loop is still sequential. Pocket TTS lives with exactly this loop, one 80-millisecond audio frame per step.
+
+
+## Counting the parameters of a real model
+
+Take **12 layers**, $d = 768$, 12 heads, a vocabulary of **50,257** tokens and **1,024** learned positions. That is GPT-2's smallest configuration, and pre-norm with layer norm.
+
+**Per block:**
+
+- Attention: four $d \times d$ matrices plus biases: $4 \times 768^2 + 4 \times 768 = 2{,}359{,}296 + 3{,}072 =$ **2,362,368**. (The number of heads only splits the width; it adds nothing.)
+- Feed-forward: $8 \times 768^2 + 5 \times 768 = 4{,}718{,}592 + 3{,}840 =$ **4,722,432**.
+- Two layer norms, each with a gain and a bias of 768: $4 \times 768 =$ **3,072**.
+- Total per block: **7,087,872**.
+
+**Twelve blocks:** $12 \times 7{,}087{,}872 =$ **85,054,464**.
+
+**Outside the blocks:**
+
+- Token embedding: $50{,}257 \times 768 =$ **38,597,376**.
+- Position embedding: $1{,}024 \times 768 =$ **786,432**.
+- Final layer norm: **1,536**.
+- Output head: **0** extra, because it reuses the token embedding table ("tied" weights, as in Whisper's decoder).
+
+**Grand total: 124,439,808**, which is the familiar "124M" of GPT-2 small. Notice that almost a third of it is the vocabulary table. Double $d$ and the block weights grow about four times, because they scale with $d^2$.
+
+The same count in PyTorch. `nn.TransformerEncoderLayer` builds one block (attention, feed-forward, two layer norms), and the rest is the embeddings and the final norm:
+
+```python
+import torch.nn as nn
+
+count = lambda m: sum(p.numel() for p in m.parameters())
+d, layers, vocab, context = 768, 12, 50257, 1024
+block = nn.TransformerEncoderLayer(d, nhead=12, dim_feedforward=4 * d,
+                                   norm_first=True)
+print("one block", count(block))
+# blocks + token table + position table + final layer norm
+total = layers * count(block) + vocab * d + context * d + 2 * d
+print("GPT-2 small", total)
+```
+
+It prints:
+
+```text
+one block 7087872
+GPT-2 small 124439808
+```
+
+GPT-2's own blocks use a causal mask and GELU, but neither has parameters, so the count is the same.
+
+<figure class="blog-figure blog-figure--wide">
+  <ParameterCounter alt="Sliders for layers, width, heads, vocabulary and context length, and a stacked bar split into token embedding, positions, attention, feed-forward and norms. Each segment prints its formula with the current numbers, and a total updates live." />
+  <figcaption><strong>Figure 7. Where the parameters live.</strong> At 12 layers, width 768, 12 heads, vocabulary 50,257 and 1,024 positions, the total is 124,439,808. Move the heads slider and nothing changes.</figcaption>
+</figure>
+
+
+## What to remember
+
+- A Transformer is embeddings plus positions, then $N$ identical blocks, then a head. Each block is attention (tokens talk) then a feed-forward network (each token thinks), and keeps the shape $T \times d$.
+- A residual connection computes $y = x + F(x)$. Its slope is $1 + F'$, so gradients get a road back that does not shrink: **2.58** versus **0.0007** in our ten-layer toy.
+- The feed-forward network widens to $4d$, applies ReLU or GELU, and narrows back. It holds about two thirds of each block's weights.
+- Attention has no sense of order. Sinusoidal or learned vectors add position; RoPE rotates queries and keys so scores depend only on the gap.
+- Encoder-only (BERT), decoder-only (GPT, Helium) and encoder-decoder (the 2017 translator, Whisper) are the same blocks with different masks and wiring.
+- Training sees every position at once; generation produces one token at a time.
+
+
+## Try it yourself
+
+- **Figure 2:** set depth to 10. The plain stack must show **0.00072**, the residual stack **2.576**. Switch to "linear, slope 0.5": plain **0.00098**, residual **57.67**.
+- **Figure 3:** set $x = (1, -1)$ with ReLU: output **(1, 0)**. Switch to GELU: **(0.942, −0.259)**. Raise the last bias to 2.5 under ReLU: **(0.5, 0.5)**.
+- **Figure 4:** with d = 4, set the position to 3: **0.1411, −0.9900, 0.0300, 0.9996**.
+- **Figure 5:** with θ = 30°, q = (1, 0), k = (2, 1), set positions (3, 2): **2.232**. Set (4, 2): **1.866**. Set (0, 1): **1.232**.
+- **Figure 6:** step to the end: "sat" must read **(2.284, 1.611)**.
+- **Figure 7:** set layers 24, width 1,024, vocabulary 50,257, positions 1,024: **354,823,168**.
+
+
+## Sources
+
+- Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A. N., Kaiser, Ł. and Polosukhin, I. (2017). Attention Is All You Need. NeurIPS. arXiv 1706.03762.
+- He, K., Zhang, X., Ren, S. and Sun, J. (2016). Deep Residual Learning for Image Recognition. CVPR. arXiv 1512.03385.
+- Su, J., Lu, Y., Pan, S., Murtadha, A., Wen, B. and Liu, Y. (2021; 2024 in Neurocomputing). RoFormer: Enhanced Transformer with Rotary Position Embedding. arXiv 2104.09864.
+- Hendrycks, D. and Gimpel, K. (2016). Gaussian Error Linear Units (GELUs). arXiv 1606.08415.
+- Devlin, J., Chang, M.-W., Lee, K. and Toutanova, K. (2019). BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding. NAACL. arXiv 1810.04805.
+- Radford, A., Narasimhan, K., Salimans, T. and Sutskever, I. (2018). Improving Language Understanding by Generative Pre-Training. OpenAI technical report.
+- Radford, A., Wu, J., Child, R., Luan, D., Amodei, D. and Sutskever, I. (2019). Language Models are Unsupervised Multitask Learners. OpenAI technical report.
+- Radford, A., Kim, J. W., Xu, T., Brockman, G., McLeavey, C. and Sutskever, I. (2023). Robust Speech Recognition via Large-Scale Weak Supervision. ICML. arXiv 2212.04356.
+- Xiong, R. and colleagues (2020). On Layer Normalization in the Transformer Architecture. ICML. arXiv 2002.04745 (pre-norm versus post-norm; see post 5).
+

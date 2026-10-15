@@ -1,0 +1,129 @@
+---
+// Why an ASR judge can hide a mispronunciation. Illustrative numbers: the
+// acoustic model slightly prefers what was said ("zat"), the language-model
+// prior overwhelmingly prefers the expected word ("sat"), and their product
+// decides the transcript. A CTC decoder with no LM keeps the acoustic choice.
+const { alt } = Astro.props;
+const words = ["the", "cat", "zat", "on", "the", "mat"];
+---
+<div class="blog-diagram ap" role="region" aria-label={alt} data-ap>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 330" role="img" aria-labelledby="ap-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="ap-title">Acoustic evidence times language-model prior gives the transcript</title>
+    <!-- what the TTS said -->
+    <text x="24" y="30" font-size="11" letter-spacing="1" fill="#5f5f66">THE TTS SAID</text>
+    {words.map((w, i) => (
+      <g transform={`translate(${24 + i * 54} 42)`}>
+        <rect width="48" height="28" rx="4" fill={w === "zat" ? "#a33b3b" : "#f6f6f8"} fill-opacity={w === "zat" ? 0.12 : 1} stroke={w === "zat" ? "#a33b3b" : "#ececf1"} />
+        <text x="24" y="19" font-size="12.5" text-anchor="middle" fill="#2b2b30">{w}</text>
+      </g>
+    ))}
+    <text x="24" y="90" font-size="10.5" fill="#a33b3b">a native listener hears “zat”</text>
+
+    <!-- three stages -->
+    {[
+      { k: "ac", x: 24, title: "acoustic model", sub: "P(sound | word)", vals: [0.55, 0.45] },
+      { k: "lm", x: 214, title: "language-model prior", sub: "P(word | “the cat __ on”)", vals: [0.001, 0.9] },
+      { k: "po", x: 404, title: "decoder picks", sub: "product, renormalised", vals: [0, 0] },
+    ].map((s, n) => (
+      <g data-stage={s.k} transform={`translate(${s.x} 120)`}>
+        <rect width="170" height="128" rx="6" fill="none" stroke="#d6d6dd" />
+        <text x="12" y="22" font-size="11.5" font-weight="600" fill="#2b2b30">{s.title}</text>
+        <text x="12" y="38" font-size="10" fill="#5f5f66">{s.sub}</text>
+        {["zat", "sat"].map((w, i) => (
+          <g transform={`translate(12 ${62 + i * 32})`}>
+            <text y="10" font-size="11.5" fill="#2b2b30">{w}</text>
+            <rect x="34" width="90" height="12" rx="2" fill="#ececf1" />
+            <rect data-bar={`${s.k}-${w}`} x="34" width="0" height="12" rx="2" fill={w === "zat" ? "#a33b3b" : "#4F5D3A"} />
+            <text data-num={`${s.k}-${w}`} x="152" y="10" font-size="10.5" text-anchor="end" fill="#2b2b30" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"></text>
+          </g>
+        ))}
+        {n < 2 && <text x="180" y="68" font-size="18" fill="#5f5f66">{n === 0 ? "×" : "="}</text>}
+      </g>
+    ))}
+
+    <!-- output -->
+    <g transform="translate(600 120)">
+      <text font-size="11" letter-spacing="1" fill="#5f5f66">TRANSCRIPT</text>
+      <text data-out y="28" font-size="14" fill="#2b2b30"></text>
+      <text y="70" font-size="11" letter-spacing="1" fill="#5f5f66">WER</text>
+      <text data-wer y="104" font-size="30" font-weight="700" fill="#594578" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"></text>
+      <text data-note y="126" font-size="10.5" fill="#5f5f66"></text>
+    </g>
+    <text x="24" y="290" font-size="10.5" fill="#5f5f66">The acoustic evidence for “zat” is real but weak. With an LM, a word the prior finds unlikely needs overwhelming evidence to survive.</text>
+    <text x="24" y="308" font-size="10.5" fill="#5f5f66">Rare words and names get a weak prior, so their errors do get through. Errors on predictable words are the ones that disappear.</text>
+  </svg>
+  <div class="fig-panel">
+    <div>
+      <span class="fig-panel__name">ASR decoder</span>
+      <div class="fig-chips">
+        <button type="button" class="fig-chip" data-mode="lm" aria-pressed="true">With a language model</button>
+        <button type="button" class="fig-chip" data-mode="ctc" aria-pressed="false">CTC, no language model</button>
+      </div>
+    </div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { setupFigure, tween, wait } from "../../lib/figure-motion";
+
+  const AC = { zat: 0.55, sat: 0.45 }, LM = { zat: 0.001, sat: 0.9 };
+
+  document.querySelectorAll<HTMLElement>("[data-ap]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const chips = Array.from(root.querySelectorAll<HTMLButtonElement>("[data-mode]"));
+    let mode = "lm";
+
+    const set = (k: string, v: number, txt: string) => {
+      $(`[data-bar="${k}"]`).setAttribute("width", String(90 * v));
+      $(`[data-num="${k}"]`).textContent = txt;
+    };
+    const post = () => {
+      const lm = mode === "lm" ? LM : { zat: 1, sat: 1 };
+      const z = AC.zat * lm.zat, s = AC.sat * lm.sat;
+      return { zat: z / (z + s), sat: s / (z + s) };
+    };
+    const fmt = (v: number) => (v < 0.01 ? v.toFixed(3) : v.toFixed(2));
+
+    function stage(k: "ac" | "lm" | "po") {
+      const src = k === "ac" ? AC : k === "lm" ? (mode === "lm" ? LM : { zat: 1, sat: 1 }) : post();
+      (["zat", "sat"] as const).forEach((w) => set(`${k}-${w}`, src[w], k === "lm" && mode !== "lm" ? "—" : fmt(src[w])));
+      root.querySelector<SVGGElement>('[data-stage="lm"]')!.style.opacity = mode === "lm" ? "1" : "0.3";
+    }
+    function result() {
+      const p = post(), w = p.zat > p.sat ? "zat" : "sat";
+      $("[data-out]").innerHTML = `the cat <tspan fill="${w === "zat" ? "#a33b3b" : "#4F5D3A"}" font-weight="700">${w}</tspan> on the mat`;
+      $("[data-wer]").textContent = w === "zat" ? "16.7%" : "0.0%";
+      $("[data-note]").textContent = w === "zat" ? "1 substitution in 6 words: the error is counted" : "the mispronunciation is invisible";
+    }
+    const clear = () => {
+      (["ac", "lm", "po"] as const).forEach((k) => ["zat", "sat"].forEach((w) => set(`${k}-${w}`, 0, "")));
+      $("[data-out]").textContent = ""; $("[data-wer]").textContent = ""; $("[data-note]").textContent = "";
+    };
+    const full = () => { stage("ac"); stage("lm"); stage("po"); result(); };
+
+    chips.forEach((c) => c.addEventListener("click", () => {
+      mode = c.dataset.mode!;
+      chips.forEach((o) => o.setAttribute("aria-pressed", String(o === c)));
+      full();
+    }));
+
+    setupFigure(
+      root,
+      clear,
+      async (alive) => {
+        for (const k of ["ac", "lm", "po"] as const) {
+          if (!alive()) return;
+          stage(k);
+          root.querySelectorAll<SVGRectElement>(`[data-bar^="${k}-"]`).forEach((b) => {
+            const w = +b.getAttribute("width")!;
+            tween(0.6, (t) => b.setAttribute("width", String(w * t)));
+          });
+          await wait(0.9);
+        }
+        if (!alive()) return;
+        result();
+      },
+    );
+  });
+</script>

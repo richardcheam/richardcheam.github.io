@@ -1,0 +1,98 @@
+---
+// Fréchet distance between two Gaussian clouds of embeddings. Both covariances
+// are kept diagonal and equal on both axes, so the trace term reduces to
+// sum_i (sigma_r,i - sigma_g,i)^2 and the two parts can be shown as bars.
+const { alt } = Astro.props;
+const CX = 210, CY = 180, U = 46;
+---
+<div class="blog-diagram fc" role="region" aria-label={alt} data-fc data-cfg={JSON.stringify({ CX, CY, U })}>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 360" role="img" aria-labelledby="fc-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="fc-title">Real and generated embedding clouds with the two terms of the Fréchet distance</title>
+    <defs><clipPath id="fc-clip"><rect x="20" y="20" width="380" height="320" /></clipPath></defs>
+    <rect x="20" y="20" width="380" height="320" fill="none" stroke="#ececf1" />
+    <g clip-path="url(#fc-clip)">
+      <g data-real></g>
+      <g data-gen></g>
+      <ellipse data-er cx={CX} cy={CY} fill="none" stroke="#2b2b30" stroke-width="1.5" />
+      <ellipse data-eg fill="none" stroke="#594578" stroke-width="1.5" stroke-dasharray="4 3" />
+    </g>
+    <text x="28" y="38" font-size="11" fill="#2b2b30">● real speech</text>
+    <text x="28" y="54" font-size="11" fill="#594578">● generated</text>
+    <g transform="translate(440 50)">
+      <text font-size="11" letter-spacing="1" fill="#5f5f66">FRÉCHET DISTANCE d²</text>
+      {[
+        { k: "mean", label: "‖μr − μg‖²   where the cloud sits", c: "#8a6a1f" },
+        { k: "cov", label: "covariance term   how wide it is", c: "#594578" },
+      ].map((b, i) => (
+        <g transform={`translate(0 ${36 + i * 56})`}>
+          <text font-size="11" fill="#2b2b30">{b.label}</text>
+          <rect y="10" width="280" height="12" rx="2" fill="#ececf1" />
+          <rect data-bar={b.k} y="10" width="0" height="12" rx="2" fill={b.c} />
+          <text data-num={b.k} x="280" y="40" font-size="11" text-anchor="end" fill={b.c} font-family="ui-monospace, SFMono-Regular, Menlo, monospace"></text>
+        </g>
+      ))}
+      <text y="170" font-size="11" fill="#5f5f66">total</text>
+      <text data-total y="204" font-size="30" font-weight="700" fill="#2b2b30" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"></text>
+      <text data-note y="236" font-size="10.5" fill="#5f5f66"></text>
+    </g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Shift the generated mean<strong data-vm></strong></span><input class="scrub" data-m type="range" min="0" max="2" step="0.1" value="0.8" style="--n: 20; --p: 40%" /></label>
+    <label><span class="fig-panel__name">Generated spread σ<strong data-vs></strong></span><input class="scrub" data-s type="range" min="0.1" max="1.8" step="0.05" value="1" style="--n: 17; --p: 52.9%" /></label>
+    <div><span class="fig-panel__name">Failure mode</span><div class="fig-chips"><button type="button" class="fig-chip" data-collapse>Mode collapse</button></div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { setupFigure, tween } from "../../lib/figure-motion";
+  import { gauss, rng } from "../../lib/eval-math";
+
+  const NS = "http://www.w3.org/2000/svg", N = 160;
+  document.querySelectorAll<HTMLElement>("[data-fc]").forEach((root) => {
+    const c = JSON.parse(root.dataset.cfg!);
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const m = $<HTMLInputElement>("[data-m]"), s = $<HTMLInputElement>("[data-s]");
+    const r = rng(11);
+    const zr = Array.from({ length: N }, () => [gauss(r), gauss(r)]);
+    const zg = Array.from({ length: N }, () => [gauss(r), gauss(r)]);
+    const dots = (g: SVGGElement, fill: string) => zr.map(() => {
+      const d = document.createElementNS(NS, "circle"); d.setAttribute("r", "2.4"); d.setAttribute("fill", fill); d.setAttribute("fill-opacity", "0.55"); g.append(d); return d;
+    });
+    const dr = dots($("[data-real]"), "#2b2b30"), dg = dots($("[data-gen]"), "#594578");
+    zr.forEach(([a, b], i) => { dr[i].setAttribute("cx", String(c.CX + a * c.U)); dr[i].setAttribute("cy", String(c.CY + b * c.U)); });
+    $("[data-er]").setAttribute("rx", String(2 * c.U)); $("[data-er]").setAttribute("ry", String(2 * c.U));
+
+    function frame(mu: number, sig: number, k = 1) {
+      // The mean moves along the diagonal so both coordinates differ.
+      const gx = c.CX + (mu / Math.SQRT2) * c.U, gy = c.CY - (mu / Math.SQRT2) * c.U;
+      zg.forEach(([a, b], i) => {
+        dg[i].setAttribute("cx", String(gx + a * sig * c.U));
+        dg[i].setAttribute("cy", String(gy + b * sig * c.U));
+        dg[i].style.display = i < k * N ? "" : "none";
+      });
+      const eg = $("[data-eg]");
+      eg.setAttribute("cx", String(gx)); eg.setAttribute("cy", String(gy));
+      eg.setAttribute("rx", String(2 * sig * c.U)); eg.setAttribute("ry", String(2 * sig * c.U));
+      const mean = mu * mu, cov = 2 * (1 - sig) ** 2, tot = mean + cov, scale = 280 / 5;
+      $('[data-bar="mean"]').setAttribute("width", String(Math.min(280, mean * scale)));
+      $('[data-bar="cov"]').setAttribute("width", String(Math.min(280, cov * scale)));
+      $('[data-num="mean"]').textContent = mean.toFixed(2);
+      $('[data-num="cov"]').textContent = cov.toFixed(2);
+      $("[data-total]").textContent = tot.toFixed(2);
+      $("[data-note]").textContent = sig < 0.35 ? "Every sample sounds the same: the mean can match, the width cannot." : mu < 0.05 && Math.abs(sig - 1) < 0.05 ? "Same distribution: d² = 0." : "2σ ellipses drawn; real cloud fixed at μ = 0, σ = 1.";
+      $("[data-vm]").textContent = mu.toFixed(1); $("[data-vs]").textContent = sig.toFixed(1);
+      m.style.setProperty("--p", `${(mu / 2) * 100}%`); s.style.setProperty("--p", `${((sig - 0.1) / 1.7) * 100}%`);
+    }
+    const now = () => frame(+m.value, +s.value);
+    m.addEventListener("input", now); s.addEventListener("input", now);
+    $("[data-collapse]").addEventListener("click", async () => {
+      const s0 = +s.value, m0 = +m.value;
+      await tween(0.9, (t) => { m.value = String(m0 * (1 - t)); s.value = String(s0 + (0.15 - s0) * t); now(); });
+      m.value = "0"; s.value = "0.15"; now();
+    });
+    setupFigure(root, () => frame(+m.value, +s.value, 0), async (alive) => {
+      await tween(1.6, (t) => alive() && frame(+m.value, +s.value, t));
+    });
+  });
+</script>

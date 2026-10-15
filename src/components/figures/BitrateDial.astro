@@ -1,0 +1,74 @@
+---
+// RVQ post, Figure 4: bitrate = frames per second x codebooks x bits per
+// index. Presets from SoundStream, EnCodec, DAC and Moshi (Mimi). Raw audio
+// for comparison: 24 kHz at 16 bits = 384,000 bits per second.
+const { alt } = Astro.props;
+const presets = [
+  { name: "Toy", f: 10, q: 3, b: 2 },
+  { name: "SoundStream 6 kbps", f: 75, q: 8, b: 10 },
+  { name: "EnCodec 24 kbps", f: 75, q: 32, b: 10 },
+  { name: "DAC", f: 86, q: 9, b: 10 },
+  { name: "Mimi", f: 12.5, q: 8, b: 11 },
+];
+---
+<div class="blog-diagram bd" role="region" aria-label={alt} data-bd data-presets={JSON.stringify(presets)}>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 330" role="img" aria-labelledby="bd-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="bd-title">One second of codec tokens and the bitrate they add up to</title>
+    <text x="20" y="22" font-size="11.5" font-weight="700" fill="#2b2b30">One second of tokens: a column per frame, a cell per codebook</text>
+    <g data-cols></g>
+    <line data-head y1="34" y2="206" stroke="#a33b3b" stroke-width="1.5" />
+    <text x="40" y="222" font-size="10.5" fill="#5f5f66">0 s</text>
+    <text x="740" y="222" font-size="10.5" text-anchor="end" fill="#5f5f66">1 s</text>
+    <text data-big x="20" y="262" font-size="20" font-weight="700" fill="#594578" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"></text>
+    <text data-r1 x="20" y="286" font-size="12" fill="#2b2b30"></text>
+    <text data-r2 x="20" y="306" font-size="12" fill="#2b2b30"></text>
+    <text data-r3 x="20" y="324" font-size="11.5" fill="#5f5f66"></text>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Preset</span><div class="fig-chips">
+      {presets.map((p, i) => <button type="button" class="fig-chip" data-pre={i} aria-pressed={i === 4 ? "true" : "false"}>{p.name}</button>)}
+    </div></div>
+    <label><span class="fig-panel__name">Frames per second f<strong data-vf></strong></span><input class="scrub" data-f type="range" min="1" max="100" step="0.5" value="12.5" /></label>
+    <label><span class="fig-panel__name">Codebooks Q<strong data-vq></strong></span><input class="scrub" data-q type="range" min="1" max="32" step="1" value="8" /></label>
+    <label><span class="fig-panel__name">Entries per codebook K<strong data-vb></strong></span><input class="scrub" data-b type="range" min="1" max="12" step="1" value="11" /></label>
+  </div>
+</div>
+
+<script>
+  import { whileVisible } from "../../lib/figure-motion";
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-bd]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const P: { name: string; f: number; q: number; b: number }[] = JSON.parse(root.dataset.presets!);
+    const fIn = $<HTMLInputElement>("[data-f]"), qIn = $<HTMLInputElement>("[data-q]"), bIn = $<HTMLInputElement>("[data-b]");
+    const mk = (g: Element, tag: string, a: Record<string, string | number>) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, String(a[k])); g.append(e); return e; };
+    const sup = (n: number) => String(n).split("").map((d) => "⁰¹²³⁴⁵⁶⁷⁸⁹"[+d]).join("");
+    let lit = -1;
+    function layout() {
+      const f = +fIn.value, q = +qIn.value, b = +bIn.value, g = $("[data-cols]"); g.replaceChildren();
+      const n = Math.floor(f), cw = 700 / f, ch = Math.min(18, 170 / q);
+      for (let i = 0; i < n; i++) for (let k = 0; k < q; k++) {
+        mk(g, "rect", { x: 40 + i * cw + 0.5, y: 206 - (k + 1) * ch, width: Math.max(0.6, cw - Math.min(3, cw * 0.25)), height: Math.max(0.6, ch - Math.min(2, ch * 0.2)), fill: k === 0 ? "#594578" : "#b9b9c2", "data-col": i });
+      }
+      const R = f * q * b;
+      $("[data-big]").textContent = `${R.toLocaleString("en")} bits per second`;
+      $("[data-r1]").textContent = `${f} frames × ${q} codebook${q > 1 ? "s" : ""} × log₂ ${(2 ** b).toLocaleString("en")} = ${f} × ${q} × ${b} bits = ${R.toLocaleString("en")} bits/s`;
+      $("[data-r2]").textContent = `${(f * q).toLocaleString("en")} tokens a second; raw 24 kHz, 16-bit audio is ${(384000 / R).toFixed(R > 38400 ? 1 : 0)}× bigger.`;
+      $("[data-r3]").textContent = `One codebook with the same ${q * b} bits per frame would need 2${sup(q * b)} entries${q * b <= 20 ? ` (${(2 ** (q * b)).toLocaleString("en")})` : ""}.`;
+      $("[data-vf]").textContent = String(f); $("[data-vq]").textContent = String(q); $("[data-vb]").textContent = (2 ** b).toLocaleString("en");
+      [fIn, qIn, bIn].forEach((i) => i.style.setProperty("--p", `${((+i.value - +i.min) / (+i.max - +i.min)) * 100}%`));
+      lit = -1;
+    }
+    const redraw = whileVisible(root, (t) => {
+      const ph = (t % 4) / 4, f = +fIn.value, x = 40 + ph * 700, col = Math.floor(ph * f);
+      $("[data-head]").setAttribute("x1", String(x)); $("[data-head]").setAttribute("x2", String(x));
+      if (col !== lit) { root.querySelectorAll<SVGRectElement>("[data-col]").forEach((r) => r.setAttribute("fill-opacity", +r.dataset.col! <= col ? "1" : "0.35")); lit = col; }
+    });
+    [fIn, qIn, bIn].forEach((i) => i.addEventListener("input", () => { root.querySelectorAll("[data-pre]").forEach((o) => o.setAttribute("aria-pressed", "false")); layout(); redraw(); }));
+    root.querySelectorAll<HTMLButtonElement>("[data-pre]").forEach((b) => b.addEventListener("click", () => {
+      const p = P[+b.dataset.pre!]; fIn.value = String(p.f); qIn.value = String(p.q); bIn.value = String(p.b);
+      root.querySelectorAll("[data-pre]").forEach((o) => o.setAttribute("aria-pressed", String(o === b))); layout(); redraw();
+    }));
+    layout(); redraw();
+  });
+</script>

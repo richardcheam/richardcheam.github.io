@@ -1,0 +1,129 @@
+---
+// Figure 2: Euler's method on three 1-D velocity fields. (a) constant speed 3
+// from x = -1; (b) the OT marginal field for two data points -2 and +2
+// (sigma_min = 0.01) from x = 0.3; (c) the VP conditional field for x1 = 2,
+// x0 = -1 with the paper's schedule (App E.1). Exact paths: closed form for
+// (a) and (c), RK4 with 4000 steps for (b).
+const { alt } = Astro.props;
+---
+<div class="blog-diagram et" role="region" aria-label={alt} data-et>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 380" role="img" aria-labelledby="et-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="et-title">An exact trip and an Euler trip through a velocity field</title>
+    <g data-axes></g>
+    <path data-exact d="" fill="none" stroke="#4F5D3A" stroke-width="2.5" />
+    <g data-steps></g>
+    <circle data-car r="6" fill="#594578" />
+    <text x="560" y="40" font-size="11.5" font-weight="700" fill="#2b2b30">Steps N</text>
+    <text data-n x="560" y="62" font-size="18" font-weight="700" fill="#594578" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"></text>
+    <text x="560" y="96" font-size="11.5" font-weight="700" fill="#2b2b30">Network calls (NFE)</text>
+    <text data-nfe x="560" y="118" font-size="18" font-weight="700" fill="#2b2b30" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"></text>
+    <text x="560" y="152" font-size="11.5" font-weight="700" fill="#2b2b30">Where it should end</text>
+    <text data-ex x="560" y="174" font-size="16" fill="#4F5D3A" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"></text>
+    <text x="560" y="208" font-size="11.5" font-weight="700" fill="#2b2b30">Where Euler ended</text>
+    <text data-eu x="560" y="230" font-size="16" fill="#594578" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"></text>
+    <text x="560" y="264" font-size="11.5" font-weight="700" fill="#2b2b30">Miss</text>
+    <text data-err x="560" y="286" font-size="16" font-weight="700" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"></text>
+    <text data-note x="560" y="318" font-size="11" fill="#5f5f66"></text>
+    <text data-note2 x="560" y="334" font-size="11" fill="#5f5f66"></text>
+    <line x1="60" x2="80" y1="362" y2="362" stroke="#4F5D3A" stroke-width="2.5" /><text x="86" y="366" font-size="11" fill="#2b2b30">exact trip</text>
+    <line x1="170" x2="190" y1="362" y2="362" stroke="#594578" stroke-width="2" /><text x="196" y="366" font-size="11" fill="#2b2b30">Euler: look at the velocity, jump, repeat</text>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Velocity field</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-field="0" aria-pressed="true">Constant speed 3</button>
+      <button type="button" class="fig-chip" data-field="1" aria-pressed="false">Two data points (OT)</button>
+      <button type="button" class="fig-chip" data-field="2" aria-pressed="false">Diffusion path (VP)</button>
+    </div></div>
+    <div><span class="fig-panel__name">Steps N</span><div class="fig-chips">
+      {[1, 2, 4, 8, 16].map((n) => <button type="button" class="fig-chip" data-steps-n={n} aria-pressed={n === 2 ? "true" : "false"}>{n}</button>)}
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { setupFigure, wait, tween } from "../../lib/figure-motion";
+  import { coeffs, T_END } from "../../lib/flow-math";
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-et]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const X = (x: number) => 60 + ((x + 3) / 6) * 460, Y = (t: number) => 30 + t * 300;
+    // Axes: position along the road, time down the page.
+    const ax = $("[data-axes]");
+    const mk = (tag: string, a: Record<string, string | number>, txt?: string) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, String(a[k])); if (txt) e.textContent = txt; ax.append(e); return e; };
+    mk("line", { x1: 60, x2: 520, y1: 30, y2: 30, stroke: "#2b2b30" });
+    for (let x = -3; x <= 3; x++) { mk("line", { x1: X(x), x2: X(x), y1: 30, y2: 330, stroke: "#ececf1" }); mk("text", { x: X(x), y: 22, "font-size": 10.5, "text-anchor": "middle", fill: "#2b2b30" }, String(x)); }
+    mk("text", { x: 54, y: Y(0) + 4, "font-size": 10.5, "text-anchor": "end", fill: "#5f5f66" }, "t = 0");
+    mk("text", { x: 54, y: Y(1) + 4, "font-size": 10.5, "text-anchor": "end", fill: "#5f5f66" }, "t = 1");
+    mk("text", { x: 54, y: Y(0.5) + 4, "font-size": 10.5, "text-anchor": "end", fill: "#5f5f66" }, "time");
+
+    // Two-point OT marginal in 1-D (Eq 8 with Eq 21).
+    const otTwo = (t: number, x: number) => {
+      const { a, da, s, ds } = coeffs("ot", t);
+      const ws = [-2, 2].map((c) => Math.exp(-((x - a * c) ** 2) / (2 * s * s))), z = ws[0] + ws[1];
+      return [-2, 2].reduce((u, c, k) => u + (ws[k] / z) * ((ds / s) * (x - a * c) + da * c), 0);
+    };
+    const vpCond = (t: number, x: number) => { const { a, da, s, ds } = coeffs("vp", t); return (ds / s) * (x - a * 2) + da * 2; };
+    const fields = [
+      { v: (_t: number, _x: number) => 3, x0: -1, exact: (t: number) => -1 + 3 * t, note: ["Speed never changes, so every", "step lands exactly. Zero miss."] },
+      { v: otTwo, x0: 0.3, exact: null as null | ((t: number) => number), note: ["Each data point's path is straight,", "but the blend bends near t = 0.5."] },
+      { v: vpCond, x0: coeffs("vp", 0).a * 2 - 1, exact: (t: number) => { const c = coeffs("vp", t); return c.a * 2 + c.s * -1; }, note: ["Diffusion leaves most of the trip", "for the end: big steps miss it."] },
+    ];
+    // RK4 reference for the two-point field, kept at 301 time samples.
+    const ref: number[] = []; {
+      let x = 0.3; const S = 4000, h = T_END / S; ref.push(x);
+      for (let k = 0; k < S; k++) {
+        const t = k * h, f = otTwo;
+        const k1 = f(t, x), k2 = f(t + h / 2, x + (h / 2) * k1), k3 = f(t + h / 2, x + (h / 2) * k2), k4 = f(t + h, x + h * k3);
+        x += (h / 6) * (k1 + 2 * k2 + 2 * k3 + k4);
+        if ((k + 1) % 40 === 0) ref.push(x);
+      }
+    }
+    fields[1].exact = (t: number) => { const i = Math.min(ref.length - 1, t * (ref.length - 1)), j = Math.floor(i); return ref[j] + (ref[Math.min(j + 1, ref.length - 1)] - ref[j]) * (i - j); };
+    let fi = 0, N = 2;
+    const fmt = (v: number) => (v >= 0 ? " " : "") + v.toFixed(3);
+    function euler() {
+      const f = fields[fi], h = 1 / N, pts = [f.x0];
+      for (let k = 0; k < N; k++) { const t = k * h; pts.push(pts[k] + h * f.v(t, pts[k])); }
+      return pts;
+    }
+    function frame(show: number) {
+      const f = fields[fi], ex = f.exact!;
+      let d = ""; for (let i = 0; i <= 300; i++) { const t = i / 300; d += `${i ? "L" : "M"}${X(ex(t)).toFixed(1)} ${Y(t).toFixed(1)}`; }
+      $("[data-exact]").setAttribute("d", d);
+      const pts = euler(), g = $("[data-steps]"); g.replaceChildren();
+      const upto = Math.min(N, show);
+      for (let k = 0; k < upto; k++) {
+        const l = document.createElementNS(NS, "line");
+        l.setAttribute("x1", String(X(pts[k]))); l.setAttribute("y1", String(Y(k / N)));
+        l.setAttribute("x2", String(X(pts[k + 1]))); l.setAttribute("y2", String(Y((k + 1) / N)));
+        l.setAttribute("stroke", "#594578"); l.setAttribute("stroke-width", "2");
+        const c = document.createElementNS(NS, "circle");
+        c.setAttribute("cx", String(X(pts[k]))); c.setAttribute("cy", String(Y(k / N))); c.setAttribute("r", "3"); c.setAttribute("fill", "#594578");
+        g.append(l, c);
+      }
+      const car = $("[data-car]"); car.setAttribute("cx", String(X(pts[upto]))); car.setAttribute("cy", String(Y(upto / N)));
+      $("[data-n]").textContent = String(N);
+      $("[data-nfe]").textContent = String(upto);
+      $("[data-ex]").textContent = `x = ${fmt(ex(1))}`;
+      const done = upto === N, miss = Math.abs(pts[N] - ex(1));
+      $("[data-eu]").textContent = done ? `x = ${fmt(pts[N])}` : "…";
+      const e = $("[data-err]"); e.textContent = done ? miss.toFixed(3) : "…"; e.setAttribute("fill", miss < 0.05 ? "#4F5D3A" : "#a33b3b");
+      $("[data-note]").textContent = done ? f.note[0] : ""; $("[data-note2]").textContent = done ? f.note[1] : "";
+    }
+    let token = 0;
+    async function run(alive: () => boolean) {
+      frame(0);
+      for (let k = 1; k <= N; k++) { await wait(Math.max(0.12, 0.7 / N)); if (!alive()) return; frame(k); }
+    }
+    const go = () => { const my = ++token; run(() => my === token); };
+    root.querySelectorAll<HTMLButtonElement>("[data-field]").forEach((b) => b.addEventListener("click", () => {
+      fi = +b.dataset.field!; root.querySelectorAll("[data-field]").forEach((o) => o.setAttribute("aria-pressed", String(o === b))); go();
+    }));
+    root.querySelectorAll<HTMLButtonElement>("[data-steps-n]").forEach((b) => b.addEventListener("click", () => {
+      N = +b.dataset.stepsN!; root.querySelectorAll("[data-steps-n]").forEach((o) => o.setAttribute("aria-pressed", String(o === b))); go();
+    }));
+    frame(N);
+    setupFigure(root, () => frame(0), async (alive) => { await tween(0.01, () => {}); await run(alive); });
+  });
+</script>

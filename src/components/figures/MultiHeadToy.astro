@@ -1,0 +1,66 @@
+---
+// Foundations, attention post: two heads for the query "it" in "the cat
+// chased it". Head 1 scores 0, 0, 3, 0 → 0.870 on "chased"; head 2 scores
+// 0, 3, 0, 0 → 0.870 on "cat". One head with scores 0, 3, 3, 0 must split:
+// 0.024, 0.476, 0.476, 0.024. Head roles are invented for illustration.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-mhead>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 270" role="img" aria-labelledby="mh2-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="mh2-title">Two attention heads from the word "it", one landing on "chased" and one on "cat"</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Head 1 peak score <strong data-v="a"></strong></span><input class="scrub" data-k="a" type="range" min="0" max="6" step="0.5" value="3" /></label>
+    <label><span class="fig-panel__name">Head 2 peak score <strong data-v="b"></strong></span><input class="scrub" data-k="b" type="range" min="0" max="6" step="0.5" value="3" /></label>
+    <div><span class="fig-panel__name">Heads</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-h="2" aria-pressed="true">Two heads</button>
+      <button type="button" class="fig-chip" data-h="1" aria-pressed="false">One head only</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt } from "../../lib/tiny-net";
+  import { INK, MUTED, GOLD, JADE } from "../../lib/net-diagram";
+  import { txt } from "../../lib/plot";
+  import { softmax } from "../../lib/attention";
+  const W = ["the", "cat", "chased", "it"], COL = ["#B5533C", "#3E6E9E"];
+  document.querySelectorAll<HTMLElement>("[data-mhead]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const p: Record<string, number> = { a: 3, b: 3 };
+    let two = true;
+    const heads = () => two ? [[0, 0, p.a, 0], [0, p.b, 0, 0]] : [[0, p.b, p.a, 0]];
+    const VAL = [[0, 0, 1, 0], [0, 1, 0, 0]];
+    const f3 = (v: number) => fmt(v, 3);
+    const steps = () => {
+      const H = heads();
+      const per = H.flatMap((sc, h) => { const w = softmax(sc), e = sc.map(Math.exp), t = e.reduce((x, y) => x + y, 0); return [
+        { say: two ? `Head ${h + 1} scores "it" against every word${h ? ', looking for the noun' : ', looking at the action'}.` : "A single head must score both things at once.", math: `scores: ${sc.map((v, j) => `${W[j]} ${fmt(v)}`).join(", ")}` },
+        { say: "Softmax the scores into weights.", math: `${e.map((x, j) => `e^${fmt(sc[j])} = ${f3(x)}`).join(", ")};  total ${f3(t)}\nweights ${w.map(f3).join(", ")}` },
+        ...(two ? [{ say: `Head ${h + 1}'s output: the weighted value. Its value is 1 for "${h ? "cat" : "chased"}" and 0 elsewhere.`, math: `output = ${w.map((x, j) => `${f3(x)} × ${VAL[h][j]}`).join(" + ")} = ${f3(w.reduce((s, x, j) => s + x * VAL[h][j], 0))}` }] : []),
+      ]; });
+      return two ? [...per, { say: "Glue the heads' outputs side by side; the output matrix W_O then mixes them. Both facts survive.", math: `concat = (${H.map((sc, h) => f3(softmax(sc).reduce((s, x, j) => s + x * VAL[h][j], 0))).join(", ")})` }] : [...per, { say: "With one head the weight is split between cat and chased: neither gets a clear share.", math: `cat ${f3(softmax(H[0])[1])}, chased ${f3(softmax(H[0])[2])}` }];
+    };
+    function draw(k: number) {
+      const H = heads(), X = (j: number) => 110 + j * 170, base = 210;
+      let s = "";
+      W.forEach((w, j) => (s += `<rect x="${X(j) - 50}" y="${base}" width="100" height="34" rx="6" fill="#fff" stroke="${j === 3 ? GOLD : INK}" stroke-width="${j === 3 ? 2.5 : 1.2}"/>` + txt(X(j), base + 22, w, `font-size="14" font-weight="700" text-anchor="middle" fill="${INK}"`)));
+      const shown = two ? Math.min(2, Math.floor((k + 1) / 3) + (k >= 0 ? 1 : 0)) : k >= 1 ? 1 : 0;
+      H.forEach((sc, h) => {
+        if (h >= shown) return;
+        const w = softmax(sc), lift = 60 + h * 50;
+        w.forEach((x, j) => { if (j === 3) return; const mx = (X(3) + X(j)) / 2; s += `<path d="M${X(3)} ${base} Q ${mx} ${base - lift - 40} ${X(j)} ${base}" fill="none" stroke="${two ? COL[h] : JADE}" stroke-width="${0.6 + x * 9}" stroke-opacity="0.8"/>` + txt(mx, base - lift + (h ? -14 : 6), f3(x), `font-size="11" font-weight="700" text-anchor="middle" fill="${two ? COL[h] : JADE}"`); });
+      });
+      s += txt(30, 22, two ? `Two heads from "it": head 1 (red) and head 2 (blue)` : `One head from "it"`, `font-size="12" font-weight="700" fill="${INK}"`);
+      s += txt(500, 22, `parameters: 4 × d_model² (e.g. 4 × 512² = 1,048,576)`, `font-size="10.5" fill="${MUTED}"`);
+      $("[data-draw]").innerHTML = s;
+      root.querySelectorAll<HTMLElement>("[data-v]").forEach((el) => (el.textContent = fmt(p[el.dataset.v!])));
+    }
+    const redraw = stepper(root, steps, draw, { delay: 1.6 });
+    root.querySelectorAll<HTMLInputElement>("[data-k]").forEach((inp) => inp.addEventListener("input", () => { p[inp.dataset.k!] = +inp.value; redraw(); }));
+    root.querySelectorAll<HTMLButtonElement>("[data-h]").forEach((b) => b.addEventListener("click", () => { two = b.dataset.h === "2"; root.querySelectorAll("[data-h]").forEach((o) => o.setAttribute("aria-pressed", String(o === b))); redraw(); }));
+  });
+</script>

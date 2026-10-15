@@ -1,0 +1,91 @@
+---
+// A project case study on the portfolio: contents rail on the left; a title
+// block with Question / Approach / Finding rows; the numbers that matter;
+// then numbered sections. Projects with their own sites do not use this.
+import { getCollection, type CollectionEntry } from "astro:content";
+import type { MarkdownHeading } from "astro";
+import Base from "./Base.astro";
+
+interface Props {
+  project: CollectionEntry<"projects">;
+  headings: MarkdownHeading[];
+}
+const { project, headings } = Astro.props;
+const d = project.data;
+const sections = headings.filter((h) => h.depth === 2);
+const all = (await getCollection("projects")).sort((a, b) => a.data.order - b.data.order);
+const next = all[(all.findIndex((p) => p.id === project.id) + 1) % all.length];
+const pad = (n: number) => String(n).padStart(2, "0");
+---
+<Base title={d.title} description={d.headline}>
+  <div class="case" data-case>
+    <nav class="case__rail" aria-label="Contents">
+      <p class="case__rail-label">Contents</p>
+      <ol>
+        <li><a href="#overview" data-case-link>Overview</a></li>
+        {sections.map((h, i) => <li><a href={`#${h.slug}`} data-case-link>{pad(i + 1)} {h.text}</a></li>)}
+      </ol>
+      <p class="case__rail-back"><a href="/projects/">← All projects</a></p>
+    </nav>
+
+    <article class="case__main">
+      <header class="case__head" id="overview" data-reveal>
+        <div class="case__topline">
+          <span class="case__name">Project</span>
+          <span>{d.area} / {d.date}{d.status && <span class="case__status">{d.status}</span>}</span>
+        </div>
+        <h1 class="case__title">{d.title}</h1>
+        <dl class="case__rows">
+          <div><dt>Question</dt><dd>{d.question}</dd></div>
+          <div><dt>Approach</dt><dd>{d.approach}</dd></div>
+          <div class="case__finding"><dt>{d.status ? "Status" : "Finding"}</dt><dd>{d.headline}</dd></div>
+          {d.links.length > 0 && (
+            <div>
+              <dt>Links</dt>
+              <dd class="case__links">{d.links.map((l) => <a href={l.url} target="_blank" rel="noopener noreferrer">{l.label}<span aria-hidden="true"> ↗</span></a>)}</dd>
+            </div>
+          )}
+          <div><dt>Built with</dt><dd>{d.stack}</dd></div>
+        </dl>
+      </header>
+
+      {d.numbers.length > 0 && (
+        <dl class="case__numbers" data-reveal>
+          {d.numbers.map((n) => <div><dd>{n.value}</dd><dt>{n.label}</dt></div>)}
+        </dl>
+      )}
+
+      {d.cover && <img class="case__cover" src={d.cover.src} alt={d.cover.alt} loading="lazy" />}
+
+      <div class="case__body note-article">
+        <slot />
+      </div>
+
+      {next && next.id !== project.id && (
+        <a class="case__next" href={`/projects/${next.id}/`}>
+          <span>Next project</span>
+          <strong>{next.data.title}</strong>
+          <em>{next.data.headline}</em>
+        </a>
+      )}
+    </article>
+  </div>
+
+  <script is:inline>
+    // Highlight the contents entry for the section in view.
+    (function () {
+      var root = document.querySelector("[data-case]");
+      if (!root || !("IntersectionObserver" in window)) return;
+      var links = Array.prototype.slice.call(root.querySelectorAll("[data-case-link]"));
+      var targets = links.map(function (a) { return document.getElementById(decodeURIComponent(a.getAttribute("href").slice(1))); });
+      var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) {
+          if (!e.isIntersecting) return;
+          var i = targets.indexOf(e.target);
+          links.forEach(function (a, j) { a.toggleAttribute("aria-current", i === j); });
+        });
+      }, { rootMargin: "-20% 0px -70% 0px" });
+      targets.forEach(function (t) { if (t) io.observe(t); });
+    })();
+  </script>
+</Base>

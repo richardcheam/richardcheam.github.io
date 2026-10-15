@@ -1,0 +1,68 @@
+---
+// Figure 10: how three model families hand sound to a network, and how many
+// numbers per second each form holds (log-scale bars).
+const { alt } = Astro.props;
+const lanes = [
+  { name: "Speech recognition (ASR)", boxes: ["waveform, 16 kHz", "log-mel: 80 × 100 per s", "model", "text: \"hello\""] },
+  { name: "Older TTS (Tacotron 2 style)", boxes: ["text", "acoustic model", "mel: 80 bands", "vocoder → waveform"] },
+  { name: "Codec TTS (Mimi, Pocket TTS)", boxes: ["text", "model", "Mimi frames: 12.5 per s", "Mimi decoder → 24 kHz"] },
+];
+const bars = [
+  { label: "raw samples at 24 kHz", n: 24000 },
+  { label: "linear spectrogram (16 kHz, 25/10 ms)", n: 20100 },
+  { label: "80-band mel, 100 frames/s", n: 8000 },
+  { label: "Pocket TTS latents, 12.5 × 32", n: 400 },
+];
+const BX = (i: number) => 20 + i * 190;
+---
+<div class="blog-diagram tr" role="region" aria-label={alt} data-tr>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 470" role="img" aria-labelledby="tr-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="tr-title">Three model pipelines and the numbers per second of each form of sound</title>
+    {lanes.map((l, li) => (
+      <g data-lane={li} transform={`translate(0 ${20 + li * 92})`}>
+        <text x="20" y="12" font-size="11.5" font-weight="700" fill="#2b2b30">{l.name}</text>
+        {l.boxes.map((b, i) => (
+          <g>
+            <rect x={BX(i)} y="22" width="168" height="46" rx="6" fill={i === 2 && li === 2 ? "#594578" : "#f6f6f8"} fill-opacity={i === 2 && li === 2 ? 0.14 : 1} stroke={i === 2 && li === 2 ? "#594578" : "#d9d9df"} />
+            {b.split(": ").map((part, j, arr) => <text x={BX(i) + 84} y={arr.length > 1 ? 41 + j * 15 : 49} font-size="10.5" text-anchor="middle" fill="#2b2b30" font-weight={j === 0 ? 600 : 400}>{part}</text>)}
+            {i < 3 && <path d={`M${BX(i) + 171} 45 h14 m-5 -4 l5 4 l-5 4`} fill="none" stroke="#2b2b30" />}
+          </g>
+        ))}
+        <circle data-pkt cx={BX(0) + 84} cy="45" r="5" fill="#a33b3b" style="opacity:0" />
+      </g>
+    ))}
+    <text x="20" y="318" font-size="11.5" font-weight="700" fill="#2b2b30">Numbers per second for one second of speech (log scale)</text>
+    {bars.map((b, i) => (
+      <g transform={`translate(0 ${336 + i * 30})`}>
+        <text x="270" y="15" font-size="11" text-anchor="end" fill="#2b2b30">{b.label}</text>
+        <rect data-bar x="280" y="3" width={(Math.log10(b.n) / Math.log10(30000)) * 400} height="16" rx="2" fill={i === 3 ? "#594578" : "#2b2b30"} fill-opacity={i === 3 ? 1 : 0.75} data-w={(Math.log10(b.n) / Math.log10(30000)) * 400} />
+        <text data-num x={290 + (Math.log10(b.n) / Math.log10(30000)) * 400} y="15" font-size="11.5" font-weight="700" fill="#2b2b30" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">{b.n.toLocaleString("en")}</text>
+      </g>
+    ))}
+  </svg>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { animate, dur, setupFigure, tween, wait } from "../../lib/figure-motion";
+  document.querySelectorAll<HTMLElement>("[data-tr]").forEach((root) => {
+    const lanes = Array.from(root.querySelectorAll<SVGGElement>("[data-lane]"));
+    const bars = Array.from(root.querySelectorAll<SVGRectElement>("[data-bar]")), nums = Array.from(root.querySelectorAll<SVGTextElement>("[data-num]"));
+    const BX = (i: number) => 20 + i * 190 + 84;
+    const setBars = (t: number) => bars.forEach((b, i) => { b.setAttribute("width", String(+b.dataset.w! * t)); nums[i].setAttribute("x", String(290 + +b.dataset.w! * t)); });
+    setupFigure(root, () => { lanes.forEach((l) => (l.style.opacity = "0.25")); setBars(0); nums.forEach((n) => (n.style.opacity = "0")); }, async (alive) => {
+      for (const l of lanes) {
+        if (!alive()) return;
+        animate(l, { opacity: [0.25, 1] }, { duration: dur(0.4) });
+        const p = l.querySelector<SVGCircleElement>("[data-pkt]")!;
+        p.style.opacity = "1";
+        await tween(1.4, (t) => p.setAttribute("cx", String(BX(0) + (BX(3) - BX(0)) * t)));
+        p.style.opacity = "0";
+        await wait(0.2);
+      }
+      if (!alive()) return;
+      nums.forEach((n) => animate(n, { opacity: [0, 1] }, { duration: dur(0.5), delay: dur(0.4) }));
+      await tween(1.2, (t) => alive() && setBars(t));
+    });
+  });
+</script>

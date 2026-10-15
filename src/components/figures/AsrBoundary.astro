@@ -1,0 +1,111 @@
+---
+// What crosses the speech-recognition boundary. One phrase, said sarcastically:
+// words, a falling drawn-out pitch, a pause and a sigh. The cascade keeps only
+// the words; the full-duplex path keeps the frames.
+const { alt } = Astro.props;
+const contour = "M30 92 C60 70 90 68 120 74 S170 84 200 80 S250 70 270 96 S320 118 340 110";
+const frames = Array.from({ length: 12 }, (_, i) => {
+  const energy = [0.5, 0.7, 0.6, 0.4, 0.15, 0.55, 0.8, 0.9, 0.85, 0.6, 0.3, 0.45][i];
+  const pitch = [0.6, 0.75, 0.7, 0.55, 0.5, 0.5, 0.45, 0.4, 0.3, 0.2, 0.15, 0.2][i];
+  return { x: 30 + i * 26, energy, pitch };
+});
+---
+<div class="blog-diagram" tabindex="0" role="region" aria-label={alt} data-asr>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 270" role="img" aria-labelledby="asr-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="asr-title">The speech-recognition boundary</title>
+    <text x="20" y="22" font-size="11" letter-spacing="1" fill="#5f5f66">CASCADE · SPEECH → TEXT</text>
+    <text x="20" y="160" font-size="11" letter-spacing="1" fill="#5f5f66">FULL DUPLEX · SPEECH → AUDIO FRAMES</text>
+
+    <!-- the spoken phrase (stays put; a ghost copy travels) -->
+    <g data-phrase>
+      <path d={contour} fill="none" stroke="#594578" stroke-width="2" />
+      <g font-size="15" fill="#2b2b30"><text x="34" y="56">Sure,</text><text x="118" y="56">that's</text><text x="212" y="56">greeeat.</text></g>
+      <text x="300" y="76" font-size="11" fill="#5f5f66">(sigh)</text>
+      <text x="30" y="128" font-size="10" fill="#5f5f66">falling pitch · drawn-out vowel · pause · sigh</text>
+    </g>
+
+    <!-- the ASR gate -->
+    <rect x="372" y="32" width="10" height="100" rx="3" fill="#2b2b30" />
+    <text x="364" y="146" font-size="11" fill="#2b2b30" font-weight="600">ASR</text>
+
+    <!-- what comes out -->
+    <g data-out>
+      <rect x="410" y="54" width="190" height="34" rx="6" fill="#fff" stroke="#d5d5dc" />
+      <text x="422" y="76" font-size="13" fill="#2b2b30" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">"Sure, that's great."</text>
+      <text x="612" y="76" font-size="11" fill="#5f5f66">→ LLM reads agreement</text>
+    </g>
+    <g data-lost font-size="11" fill="#a33b3b">
+      <text x="410" y="112">lost: pitch · timing · vowel length · sigh</text>
+    </g>
+
+    <!-- full duplex: the same phrase as frames -->
+    <g data-frames>
+      {frames.map((f) => (
+        <g>
+          <rect x={f.x} y={236 - f.energy * 50} width="20" height={f.energy * 50} rx="2" fill="#4F5D3A" fill-opacity="0.35" />
+          <circle cx={f.x + 10} cy={236 - 58 - f.pitch * 14} r="2.5" fill="#594578" />
+        </g>
+      ))}
+    </g>
+    <text x="30" y="254" font-size="10" fill="#5f5f66">12 frames × 80 ms · bars = energy, dots = pitch</text>
+    <g data-model>
+      <rect x="410" y="176" width="350" height="64" rx="10" fill="#594578" fill-opacity="0.06" stroke="#594578" stroke-opacity="0.5" />
+      <text x="424" y="198" font-size="12" font-weight="600" fill="#2b2b30">one model, audio in</text>
+      <text x="424" y="216" font-size="11" fill="#5f5f66">every frame arrives with its pitch, energy and timing</text>
+      <text x="424" y="232" font-size="11" fill="#4F5D3A">kept: everything the listener heard</text>
+    </g>
+  </svg>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { animate, dur, setupFigure, wait } from "../../lib/figure-motion";
+
+  // A copy of the phrase travels to the ASR gate; only the words come out the
+  // other side. Below, the same phrase as frames flows into the model intact.
+  document.querySelectorAll<HTMLElement>("[data-asr]").forEach((root) => {
+    const svg = root.querySelector("svg")!;
+    const phrase = root.querySelector<SVGGElement>("[data-phrase]")!;
+    const out = root.querySelector<SVGGElement>("[data-out]")!;
+    const lost = root.querySelector<SVGGElement>("[data-lost]")!;
+    const frames = Array.from(root.querySelectorAll<SVGGElement>("[data-frames] > g"));
+    const model = root.querySelector<SVGGElement>("[data-model]")!;
+    let ghosts: SVGElement[] = [];
+
+    setupFigure(
+      root,
+      () => {
+        ghosts.forEach((g) => g.remove()); ghosts = [];
+        out.style.opacity = "0"; lost.style.opacity = "0";
+        model.style.opacity = "0.35";
+      },
+      async (alive) => {
+        // Cascade: the whole utterance travels to the gate.
+        const ghost = phrase.cloneNode(true) as SVGGElement;
+        ghost.removeAttribute("data-phrase");
+        svg.append(ghost); ghosts.push(ghost);
+        const [contour, words, sigh, note] = Array.from(ghost.children) as SVGElement[];
+        note.style.opacity = "0";
+        await animate(ghost, { transform: ["translateX(0px)", "translateX(250px)"] }, { duration: dur(1.1), ease: [0.45, 0, 0.55, 1] });
+        if (!alive()) return;
+        // At the boundary: the prosody drops away, the words pass.
+        animate(contour, { opacity: [1, 0], transform: ["translateY(0px)", "translateY(14px)"] }, { duration: dur(0.5) });
+        animate(sigh, { opacity: [1, 0], transform: ["translateY(0px)", "translateY(14px)"] }, { duration: dur(0.5) });
+        await animate(words, { opacity: [1, 0] }, { duration: dur(0.35) });
+        if (!alive()) return;
+        await animate(out, { opacity: [0, 1], transform: ["translateX(-12px)", "translateX(0px)"] }, { duration: dur(0.4) });
+        await animate(lost, { opacity: [0, 1] }, { duration: dur(0.4) });
+        ghost.remove();
+        await wait(0.3);
+        if (!alive()) return;
+
+        // Full duplex: the frames stream into the model, nothing removed. Each copy
+        // lands half size at x = 430 + 14i inside the model box.
+        const copies = frames.map((f) => { const c = f.cloneNode(true) as SVGGElement; svg.append(c); ghosts.push(c); return c; });
+        animate(model, { opacity: [0.35, 1] }, { duration: dur(0.5) });
+        await Promise.all(copies.map((c, i) => animate(c, { transform: ["translate(0px, 0px)", `translate(${415 + i}px, 100px) scale(0.5)`], opacity: [1, 0.9, 0] }, { duration: dur(0.7), delay: dur(i * 0.08), ease: [0.45, 0, 0.55, 1] })));
+        copies.forEach((c) => c.remove());
+      },
+    );
+  });
+</script>

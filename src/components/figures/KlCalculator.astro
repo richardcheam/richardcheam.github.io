@@ -1,0 +1,45 @@
+---
+// Foundations, autoencoders post: KL between N(μ, σ²) and N(0, 1),
+// ½(μ² + σ² − ln σ² − 1). (0, 1) → 0; (2, 1) → 2; (0, 0.5) → 0.318;
+// (0, 2) → 0.807; (1, 0.5) → 0.818; (0, 0.1) → 1.808.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-kl>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 270" role="img" aria-labelledby="kl-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="kl-title">An encoder's bell curve against the standard normal, with the KL formula filled in</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Centre μ <strong data-v="mu"></strong></span><input class="scrub" data-k="mu" type="range" min="-3" max="3" step="0.05" value="1" /></label>
+    <label><span class="fig-panel__name">Spread σ <strong data-v="sg"></strong></span><input class="scrub" data-k="sg" type="range" min="0.05" max="3" step="0.01" value="0.5" /></label>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt } from "../../lib/tiny-net";
+  import { INK, MUTED, GOLD } from "../../lib/net-diagram";
+  import { frame, txt } from "../../lib/plot";
+  const pdf = (z: number, m: number, s: number) => Math.exp(-((z - m) ** 2) / (2 * s * s)) / (s * Math.sqrt(2 * Math.PI));
+  document.querySelectorAll<HTMLElement>("[data-kl]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const p: Record<string, number> = { mu: 1, sg: 0.5 };
+    const set = (m: number, s: number) => { p.mu = m; p.sg = s; $<HTMLInputElement>('[data-k="mu"]').value = String(m); $<HTMLInputElement>('[data-k="sg"]').value = String(s); };
+    const kl = () => { const m2 = p.mu ** 2, s2 = p.sg ** 2, l = -Math.log(s2); return { m2, s2, l, br: m2 + s2 + l - 1, k: 0.5 * (m2 + s2 + l - 1) }; };
+    const PRE = [[0, 1, "Identical to the standard normal: no surprise at all."], [2, 1, "Same width, centre moved to 2: the off-centre penalty."], [0, 0.5, "Half as wide: a small width penalty."], [0, 2, "Twice as wide: a bigger one."], [1, 0.5, "Off-centre and narrow: both penalties."], [0, 0.1, "Very narrow: the −ln σ² term shoots up. A pin would cost infinitely much."]] as const;
+    const steps = () => PRE.map(([m, sg, say]) => ({ say, math: "", enter: () => set(m, sg) })).map((st) => ({ ...st, get math() { const c = kl(); return `½(μ² + σ² − ln σ² − 1) = ½(${fmt(c.m2, 3)} + ${fmt(c.s2, 3)} + ${c.l < 0 ? `(${fmt(c.l, 3)})` : fmt(c.l, 3)} − 1) = ½ × ${fmt(c.br, 3)} = ${fmt(c.k, 3)}`; } }));
+    function draw() {
+      const c = kl(), top = Math.max(0.45, pdf(p.mu, p.mu, p.sg) * 1.05), F = frame({ l: 40, t: 30, w: 420, h: 190, x0: -5, x1: 5, y0: 0, y1: top });
+      let s = F.grid([-4, -2, 0, 2, 4], [], 0) + F.curve((z) => pdf(z, 0, 1), `stroke="#9aa3a1" stroke-width="2.2"`, 300) + F.curve((z) => pdf(z, p.mu, p.sg), `stroke="${GOLD}" stroke-width="2.8"`, 400);
+      s += txt(40, 18, `grey: standard normal N(0, 1); gold: N(${fmt(p.mu, 2)}, ${fmt(p.sg, 2)}²)`, `font-size="12" font-weight="700" fill="${INK}"`);
+      s += txt(500, 60, "off-centre part μ²/2", `font-size="11.5" fill="${MUTED}"`) + txt(500, 80, fmt(c.m2 / 2, 3), `font-size="14" font-weight="700" fill="${INK}"`);
+      s += txt(500, 116, "width part (σ² − ln σ² − 1)/2", `font-size="11.5" fill="${MUTED}"`) + txt(500, 136, fmt((c.s2 + c.l - 1) / 2, 3), `font-size="14" font-weight="700" fill="${INK}"`);
+      s += txt(500, 180, `KL = ${fmt(c.k, 3)}`, `font-size="18" font-weight="700" fill="${GOLD}"`);
+      $("[data-draw]").innerHTML = s;
+      root.querySelectorAll<HTMLElement>("[data-v]").forEach((el) => (el.textContent = fmt(p[el.dataset.v!], 2)));
+    }
+    const redraw = stepper(root, steps, draw, { delay: 2 });
+    root.querySelectorAll<HTMLInputElement>("[data-k]").forEach((inp) => inp.addEventListener("input", () => { p[inp.dataset.k!] = +inp.value; redraw(); }));
+  });
+</script>

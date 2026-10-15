@@ -1,0 +1,48 @@
+---
+// Foundations, Transformer post: sinusoidal position vectors. d = 4,
+// position 1: 0.8415, 0.5403, 0.0100, 1.0000; position 3: 0.1411,
+// −0.9900, 0.0300, 0.9996.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-sinpe>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 300" role="img" aria-labelledby="sp-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="sp-title">A heatmap of sinusoidal position values, fast waves on the left and slow waves on the right</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Position p <strong data-vp></strong></span><input class="scrub" data-p type="range" min="0" max="63" step="1" value="1" /></label>
+    <div><span class="fig-panel__name">Width d</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-d="4" aria-pressed="true">4</button><button type="button" class="fig-chip" data-d="16" aria-pressed="false">16</button><button type="button" class="fig-chip" data-d="64" aria-pressed="false">64</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt } from "../../lib/tiny-net";
+  import { INK, MUTED, GOLD } from "../../lib/net-diagram";
+  import { txt } from "../../lib/plot";
+  import { sinPE } from "../../lib/transformer";
+  const colour = (v: number) => { const t = (v + 1) / 2, a = [62, 110, 158], b = [214, 150, 60]; return `rgb(${a.map((x, i) => Math.round(x + (b[i] - x) * t)).join(",")})`; };
+  document.querySelectorAll<HTMLElement>("[data-sinpe]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    let p = 1, d = 4;
+    const setP = (v: number) => { p = v; $<HTMLInputElement>("[data-p]").value = String(v); };
+    const steps = () => [0, 1, 2, 3].map((q) => ({ say: q === 0 ? "Position 0: every sine is 0 and every cosine is 1." : `Position ${q}. Pair 0 (stretch 1) swings a lot; pair 1 (stretch ${fmt(10000 ** (2 / d))}) barely moves.`, math: Array.from({ length: Math.min(d, 4) }, (_, j) => { const i = Math.floor(j / 2), st = 10000 ** ((2 * i) / d); return `${j % 2 ? "cos" : "sin"}(${q} / ${fmt(st, 2)}) = ${fmt(sinPE(q, j, d), 4)}`; }).join(",  "), enter: () => setP(q) }));
+    function draw() {
+      const P = 64, cw = Math.min(40, 400 / d), ch = 3.6;
+      let s = txt(30, 18, `Positions 0 to 63 (down) by dimensions 0 to ${d - 1} (across)`, `font-size="12" font-weight="700" fill="${INK}"`);
+      for (let q = 0; q < P; q++) for (let j = 0; j < d; j++) s += `<rect x="${40 + j * cw}" y="${30 + q * ch}" width="${cw}" height="${ch}" fill="${colour(sinPE(q, j, d))}"/>`;
+      s += `<rect x="38" y="${30 + p * ch - 1}" width="${d * cw + 4}" height="${ch + 2}" fill="none" stroke="${INK}" stroke-width="2"/>`;
+      s += txt(500, 50, `position ${p}`, `font-size="13" font-weight="700" fill="${INK}"`);
+      Array.from({ length: Math.min(d, 8) }, (_, j) => j).forEach((j) => { const v = sinPE(p, j, d); s += `<rect x="500" y="${64 + j * 26}" width="16" height="16" fill="${colour(v)}"/>` + txt(524, 77 + j * 26, `dim ${j}: ${j % 2 ? "cos" : "sin"} → ${fmt(v, 4)}`, `font-size="12" fill="${INK}"`); });
+      s += txt(500, 290, "blue −1, orange +1", `font-size="10.5" fill="${MUTED}"`);
+      $("[data-draw]").innerHTML = s;
+      $("[data-vp]").textContent = String(p);
+    }
+    const redraw = stepper(root, steps, draw, { delay: 1.8 });
+    $<HTMLInputElement>("[data-p]").addEventListener("input", (e) => { p = +(e.target as HTMLInputElement).value; redraw(); });
+    root.querySelectorAll<HTMLButtonElement>("[data-d]").forEach((b) => b.addEventListener("click", () => { d = +b.dataset.d!; root.querySelectorAll("[data-d]").forEach((o) => o.setAttribute("aria-pressed", String(o === b))); redraw(); }));
+  });
+</script>

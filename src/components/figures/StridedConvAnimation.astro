@@ -1,0 +1,267 @@
+---
+// Animated causal strided convolution (encoder) and transposed convolution
+// (decoder), kernel 8 and stride 4, as in Mimi's outermost resampling layers.
+// Every bar is a real number: samples, weights and sums are computed here.
+interface Props {
+  alt: string;
+}
+const { alt } = Astro.props;
+
+const K = 8, S = 4, N = 16;
+const raw = [1, 2, 3, 4, 4, 3, 2, 1];
+const w = raw.map((v) => v / raw.reduce((a, b) => a + b, 0)); // sums to 1
+const x = Array.from({ length: N }, (_, i) => 0.75 * Math.sin((2 * Math.PI * i) / 11 + 0.4) + 0.25 * Math.sin((2 * Math.PI * i) / 3.1));
+const padded = [...Array(K - S).fill(0), ...x];
+const y = Array.from({ length: N / S }, (_, n) => w.reduce((acc, wj, j) => acc + wj * padded[n * S + j], 0));
+const frames = [0.8, 1.0, 0.6]; // decoder inputs
+const outLen = frames.length * S + (K - S);
+
+const X0 = 70, CELL = 30;
+const encBase = 92, encScale = 34, outBase = 228, outScale = 80;
+const decBase = 266, decScale = 320;
+const bar = (v: number, base: number, scale: number) => ({ y: v >= 0 ? base - v * scale : base, h: Math.max(Math.abs(v) * scale, 0.5) });
+const palette = ["#594578", "#8b78a9", "#bcaecf"];
+const data = { K, S, w, padded, y, frames };
+---
+<div class="blog-diagram sca" role="region" aria-label={alt} data-sca data-values={JSON.stringify(data)}>
+  <div class="sca__modes" role="tablist" aria-label="Direction">
+    <button type="button" role="tab" aria-selected="true" data-mode="enc">Encoder · strided conv</button>
+    <button type="button" role="tab" aria-selected="false" data-mode="dec">Decoder · transposed conv</button>
+  </div>
+
+  <svg data-panel="enc" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 290" role="img" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title>Causal strided convolution</title>
+    <desc>Twenty input cells: four padding cells, then sixteen samples drawn as bars. An eight-cell window steps four cells at a time. Under it, four output bars appear one by one, each the weighted sum of the samples inside the window.</desc>
+    <text x={X0} y="30" font-size="12" fill="#5f5f66" letter-spacing="1">INPUT x̃ · 4 PADDING + 16 SAMPLES</text>
+    <text x={X0} y="166" font-size="12" fill="#5f5f66" letter-spacing="1">OUTPUT y · ONE FRAME PER STRIDE</text>
+    {padded.map((v, i) => {
+      const b = bar(v, encBase, encScale);
+      return (
+        <g>
+          <rect x={X0 + i * CELL} y="50" width={CELL} height="84" fill={i < K - S ? "#ececf1" : "#fff"} stroke="#d5d5dc" stroke-width="0.8" stroke-dasharray={i < K - S ? "3 2" : undefined} />
+          {i >= K - S && <rect x={X0 + i * CELL + 9} y={b.y} width="12" height={b.h} fill="#5f5f66" fill-opacity="0.75" />}
+        </g>
+      );
+    })}
+    <line x1={X0} y1={encBase} x2={X0 + padded.length * CELL} y2={encBase} stroke="#d5d5dc" />
+    <g data-window>
+      <polygon points={`${X0},134 ${X0 + K * CELL},134 ${X0 + K * CELL},186 ${X0 + (K - S) * CELL},186`} fill="#594578" fill-opacity="0.08" />
+      <rect x={X0 - 2} y="46" width={K * CELL + 4} height="92" rx="4" fill="#594578" fill-opacity="0.07" stroke="#594578" stroke-width="2" />
+      {w.map((wj, j) => <text x={X0 + j * CELL + CELL / 2} y="150" font-size="10" text-anchor="middle" fill="#594578">{wj.toFixed(2).replace(/^0/, "")}</text>)}
+    </g>
+    {y.map((v, n) => {
+      const b = bar(v, outBase, outScale);
+      const cx = X0 + (n * S + K - S) * CELL;
+      return (
+        <g>
+          <rect x={cx} y="186" width={S * CELL} height="84" fill="#fff" stroke="#d5d5dc" stroke-width="0.8" />
+          <rect data-out={n} x={cx + S * CELL / 2 - 14} y={b.y} width="28" height={b.h} fill="#594578" style={`transform-box: fill-box; transform-origin: 50% ${v >= 0 ? "100%" : "0%"}; transform: scaleY(0)`} />
+          <text data-out-label={n} x={cx + S * CELL / 2} y="284" font-size="11" text-anchor="middle" fill="#594578" opacity="0">{`y${"₀₁₂₃"[n]} = ${v < 0 ? "−" : ""}${Math.abs(v).toFixed(2)}`}</text>
+        </g>
+      );
+    })}
+    <line x1={X0 + (K - S) * CELL} y1={outBase} x2={X0 + padded.length * CELL} y2={outBase} stroke="#d5d5dc" />
+  </svg>
+
+  <svg data-panel="dec" hidden xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 290" role="img" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title>Causal transposed convolution with overlap-add</title>
+    <desc>Three input frames at the top. Each stamps its value times the eight kernel weights onto eight output positions, four positions after the previous frame, so stamps overlap by four and stack. The last four positions are held for the next chunk.</desc>
+    <text x={X0} y="30" font-size="12" fill="#5f5f66" letter-spacing="1">INPUT FRAMES a · ONE PER STRIDE</text>
+    <text x={X0} y="160" font-size="12" fill="#5f5f66" letter-spacing="1">OUTPUT · OVERLAPPING STAMPS ADD</text>
+    {frames.map((a, n) => (
+      <g data-frame={n}>
+        <rect data-frame-box x={X0 + n * S * CELL} y="44" width={S * CELL} height="80" rx="3" fill="#fff" stroke={palette[n]} stroke-width="1.5" />
+        <rect x={X0 + n * S * CELL + 46} y={112 - a * 56} width="28" height={a * 56} fill={palette[n]} />
+        <text x={X0 + n * S * CELL + 60} y="140" font-size="11" text-anchor="middle" fill="#594578">{`a${"₀₁₂"[n]} = ${a.toFixed(1)}`}</text>
+      </g>
+    ))}
+    <rect x={X0 + frames.length * S * CELL} y="176" width={(K - S) * CELL} height="94" fill="#ececf1" stroke="#5f5f66" stroke-dasharray="3 2" />
+    <text x={X0 + frames.length * S * CELL + 6} y="190" font-size="10" fill="#5f5f66">held for the next chunk</text>
+    {Array.from({ length: outLen }, (_, p) => <rect x={X0 + p * CELL} y="176" width={CELL} height="94" fill="none" stroke="#d5d5dc" stroke-width="0.8" />)}
+    {frames.map((a, n) => {
+      return w.map((wj, j) => {
+        const p = n * S + j;
+        const below = frames.slice(0, n).reduce((acc, ap, m) => {
+          const jj = p - m * S;
+          return jj >= 0 && jj < K ? acc + ap * w[jj] : acc;
+        }, 0);
+        const h = a * wj * decScale;
+        return <rect data-stamp={n} x={X0 + p * CELL + 7} y={decBase - (below * decScale) - h} width="16" height={h} fill={palette[n]} style="transform-box: fill-box; transform-origin: 50% 100%; transform: scaleY(0)" />;
+      });
+    })}
+    <line x1={X0} y1={decBase} x2={X0 + outLen * CELL} y2={decBase} stroke="#d5d5dc" />
+    <g data-bracket opacity="0">
+      <path d={`M${X0 + 2} 174 v-5 h${K * CELL - 4} v5`} fill="none" stroke="#594578" stroke-width="2" />
+    </g>
+  </svg>
+
+  <div class="sca__controls">
+    <button type="button" data-action="play">Play</button>
+    <button type="button" data-action="step">Step</button>
+    <button type="button" data-action="reset">Reset</button>
+    <p class="sca__readout" aria-live="polite" data-readout>Press Play, or Step through one output at a time.</p>
+  </div>
+</div>
+<p class="blog-figure-reading">Encoder: the window ends on the newest sample it reads, so no output waits for the future. Decoder: neighbouring stamps overlap by four positions and stack; with this kernel, two overlapping halves add up to a smooth ramp instead of a step.</p>
+
+<style>
+  .sca__modes { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
+  .sca button {
+    min-height: 36px;
+    padding: 0 0.85rem;
+    border: 1px solid var(--border-strong);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: 0.85rem;
+    cursor: pointer;
+  }
+  .sca button:hover { border-color: var(--text); }
+  .sca__modes button[aria-selected="true"] { background: var(--text); color: var(--bg); border-color: var(--text); }
+  .sca__controls { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.5rem; }
+  .sca__readout { margin: 0 0 0 0.5rem; font-family: var(--font-mono); font-size: 0.82rem; color: var(--text-secondary); flex: 1 1 18rem; }
+  .sca svg[hidden] { display: none; }
+</style>
+
+<script>
+  import { animate } from "motion/mini";
+
+  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const sub = (s: string) => s.replace(/\d/g, (d) => "₀₁₂₃₄₅₆₇₈₉"[+d]);
+  const num = (v: number) => (v < 0 ? `(−${Math.abs(v).toFixed(2)})` : v.toFixed(2));
+
+  document.querySelectorAll<HTMLElement>("[data-sca]").forEach((root) => {
+    const { K, S, w, padded, y, frames } = JSON.parse(root.dataset.values!);
+    const CELL = 30;
+    const readout = root.querySelector<HTMLElement>("[data-readout]")!;
+    const enc = root.querySelector<SVGElement>('[data-panel="enc"]')!;
+    const dec = root.querySelector<SVGElement>('[data-panel="dec"]')!;
+    const win = enc.querySelector<SVGGElement>("[data-window]")!;
+    const bracket = dec.querySelector<SVGGElement>("[data-bracket]")!;
+    let mode: "enc" | "dec" = "enc";
+    let step = 0;
+    let playing = false;
+    let token = 0;
+    const total = () => (mode === "enc" ? y.length : frames.length);
+    const dur = (s: number) => (reduce ? 0 : s);
+
+    function explainEnc(n: number) {
+      const start = n * S;
+      const terms = w
+        .map((wj: number, j: number) => ({ j, t: `${wj.toFixed(2)}·${num(padded[start + j])}` }))
+        .filter(({ j }: { j: number }) => start + j >= K - S)
+        .map(({ t }: { t: string }) => t);
+      const firstReal = start - (K - S);
+      const reads = firstReal < 0 ? `padding + x₀…${sub("x" + (firstReal + K - 1))}` : `${sub("x" + firstReal)}…${sub("x" + (firstReal + K - 1))}`;
+      return `${sub("y" + n)} reads ${reads}: ${terms.slice(0, 3).join(" + ")} + … = ${y[n] < 0 ? "−" : ""}${Math.abs(y[n]).toFixed(2)}`;
+    }
+    function explainDec(n: number) {
+      return `${sub("a" + n)} = ${frames[n].toFixed(1)} stamps a·w onto positions ${n * S}…${n * S + K - 1}` + (n > 0 ? `; positions ${n * S}…${n * S + S - 1} now hold two stamps, added` : "");
+    }
+
+    async function reset() {
+      token++;
+      playing = false;
+      step = 0;
+      setPlayLabel();
+      win.style.transform = "translateX(0px)";
+      root.querySelectorAll<SVGElement>("[data-out], [data-stamp]").forEach((el) => (el.style.transform = "scaleY(0)"));
+      root.querySelectorAll<SVGElement>("[data-out-label]").forEach((el) => el.setAttribute("opacity", "0"));
+      bracket.setAttribute("opacity", "0");
+      bracket.style.transform = "translateX(0px)";
+      root.querySelectorAll<SVGElement>("[data-frame-box]").forEach((el) => el.setAttribute("stroke-width", "1.5"));
+      readout.textContent = mode === "enc" ? "Press Play, or Step through one output at a time." : "Press Play, or Step through one input frame at a time.";
+    }
+
+    async function advance() {
+      if (step >= total()) return false;
+      const n = step++;
+      const my = token;
+      if (mode === "enc") {
+        await animate(win, { transform: `translateX(${n * S * CELL}px)` }, { duration: dur(n === 0 ? 0.2 : 0.55), ease: [0.65, 0, 0.35, 1] });
+        if (my !== token) return false;
+        readout.textContent = explainEnc(n);
+        const out = enc.querySelector<SVGElement>(`[data-out="${n}"]`)!;
+        await animate(out, { transform: ["scaleY(0)", "scaleY(1)"] }, { duration: dur(0.45), ease: [0.22, 1, 0.36, 1] });
+        enc.querySelector(`[data-out-label="${n}"]`)!.setAttribute("opacity", "1");
+      } else {
+        bracket.setAttribute("opacity", "1");
+        await animate(bracket, { transform: `translateX(${n * S * CELL}px)` }, { duration: dur(n === 0 ? 0.01 : 0.45), ease: [0.65, 0, 0.35, 1] });
+        if (my !== token) return false;
+        readout.textContent = explainDec(n);
+        dec.querySelectorAll<SVGElement>("[data-frame-box]").forEach((el, i) => el.setAttribute("stroke-width", i === n ? "3" : "1.5"));
+        const bars = Array.from(dec.querySelectorAll<SVGElement>(`[data-stamp="${n}"]`));
+        await Promise.all(bars.map((el, j) => animate(el, { transform: ["scaleY(0)", "scaleY(1)"] }, { duration: dur(0.4), delay: dur(j * 0.06), ease: [0.22, 1, 0.36, 1] })));
+      }
+      if (step >= total()) {
+        readout.textContent += mode === "enc" ? `  ·  done: 16 samples → 4 frames` : `  ·  done: 12 samples out, last 4 carried`;
+      }
+      return my === token;
+    }
+
+    function setPlayLabel() {
+      root.querySelector('[data-action="play"]')!.textContent = playing ? "Pause" : step >= total() ? "Replay" : "Play";
+    }
+
+    // Every action runs on one chain, so animations never overlap. Pause and
+    // interruptions only flip flags; the running step finishes, then the chain moves on.
+    let chain: Promise<unknown> = Promise.resolve();
+    const enqueue = (fn: () => Promise<unknown>) => (chain = chain.then(fn, fn));
+
+    async function playLoop() {
+      if (step >= total()) await reset();
+      playing = true;
+      setPlayLabel();
+      const my = token;
+      while (playing && my === token && step < total()) {
+        await advance();
+        if (!playing || my !== token) break;
+        await new Promise((r) => setTimeout(r, reduce ? 600 : 450));
+      }
+      if (my === token) { playing = false; setPlayLabel(); }
+    }
+
+    function interrupt() {
+      token++;
+      playing = false;
+    }
+
+    root.addEventListener("click", (event) => {
+      const target = (event.target as HTMLElement).closest("button");
+      if (!target) return;
+      const nextMode = target.dataset.mode as "enc" | "dec" | undefined;
+      const action = target.dataset.action;
+      if (nextMode && nextMode !== mode) {
+        interrupt();
+        enqueue(async () => {
+          mode = nextMode;
+          root.querySelectorAll<HTMLElement>("[data-mode]").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.mode === mode)));
+          enc.toggleAttribute("hidden", mode !== "enc");
+          dec.toggleAttribute("hidden", mode !== "dec");
+          await reset();
+        });
+      }
+      if (action === "play") {
+        if (playing) { playing = false; setPlayLabel(); return; }
+        enqueue(playLoop);
+      }
+      if (action === "step") {
+        playing = false;
+        enqueue(async () => { await advance(); setPlayLabel(); });
+      }
+      if (action === "reset") {
+        interrupt();
+        enqueue(reset);
+      }
+    });
+
+    // Start the first pass when the figure scrolls into view.
+    if (!reduce && "IntersectionObserver" in window) {
+      const io = new IntersectionObserver((entries) => {
+        if (entries.some((e) => e.isIntersecting)) { io.disconnect(); if (step === 0 && !playing) enqueue(playLoop); }
+      }, { threshold: 0.6 });
+      io.observe(root);
+    }
+  });
+</script>

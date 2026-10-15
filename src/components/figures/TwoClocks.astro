@@ -1,0 +1,78 @@
+---
+// Moshi review, Figure 2: the RQ-Transformer's two clocks (Sec 3.4.1, p. 13).
+// Each pass of the big Temporal Transformer covers one 17-token column, filled
+// by the small Depth Transformer; a single flattened model would need one big
+// pass per token. Counts: 12.5 columns per second, K = 17.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram tc" role="region" aria-label={alt} data-tc>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 400" role="img" aria-labelledby="tc-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="tc-title">The same number of big-model passes covers 17 times more audio with the RQ-Transformer than with a flattened sequence</title>
+    <text x="20" y="22" font-size="11.5" font-weight="700" fill="#2b2b30">RQ-Transformer: one big pass per column, the small model climbs the 17 floors</text>
+    <g data-rq></g>
+    <text x="20" y="232" font-size="11.5" font-weight="700" fill="#2b2b30">Flattened: one big pass per token</text>
+    <g data-flat></g>
+    <text data-c1 x="20" y="318" font-size="12.5" fill="#2b2b30"></text>
+    <text data-c2 x="20" y="338" font-size="12.5" fill="#2b2b30"></text>
+    <text data-c3 x="20" y="364" font-size="12.5" font-weight="700" fill="#2b2b30"></text>
+    <text data-c4 x="20" y="384" font-size="11.5" fill="#5f5f66"></text>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Conversation length<strong data-vd></strong></span><input class="scrub" data-d type="range" min="1" max="300" step="1" value="300" /></label>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { setupFigure, tween, wait } from "../../lib/figure-motion";
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-tc]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const COLS = 24, K = 17, CW = 30, CH = 10, X0 = 20, Y0 = 36;
+    const cells: SVGRectElement[][] = [];
+    const rq = $("[data-rq]"), flat = $("[data-flat]");
+    const mk = (g: Element, tag: string, a: Record<string, string | number>) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, String(a[k])); g.append(e); return e; };
+    for (let c = 0; c < COLS; c++) {
+      cells.push([]);
+      for (let k = 0; k < K; k++) cells[c].push(mk(rq, "rect", { x: X0 + c * CW, y: Y0 + (K - 1 - k) * CH, width: CW - 3, height: CH - 2, rx: 1 }) as SVGRectElement);
+    }
+    const big = mk(rq, "path", { fill: "#a33b3b" }), lift = mk(rq, "path", { fill: "#594578" });
+    // The flattened line: the same columns laid end to end, 17 cells each.
+    const fl: SVGRectElement[] = [];
+    for (let i = 0; i < 6 * K; i++) fl.push(mk(flat, "rect", { x: X0 + i * 7, y: 244 + 0, width: 6, height: 26, rx: 1 }) as SVGRectElement);
+    const fbig = mk(flat, "path", { fill: "#a33b3b" });
+    const colour = (k: number) => (k === 0 ? "#2b2b30" : k === 1 || k === 9 ? "#4F5D3A" : "#8a8a94");
+    function draw(passes: number, floor: number) {
+      // passes: big passes done; floor: how far the lift has climbed in the current column.
+      cells.forEach((col, c) => col.forEach((r, k) => {
+        const on = c < passes || (c === passes && k < floor);
+        r.setAttribute("fill", on ? colour(k) : "#ececf1"); r.setAttribute("fill-opacity", on ? "0.85" : "1");
+      }));
+      const bx = X0 + Math.min(passes, COLS - 1) * CW + CW / 2 - 1.5;
+      big.setAttribute("d", `M${bx} ${Y0 + K * CH + 4} l-7 12 h14 z`);
+      lift.setAttribute("d", floor > 0 && passes < COLS ? `M${X0 + passes * CW + CW - 1} ${Y0 + (K - floor) * CH + 4} l7 -5 v10 z` : "");
+      fl.forEach((r, i) => { const on = i < passes; r.setAttribute("fill", on ? colour(i % K) : "#ececf1"); r.setAttribute("fill-opacity", on ? "0.85" : "1"); });
+      fbig.setAttribute("d", `M${X0 + Math.min(passes, fl.length - 1) * 7 + 3} 274 l-7 12 h14 z`);
+    }
+    const dIn = $<HTMLInputElement>("[data-d]");
+    function counts() {
+      const d = +dIn.value, steps = d * 12.5;
+      $("[data-c1]").textContent = `${d} s of conversation = ${d} × 12.5 = ${steps.toLocaleString("en")} columns of ${K} tokens.`;
+      $("[data-c2]").textContent = `Big passes: RQ-Transformer ${steps.toLocaleString("en")}; flattened ${(steps * K).toLocaleString("en")}.`;
+      $("[data-c3]").textContent = `The 7B model runs ${K}× less often; the work inside a column goes to a 6-layer model.`;
+      $("[data-c4]").textContent = `Audio tokens alone, flattened: 8 × 12.5 × ${d} = ${(8 * steps).toLocaleString("en")} (Sec 3.4.1, p. 13). Same number of red-arrow moves in both rows above.`;
+      $("[data-vd]").textContent = `${d} s`; dIn.style.setProperty("--p", `${((d - 1) / 299) * 100}%`);
+    }
+    dIn.addEventListener("input", counts);
+    counts(); draw(COLS, 0);
+    setupFigure(root, () => draw(0, 0), async (alive) => {
+      for (let c = 0; c < COLS; c++) {
+        if (!alive()) return;
+        const slow = c < 3;
+        await tween(slow ? 0.9 : 0.12, (e) => { if (alive()) draw(c, Math.round(e * K)); });
+        draw(c + 1, 0);
+        if (slow) await wait(0.25);
+      }
+    });
+  });
+</script>

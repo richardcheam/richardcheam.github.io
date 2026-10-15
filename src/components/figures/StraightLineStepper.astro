@@ -1,0 +1,52 @@
+---
+// Foundations, diffusion post: a straight pair 0.5 → 1 (target velocity 0.5;
+// at t = 0.5, x_t = 0.75) and Euler on the toy's averaged straight-path
+// field from 0.5: N = 2 ends at 0.462, N = 4 at 1.000 (stops 0.5, 0.375,
+// 0.305, 0.425, 1.000).
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-straight>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 290" role="img" aria-labelledby="sl2-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="sl2-title">A straight noise-to-data line, and Euler steps through the averaged velocity field</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Euler steps N</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-n="1" aria-pressed="false">1</button><button type="button" class="fig-chip" data-n="2" aria-pressed="false">2</button><button type="button" class="fig-chip" data-n="4" aria-pressed="true">4</button><button type="button" class="fig-chip" data-n="8" aria-pressed="false">8</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt, par } from "../../lib/tiny-net";
+  import { INK, MUTED, NEG, JADE, GOLD } from "../../lib/net-diagram";
+  import { frame, txt, arrow } from "../../lib/plot";
+  import { vStraight } from "../../lib/diffusion";
+  document.querySelectorAll<HTMLElement>("[data-straight]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    let N = 4;
+    const f3 = (v: number) => fmt(v, 3);
+    const path = () => { const h = 1 / N, out = [{ t: 0, x: 0.5, x1: 0, v: 0 }]; let x = 0.5; for (let k = 0; k < N; k++) { const r = vStraight(x, k * h); out[k].x1 = r.x1; out[k].v = r.v; x = x + h * r.v; out.push({ t: (k + 1) * h, x, x1: 0, v: 0 }); } return out; };
+    const steps = () => { const P = path(), h = 1 / N; return [
+      { say: "Training target for one pair: a straight line from noise 0.5 to data 1, at constant velocity 'destination minus start'.", math: `x_t at t = 0.5: 0.5 × 0.5 + 0.5 × 1 = 0.75;  target velocity 1 − 0.5 = 0.5` },
+      ...P.slice(0, N).map((q, k) => ({ say: k === 0 ? "Now sample with the averaged field the network learns. At t = 0 it cannot yet tell +1 from −1, so it heads for the middle." : `Step ${k + 1}: guess the destination, head there at the speed that arrives on time.`, math: `t = ${f3(q.t)}: x̂₁ = ${f3(q.x1)},  v = (${f3(q.x1)} − ${f3(q.x)}) / ${f3(1 - q.t)} = ${f3(q.v)},  x = ${f3(q.x)} + ${f3(h)} × ${par(q.v, 3)} = ${f3(P[k + 1].x)}` })),
+    ]; };
+    function draw(k: number) {
+      const P = path();
+      const A = frame({ l: 40, t: 30, w: 260, h: 220, x0: 0, x1: 1, y0: -1.3, y1: 1.3 });
+      let s = A.grid([0, 0.5, 1], [-1, 0, 1], 1) + `<line x1="${A.X(0)}" y1="${A.Y(0.5)}" x2="${A.X(1)}" y2="${A.Y(1)}" stroke="${GOLD}" stroke-width="2.5"/><circle cx="${A.X(0.5)}" cy="${A.Y(0.75)}" r="5" fill="${GOLD}"/>` + txt(40, 18, "one pair: noise 0.5 → data 1", `font-size="12" font-weight="700" fill="${INK}"`);
+      const B = frame({ l: 380, t: 30, w: 340, h: 220, x0: 0, x1: 1, y0: -1.6, y1: 1.6 });
+      s += B.grid([0, 0.5, 1], [-1, 0, 1], 1) + txt(380, 18, "averaged field the network learns, and Euler", `font-size="12" font-weight="700" fill="${INK}"`);
+      for (let i = 0; i < 10; i++) for (let j = -6; j <= 6; j++) { const t = i * 0.095, x = j * 0.25, v = vStraight(x, t).v, len = Math.max(-0.25, Math.min(0.25, v * 0.06)); s += `<line x1="${B.X(t)}" y1="${B.Y(x)}" x2="${B.X(t + 0.05)}" y2="${B.Y(x + len)}" stroke="${MUTED}" stroke-opacity="0.5"/>`; }
+      const shown = Math.max(0, Math.min(N, k));
+      s += `<polyline fill="none" stroke="${NEG}" stroke-width="2.5" points="${P.slice(0, shown + 1).map((q) => `${B.X(q.t)},${B.Y(q.x)}`).join(" ")}"/>`;
+      P.slice(0, shown + 1).forEach((q) => (s += `<circle cx="${B.X(q.t)}" cy="${B.Y(q.x)}" r="4.5" fill="${NEG}"/>`));
+      s += txt(380, 274, `N = ${N}: ends at ${f3(P[N].x)}`, `font-size="12.5" font-weight="700" fill="${INK}"`);
+      $("[data-draw]").innerHTML = s;
+    }
+    const redraw = stepper(root, steps, draw, { delay: 1.6 });
+    root.querySelectorAll<HTMLButtonElement>("[data-n]").forEach((b) => b.addEventListener("click", () => { N = +b.dataset.n!; root.querySelectorAll("[data-n]").forEach((o) => o.setAttribute("aria-pressed", String(o === b))); redraw(); }));
+  });
+</script>

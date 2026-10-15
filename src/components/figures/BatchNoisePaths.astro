@@ -1,0 +1,87 @@
+---
+// Foundations, loss post: full-batch, stochastic and mini-batch descent on
+// four points A(2,0) B(4,2) C(2,4) D(0,2), loss = average squared distance
+// = 4 + |w − (2,2)|². With η = 0.25 each step goes halfway to its target.
+// After 4 steps: full (1.875, 1.875); stochastic B, D, A, C (1.75, 2.375);
+// mini-batches {B, A} then {D, C} (1.5625, 2.1875).
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-batch>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 320" role="img" aria-labelledby="bn-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="bn-title">Three paths towards the centre of four points: full batch, one example at a time, and two at a time</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Learning rate η <strong data-v></strong></span><input class="scrub" data-eta type="range" min="0.05" max="0.5" step="0.05" value="0.25" /></label>
+    <div><span class="fig-panel__name">Data order</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-shuffle>Reshuffle</button>
+      <button type="button" class="fig-chip" data-default>Back to B, D, A, C</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt, mulberry } from "../../lib/tiny-net";
+  import { INK, MUTED, NEG, GOLD } from "../../lib/net-diagram";
+  import { frame, txt } from "../../lib/plot";
+  const PTS: Record<string, [number, number]> = { A: [2, 0], B: [4, 2], C: [2, 4], D: [0, 2] };
+  const COL = { full: "#2F6E5F", sgd: "#B5533C", mini: "#3E6E9E" };
+  const N = 8, loss = ([a, b]: number[]) => 4 + (a - 2) ** 2 + (b - 2) ** 2;
+  const pt = ([a, b]: number[]) => `(${fmt(a, 4)}, ${fmt(b, 4)})`;
+  document.querySelectorAll<HTMLElement>("[data-batch]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    let eta = 0.25, order = ["B", "D", "A", "C"], mini = [["B", "A"], ["D", "C"]], seed = 0;
+    const avg = (ks: string[]) => [ks.reduce((t, k) => t + PTS[k][0], 0) / ks.length, ks.reduce((t, k) => t + PTS[k][1], 0) / ks.length];
+    const run = () => {
+      const r = { full: [[0, 0]], sgd: [[0, 0]], mini: [[0, 0]] } as Record<string, number[][]>, tg = { full: [] as number[][], sgd: [] as string[], mini: [] as string[][] };
+      const mv = (w: number[], t: number[]) => [w[0] + 2 * eta * (t[0] - w[0]), w[1] + 2 * eta * (t[1] - w[1])];
+      for (let i = 0; i < N; i++) {
+        r.full.push(mv(r.full[i], [2, 2]));
+        const k = order[i % 4]; tg.sgd.push(k); r.sgd.push(mv(r.sgd[i], PTS[k]));
+        const m = mini[i % 2]; tg.mini.push(m); r.mini.push(mv(r.mini[i], avg(m)));
+      }
+      return { r, tg };
+    };
+    const how = (w: number[], t: number[], nw: number[]) => `${pt(w)} + ${fmt(2 * eta)} × (${pt(t)} − ${pt(w)}) = ${pt(nw)}, loss ${fmt(loss(nw), 4)}`;
+    const steps = () => {
+      const { r, tg } = run();
+      return Array.from({ length: N }, (_, i) => ({
+        say: i === 0 ? `Each path moves ${fmt(2 * eta)} of the way to its own target. Full batch aims at the average of all four points; stochastic aims at one point; mini-batch at the average of two.` : i === 4 ? "A second pass through the data. Full batch has used 20 example-gradients so far; the other two only a quarter or half as many." : `Step ${i + 1}.`,
+        math: `full, target (2, 2): ${how(r.full[i], [2, 2], r.full[i + 1])}\nstochastic, point ${tg.sgd[i]}: ${how(r.sgd[i], PTS[tg.sgd[i]], r.sgd[i + 1])}\nmini-batch ${tg.mini[i].join(" + ")}: ${how(r.mini[i], avg(tg.mini[i]), r.mini[i + 1])}`,
+      }));
+    };
+    function draw(k: number) {
+      const { r, tg } = run(), n = k + 1, F = frame({ l: 40, t: 30, w: 260, h: 260, x0: -0.5, x1: 4.5, y0: -0.5, y1: 4.5 });
+      let s = F.grid([0, 1, 2, 3, 4], [0, 1, 2, 3, 4], 0);
+      for (const c of [0.5, 1, 1.5, 2, 2.5]) s += `<circle cx="${F.X(2)}" cy="${F.Y(2)}" r="${c * 52}" fill="none" stroke="#2F6E5F" stroke-opacity="0.18"/>`;
+      s += txt(40, 18, "Four points; the average loss is lowest at the centre (2, 2)", `font-size="12" font-weight="700" fill="${INK}"`);
+      Object.entries(PTS).forEach(([nm, [a, b]]) => {
+        const hot = k >= 0 && (tg.sgd[k] === nm || tg.mini[k].includes(nm));
+        s += `<rect x="${F.X(a) - 7}" y="${F.Y(b) - 7}" width="14" height="14" fill="${hot ? GOLD : INK}" transform="rotate(45 ${F.X(a)} ${F.Y(b)})"/>` + txt(F.X(a) + 12, F.Y(b) - 9, nm, `font-size="12" font-weight="700" fill="${INK}"`);
+      });
+      (["full", "sgd", "mini"] as const).forEach((key) => {
+        const ps = r[key].slice(0, n + 1);
+        s += `<polyline fill="none" stroke="${COL[key]}" stroke-width="2.5" points="${ps.map((p) => `${F.X(p[0])},${F.Y(p[1])}`).join(" ")}"/>`;
+        ps.forEach((p, i) => (s += `<circle cx="${F.X(p[0])}" cy="${F.Y(p[1])}" r="${i === n ? 6 : 3}" fill="${COL[key]}" stroke="#fff" stroke-width="1.5"/>`));
+      });
+      // Legend and positions.
+      const rows: [keyof typeof COL, string][] = [["full", "Full batch (all 4 points per step)"], ["sgd", `Stochastic (1 point per step: ${order.join(", ")})`], ["mini", `Mini-batch (2 per step: ${mini.map((m) => m.join(" + ")).join(", ")})`]];
+      rows.forEach(([key, label], i) => {
+        const y = 52 + i * 62, p = r[key][n];
+        s += `<rect x="340" y="${y - 10}" width="14" height="4" fill="${COL[key]}"/>` + txt(362, y - 4, label, `font-size="12" font-weight="700" fill="${INK}"`);
+        s += txt(362, y + 16, `now at ${pt(p)}`, `font-size="12" fill="${INK}"`) + txt(362, y + 34, `average loss ${fmt(loss(p), 4)} (best possible 4)`, `font-size="11.5" fill="${MUTED}"`);
+      });
+      s += txt(340, 250, `Example-gradients used so far: full ${4 * n}, stochastic ${n}, mini-batch ${2 * n}.`, `font-size="11.5" fill="${MUTED}"`);
+      s += txt(340, 270, "Noisy paths wobble, but each step costs far less.", `font-size="11.5" fill="${MUTED}"`);
+      $("[data-draw]").innerHTML = s;
+      $("[data-v]").textContent = fmt(eta, 2);
+    }
+    const redraw = stepper(root, steps, draw, { delay: 1.8 });
+    $<HTMLInputElement>("[data-eta]").addEventListener("input", (e) => { eta = +(e.target as HTMLInputElement).value; redraw(); });
+    const shuffle = (a: string[], rnd: () => number) => { const b = [...a]; for (let i = b.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [b[i], b[j]] = [b[j], b[i]]; } return b; };
+    $("[data-shuffle]").addEventListener("click", () => { const rnd = mulberry(++seed); order = shuffle(["A", "B", "C", "D"], rnd); const m = shuffle(["A", "B", "C", "D"], rnd); mini = [[m[0], m[1]], [m[2], m[3]]]; redraw(); });
+    $("[data-default]").addEventListener("click", () => { order = ["B", "D", "A", "C"]; mini = [["B", "A"], ["D", "C"]]; redraw(); });
+  });
+</script>

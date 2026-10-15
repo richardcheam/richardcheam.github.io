@@ -1,0 +1,4 @@
+---
+layout: null
+---
+{% include blog-figures/numa-topology.html standalone=true %}

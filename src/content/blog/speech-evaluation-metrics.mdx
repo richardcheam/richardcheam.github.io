@@ -1,0 +1,397 @@
+---
+title: "How do we know a TTS is good? Speech evaluation, metric by metric"
+title_key: "Speech evaluation"
+date: 2026-10-12
+category: "speech-ai"
+read_time: "30 min"
+series_order: 12
+series: speech-ai
+featured: false
+excerpt: "WER, CER, speaker similarity, MCD, F0 RMSE, Fréchet distances, TTSDS, MOS, CMOS, MUSHRA and learned MOS predictors: what each one measures, the math, and where it stops agreeing with people."
+question: "What does each speech-evaluation metric actually measure, and how far can it be trusted to agree with human listeners, especially in a low-resource language?"
+my_work: "A concept note. I worked each formula on a small example, wrote two CPU-only toy scripts (edit distance with normalisation, and clip-level against system-level correlation), and checked the cited numbers in the TTSDS2 and OpenBibleTTS papers."
+result: "Every metric is a judge with its own training data and blind spots. Ranking systems is easy; flagging which clip is bad is hard. In OpenBibleTTS, WER agreed strongly with native listeners in 7 of 10 languages and UTMOSv2 in only 3."
+evidence_limit: "Correlation figures are the papers' own. The figures use illustrative or simulated numbers where marked. I ran no listening test for this post."
+lesson: "A metric is a hypothesis about what listeners care about. Check it against a few native listeners before trusting it in a new language."
+---
+
+import EditDistanceTable from "../../components/figures/EditDistanceTable.astro";
+import NormalisationWer from "../../components/figures/NormalisationWer.astro";
+import AsrPriorHides from "../../components/figures/AsrPriorHides.astro";
+import SimOrigResyn from "../../components/figures/SimOrigResyn.astro";
+import PitchRmse from "../../components/figures/PitchRmse.astro";
+import FrechetClouds from "../../components/figures/FrechetClouds.astro";
+import MosRaters from "../../components/figures/MosRaters.astro";
+import SystemVsClip from "../../components/figures/SystemVsClip.astro";
+import OpenBibleRho from "../../components/figures/OpenBibleRho.astro";
+import TtsdsWorstCase from "../../components/figures/TtsdsWorstCase.astro";
+
+You trained a TTS model. It speaks. You play ten samples and they sound fine. A colleague plays ten more and hears a mispronounced name and a question read like a statement. Which of you is right?
+
+Speech evaluation tries to turn "sounds good" into numbers that can be compared across models, papers and languages. Each number captures one slice of "good" and misses the rest. This post goes through the main families: intelligibility, speaker similarity, signal distance, distribution distance, human tests and learned predictors. It ends with the question that decides whether any of them can be used: do they agree with people?
+
+No background in speech evaluation is assumed. Section 1 introduces the handful of ideas everything else is built from, and every formula comes after a plain-language version of what it computes. Where I cite a paper, I give the section and the PDF page so you can check the claim in the arXiv PDF.
+
+## Five ideas you need first
+
+**1. What a TTS produces.** A text-to-speech (TTS) model takes text and outputs a **waveform**: a long list of numbers, one per tiny moment in time, that a speaker turns into sound. At 24,000 numbers per second, a 3-second sentence is 72,000 numbers. Nobody can judge quality by staring at those numbers, so every metric below first turns the waveform into something easier to compare.
+
+**2. Speech recognisers (ASR).** An automatic speech recogniser does the opposite of TTS: audio in, text out. Whisper, the model behind many subtitle tools, is one. Several metrics use an ASR as a stand-in listener: if a machine can write down what was said, a person probably can too.
+
+**3. Embeddings.** A neural network can turn a clip into a short list of numbers, say 192 or 256 of them, called an **embedding** or **vector**. The network is trained so that the list captures one property. For a speaker network, two clips of the same voice get similar lists and two different voices get different lists, whatever the words. You can picture each list as a point in space: same voice, nearby points.
+
+**4. Distributions.** A single clip is one point. A thousand clips are a **cloud** of points. The shape of the cloud, where its centre sits and how spread out it is, describes a whole system's output rather than one sample. Real recordings form one cloud; a TTS model's outputs form another. A good model's cloud overlaps the real one.
+
+**5. Correlation.** To check whether a metric is trustworthy, we score the same clips with the metric and with people, then ask whether the two scores go up and down together. A **correlation** summarises that in one number: 1 means they always move together, 0 means no relation, −1 means one goes up when the other goes down.
+
+With these five ideas, every metric in this post answers one question: *how close is the generated speech to what a person would accept, along one particular dimension?*
+
+## One text, many right answers
+
+A sentence can be said fast or slow, with a rise or a fall, with the stress on any word, in any voice. Many of these readings are correct. TTS is a **one-to-many** problem: one text maps to a whole distribution of acceptable waveforms.
+
+That fact sorts every metric into one of three styles. The names below are only a map for now; each one is explained in the section linked next to it.
+
+1. **Reference-based (paired).** Compare the output with a recording of the same text. Mel-cepstral distortion (MCD), which compares the sound's spectrum, and F0 RMSE, which compares the pitch, work this way ([Section 5](#signal-level-metrics-mcd-and-f0)). They measure distance to one correct reading, so they also punish other correct readings.
+2. **Reference-free, task-based.** Check one property without a target waveform. The word error rate (WER) asks whether a speech recogniser can recover the words ([Section 3](#intelligibility-wer-and-cer)); speaker similarity asks whether the voice matches ([Section 4](#speaker-similarity)); a MOS predictor is a network that guesses how a listener would rate the clip ([Section 8](#learned-mos-predictors)).
+3. **Distribution-based.** Compare the *set* of generated clips with a *set* of real speech. Fréchet distances and TTSDS, a score built for TTS, work this way ([Section 6](#distribution-level-metrics)).
+
+Human listeners, whose tests are covered in [Section 7](#human-tests), remain the reference all of these are calibrated against. They are also slow, expensive and noisy, which is why the other three exist.
+
+## Intelligibility: WER and CER
+
+### The idea
+
+Think of a dictation test. You read a sentence aloud, a student writes it down, and you count their mistakes. WER does the same with a machine as the student: run the generated audio through an automatic speech recogniser (ASR) and compare its transcript with the text the TTS was asked to say. If the ASR cannot recover the words, a listener may not either.
+
+### Edit distance
+
+Marking the test means counting how many single-word fixes turn the student's version into the original. There are three kinds of fix:
+
+- **Substitution (S)**: a wrong word in place of the right one ("the" written for "a").
+- **Deletion (D)**: a word that was missed.
+- **Insertion (I)**: an extra word that was never said.
+
+Add them up and divide by the length of the original sentence:
+
+$$
+\text{WER} = \frac{S + D + I}{N}
+$$
+
+N is the number of words in the **reference**, the text the TTS was asked to say. The **hypothesis** is what the ASR wrote down. A WER of 10% means roughly one word in ten was wrong. Insertions count, so WER can go above 100%.
+
+There is one subtlety. There are many ways to line up two sentences, and they give different counts. WER always uses the alignment with the *fewest* fixes. That smallest number is called the **Levenshtein distance**.
+
+Finding it by trying every alignment would be slow. Instead it is built up in a table, from short pieces of the sentences to the full ones: the answer for "first 2 words against first 3 words" is computed from answers already in the table for shorter pieces. This trick of filling a table of smaller answers is called **dynamic programming**. Let $D[i][j]$ be the cost of turning the first $i$ reference words into the first $j$ hypothesis words. Each cell takes the cheapest of three moves:
+
+$$
+D[i][j] = \min\big(\, D[i-1][j] + 1,\;\; D[i][j-1] + 1,\;\; D[i-1][j-1] + [\,r_i \ne h_j\,] \,\big)
+$$
+
+Read it as: to fill a cell, look at the three cells above, to the left and diagonally above-left, add the cost of one more move, and keep the cheapest. Coming from above deletes reference word $r_i$. Coming from the left inserts hypothesis word $h_j$. Coming diagonally either matches the two words (cost 0) or substitutes one for the other (cost 1); the bracket $[\,r_i \ne h_j\,]$ is 1 if the words differ and 0 if they are the same. The first row and column are just counts, $D[0][j] = j$ and $D[i][0] = i$, because turning nothing into j words takes j insertions.
+
+**Worked example.** Reference "a cat sat" (N = 3), hypothesis "the cat". The bottom-right cell is 2: substitute "a" with "the", match "cat", delete "sat". WER = 2/3 ≈ 66.7%. The figure fills the table cell by cell; type your own pair to recompute it.
+
+<figure class="blog-figure blog-figure--wide">
+  <EditDistanceTable alt="A grid with the reference words down the side and the hypothesis words across the top. Cells fill row by row with edit costs; a path traces back from the bottom-right corner, and the alignment below reads: a to the, substitution; cat matches cat; sat deleted. WER 66.7 percent." />
+  <figcaption><strong>Figure 1. The table behind every WER.</strong> Each new cell flashes the neighbour it was built from. The backtrace reads the alignment off the finished table: colours mark matches (green), substitutions (amber), deletions (red) and insertions (purple). Up to six words per line.</figcaption>
+</figure>
+
+### CER, and scripts without spaces
+
+CER is the same formula over characters. It matters when "word" is not well defined. Thai, Lao, Khmer, Chinese and Japanese are normally written without spaces between words, so a WER would depend on whichever word segmenter you picked. Seed-TTS, a large TTS system from ByteDance, reports WER for English with Whisper-large-v3 and CER for Mandarin with Paraformer-zh ([Seed-TTS](https://arxiv.org/abs/2406.02430), Sec 3.1, p. 4); F5-TTS, an open-source TTS model, follows the same protocol ([F5-TTS](https://arxiv.org/abs/2410.06885), Sec 4, p. 6).
+
+Two cautions:
+
+- **Never compare a CER with a WER.** One wrong word is only a few wrong characters, so CER runs much lower for the same mistakes.
+- **State the character unit.** In scripts with stacked or combining marks, a "character" can be a Unicode code point or a whole written cluster. The Khmer cluster ក្រ (*kra*) is three code points: KA, the subscript sign COENG, and RO. Drop the subscript and the code-point CER is 2/3; count by written cluster and it is 1/1. The toy script below prints both.
+
+### Normalisation can move WER from 100% to 0%
+
+Before scoring, both texts are usually lower-cased, stripped of punctuation, and have numbers and abbreviations written out. The Whisper paper explains its text normaliser in Sec 3.2 (p. 5), specifies it in Appendix C (p. 21), and compares it with another normaliser in Sec 4.4 (p. 12) ([Whisper](https://arxiv.org/abs/2212.04356)).
+
+Take the reference "Dr. Smith paid \$5." and the ASR output "doctor smith paid five dollars". Split on spaces with no normalisation, the reference has 4 tokens, and the alignment needs 3 substitutions and 1 insertion: WER 100%. Expand the abbreviation, write out the number, lowercase and strip punctuation, and WER is 0%. The audio never changed.
+
+<figure class="blog-figure blog-figure--wide">
+  <NormalisationWer alt="The reference tokens above, the ASR tokens below, joined by lines coloured by edit type. Switches for abbreviations, numbers, lowercase and punctuation. A waterfall on the right shows WER falling from 100 percent raw, 100 after abbreviations, 60 after numbers, 20 after lowercasing, to 0 after stripping punctuation." />
+  <figcaption><strong>Figure 2. One recording, five WERs.</strong> Toggle the steps in any order. The waterfall uses the order in the text and is computed by the same edit distance as Figure 1. A WER reported without its normaliser cannot be compared with anyone else's.</figcaption>
+</figure>
+
+### The ASR is a judge, and judges have priors
+
+WER measures "ASR model X could transcribe this", not "a person could understand this". Three consequences:
+
+- **Different judges, different numbers.** Two ASR models give different absolute WERs on the same audio and can even rank systems differently. Always name the model and version.
+- **The language model can hide errors.** A *language model* is the part of an ASR that knows which words usually follow which: after "the cat", "sat" is common and "zat" is not a word at all. That knowledge is called a *prior*. Most modern ASR decoders carry a strong prior over word sequences; Whisper's decoder is effectively a conditional language model. Suppose the TTS says "the cat *zat* on the mat". The acoustic evidence slightly favours "zat", but the prior for "sat" after "the cat" is overwhelming, and the transcript reads "sat". WER counts zero errors; a listener heard one. This effect is strongest on predictable words and weakest on names and rare words, whose prior is weak anyway.
+- **A weak judge inflates WER.** In a low-resource language the ASR may be poor, so even real recordings get a high WER. The fix is cheap: run the **ground-truth recordings** through the same ASR and report that WER as the floor.
+
+<figure class="blog-figure blog-figure--wide">
+  <AsrPriorHides alt="Six word boxes, with zat highlighted in red. Three panels: the acoustic model gives zat 0.55 and sat 0.45; the language-model prior gives zat 0.001 and sat 0.9; the product, renormalised, gives sat almost 1. The transcript reads the cat sat on the mat with WER 0 percent. Switching to a CTC decoder with no language model makes the transcript read zat and WER 16.7 percent." />
+  <figcaption><strong>Figure 3. How the judge's prior hides a mispronunciation.</strong> Illustrative numbers, not measured. Switch the decoder to CTC (a simpler decoding method that picks the most likely sound at each moment without any word prior) with no language model and the acoustic choice survives: one substitution in six words. Mitigations: an ASR with a weak or no LM, sentences built so the LM cannot guess the next word, or scoring at the phoneme level.</figcaption>
+</figure>
+
+## Speaker similarity
+
+The question here is different: does the generated speech sound like the right *person*? This matters for voice cloning, where the model is given a few seconds of someone's voice (the **prompt**) and must keep speaking in that voice.
+
+The tool is the speaker embedding from Section 1. A speaker-verification network, the kind a bank might use to check a caller's voice, is trained so that clips from the same person land close together in a vector space and clips from different people land far apart. Evaluation reuses it as a ruler: embed the voice prompt and the generated clip, then compare the two vectors with cosine similarity.
+
+$$
+\cos(\mathbf{a}, \mathbf{b}) = \frac{\mathbf{a} \cdot \mathbf{b}}{\lVert \mathbf{a} \rVert \, \lVert \mathbf{b} \rVert}
+$$
+
+In words: take the two lists of numbers, multiply them position by position and add up (the top), then divide by the length of each list (the bottom). The result is between −1 and 1. A value of 1 means the two vectors point in exactly the same direction: same voice, as far as the network can tell. Values near 0 mean unrelated. In practice, same-speaker pairs often land around 0.6 to 0.9, depending on the network.
+
+With $\mathbf{a} = (1, 2, 2)$ and $\mathbf{b} = (2, 1, 2)$, the dot product is 8 and both norms are 3, so the similarity is 8/9 ≈ 0.889. Cosine looks only at the angle between the vectors, never their length.
+
+Common rulers are [ECAPA-TDNN](https://arxiv.org/abs/2005.07143) and WavLM-large fine-tuned for verification ([WavLM](https://arxiv.org/abs/2110.13900)); Seed-TTS (Sec 3.1, p. 4) and F5-TTS (Sec 4, p. 6) use the WavLM one. Scores from different verifiers live on different scales: a 0.6 from one is not a 0.6 from another.
+
+### SIM-o and SIM-r
+
+Voicebox defined two variants, in the "Coherence" paragraph of its Sec 4 (p. 10) ([Voicebox](https://arxiv.org/abs/2306.15687)):
+
+- **SIM-o**: generated audio against the **original** prompt.
+- **SIM-r**: generated audio against the prompt after it has been **resynthesised** through the model's own codec or vocoder. (A *vocoder* or *codec* is the final stage of many TTS systems that turns the model's internal representation back into a waveform; the [Mimi post](/blog/mimi-codec-explained/) opens one up.)
+
+The vocoder alone already changes the voice a little. SIM-r removes that penalty and isolates "did the model copy the voice?". SIM-o is the end-to-end number a listener experiences. SIM-r is always the easier score, so comparing one paper's SIM-r with another's SIM-o flatters the first.
+
+<figure class="blog-figure blog-figure--wide">
+  <SimOrigResyn alt="A unit circle with three rays: O, the original prompt, at zero degrees; R, the resynthesised prompt, a little above it; G, the generated clip, at 52 degrees. A shaded wedge between O and R is the vocoder's own loss. Readouts show SIM-o as cos of G and O, and SIM-r as cos of G and R. A slider for vocoder quality rotates R toward O, and the two scores converge." />
+  <figcaption><strong>Figure 4. Why SIM-r is always kinder.</strong> A two-dimensional cartoon with illustrative angles; real embeddings have hundreds of dimensions, but cosine only ever measures an angle. Raise the vocoder quality and R moves onto O: the two scores meet when the vocoder is transparent.</figcaption>
+</figure>
+
+## Signal-level metrics: MCD and F0
+
+These metrics compare the generated audio with a real recording of the *same sentence*, moment by moment. Both need that reference recording.
+
+### Mel-cepstral distortion
+
+First, a few terms. Speech is analysed in short slices called **frames**, typically 5 to 10 milliseconds each. For each frame you can measure how much energy there is at each pitch range, low to high; plotted over time this is a **spectrogram**, the picture of sound you may have seen in audio software. The overall shape of that energy profile, its peaks and valleys, is what makes an "ee" differ from an "oo" and one voice differ from another.
+
+**Mel cepstral coefficients** squeeze that shape into a short list of numbers per frame, usually 13 to 25. "Mel" means the frequency scale is warped to match human hearing, which is more sensitive to differences in low pitches than high ones. So: one short list per frame, describing what the sound "looks like" at that moment.
+
+Mel cepstra summarise the spectral envelope of a frame, which roughly carries timbre and phone identity. MCD compares the generated and reference cepstra frame by frame, in decibels:
+
+$$
+\text{MCD} = \frac{10}{\ln 10}\sqrt{2 \sum_{d=1}^{D} \big(c_d - \hat{c}_d\big)^2}
+$$
+
+Here $c_d$ is the d-th number in the reference frame's list and $\hat{c}_d$ the same number for the generated frame. The formula is a distance: square each difference, add them up, take the square root. The $10/\ln 10$ and the 2 only convert the result into **decibels** (dB), the unit used for loudness, so that values are comparable across papers. Lower is better; 0 dB means identical. The energy coefficient $c_0$ is usually left out, and the per-frame values are averaged. With coefficient differences $(0.1, 0.2, 0.2)$: the sum of squares is 0.09, doubled 0.18, square root 0.424, times $10/\ln 10 \approx 4.343$ gives about 1.84 dB.
+
+The two clips rarely have the same length: the TTS might say a word faster or pause longer. Comparing frame 100 with frame 100 would then compare different sounds. So the frames are first paired by **dynamic time warping** (DTW), which stretches and squeezes time so that each sound is matched with the same sound in the other clip, like lining up two people singing the same song at slightly different speeds. DTW is the edit-distance table of Figure 1 with continuous costs: it finds the cheapest monotonic path through a frame-by-frame distance matrix. Whether DTW is used, which frames count, whether silence is kept and the cepstral order $D$ all change the number, so MCD values from different toolkits should not be compared without checking these choices.
+
+### F0 RMSE
+
+**F0**, the fundamental frequency, is the physical side of pitch: how many times per second the vocal folds vibrate. A typical male voice sits around 100 to 150 Hz, a typical female voice around 180 to 250 Hz. Plotted over a sentence, F0 forms the melody of speech, the **intonation**: it rises at the end of many questions and falls at the end of statements.
+
+**RMSE**, root mean square error, is the typical size of the gap between two curves: square each gap so negatives do not cancel positives, average, then take the square root to return to the original unit. On frames that are voiced in both signals, F0 RMSE is
+
+$$
+\text{F0 RMSE} = \sqrt{\frac{1}{T}\sum_{t=1}^{T}\big(f_t - \hat{f}_t\big)^2}
+$$
+
+Here $f_t$ is the reference pitch at frame $t$ and $\hat{f}_t$ the generated pitch, both in hertz, and $T$ is the number of frames voiced in both. Example: gaps of 10, −10 and 20 Hz over three frames give $\sqrt{(100 + 100 + 400)/3} = \sqrt{200} \approx 14.1$ Hz.
+
+in hertz or cents, often reported with the voiced/unvoiced error, the share of frames where the two signals disagree on whether there is pitch at all.
+
+Both metrics need a reference and assume there is one correct contour. A natural reading that rises a little later than the reference is "wrong". A flat monotone at the reference's average pitch can score better. These metrics suit reconstruction tasks: vocoders, codecs, voice conversion with parallel data. They are a poor guide to naturalness in open-ended TTS.
+
+<figure class="blog-figure blog-figure--wide">
+  <PitchRmse alt="Three pitch contours over the words You're coming tomorrow. The reference rises at the end. Contour A is natural and rises 250 milliseconds later. Contour B is flat. Readouts give F0 RMSE for A and for B, and say which one the metric prefers. A slider moves where A starts its rise." />
+  <figcaption><strong>Figure 5. Closeness to one take is not naturalness.</strong> Synthetic contours; the RMSE is computed from them frame by frame. At 250 ms the monotone scores better than A, although A is still a perfectly good question. Slide the rise earlier and A wins again: the metric is measuring timing against one take, not whether the question sounds like a question.</figcaption>
+</figure>
+
+## Distribution-level metrics
+
+### Fréchet distance
+
+Section 2 said a sentence has many right readings. Distribution metrics stop comparing clip with clip and compare cloud with cloud (idea 4 in Section 1): is the whole set of generated speech spread out like real speech?
+
+Embed many real clips and many generated clips. Fit a Gaussian to each cloud. A **Gaussian** is the familiar bell curve, here in many dimensions: it describes a cloud with just a centre, the **mean** $\mu$, and a spread, the **covariance** $\Sigma$, which records how wide the cloud is in every direction and whether it is tilted. Measure how far apart the Gaussians are in location and in shape. No paired reference is needed.
+
+$$
+d^2 = \lVert \mu_r - \mu_g \rVert^2 + \operatorname{Tr}\!\Big(\Sigma_r + \Sigma_g - 2\big(\Sigma_r \Sigma_g\big)^{1/2}\Big)
+$$
+
+The subscript $r$ stands for real speech and $g$ for generated speech; $(\cdot)^{1/2}$ is a matrix square root, the matrix version of $\sqrt{\ }$.
+
+The first term is the squared distance between the two centres: where each cloud sits. The second term compares the two spreads; $\operatorname{Tr}$, the trace, simply adds up the diagonal of a matrix, which here sums the differences in width across all directions. Zero means the two clouds are identical. Lower is better. In one dimension it reduces to $(\mu_r - \mu_g)^2 + (\sigma_r - \sigma_g)^2$: real speech at $N(0, 1^2)$ against generated speech at $N(1, 2^2)$ gives $1 + 1 = 2$.
+
+The Fréchet Audio Distance applies this to VGGish embeddings ([FAD](https://arxiv.org/abs/1812.08466)). Two caveats: the estimate is biased when the number of clips is small, so report the sample size; and the embedding decides what counts as different. VGGish was trained on general audio, not speech.
+
+<figure class="blog-figure blog-figure--wide">
+  <FrechetClouds alt="Two clouds of dots: real speech centred at the origin and generated speech offset along the diagonal, each with a two-sigma ellipse. Two bars split the Fréchet distance into the mean term and the covariance term, with the total below. Sliders shift the generated mean and change its spread; a mode-collapse button shrinks the generated cloud to a near point at the real mean." />
+  <figcaption><strong>Figure 6. The two halves of a Fréchet distance.</strong> Covariances are kept round so the trace term reduces to the squared difference of the spreads on each axis. Press "Mode collapse": the mean term drops to zero, yet the distance stays high, because a model that always says things the same way has the wrong width.</figcaption>
+</figure>
+
+### TTSDS and TTSDS2
+
+[TTSDS](https://arxiv.org/abs/2407.12707) splits quality into factors: General, Environment, Intelligibility, Prosody and Speaker (Table 1, p. 2). Each factor has its own features. For each feature, it measures the 2-Wasserstein distance, a way of comparing two distributions that is often explained as "earth moving": if one distribution is a pile of sand, how much sand has to be moved, and how far, to reshape it into the other? It measures the distance from the generated clips to real speech and to a set of noise datasets, and turns the two into a score (Sec 2.3–2.4, p. 3):
+
+$$
+\text{score} = 100 \times \frac{W_{\text{noise}}}{W_{\text{real}} + W_{\text{noise}}}
+$$
+
+$W_{\text{real}}$ is the earth-moving distance from the generated clips to real speech, and $W_{\text{noise}}$ the distance to the noise datasets. Example: $W_{\text{real}} = 1$ and $W_{\text{noise}} = 9$ give $100 \times 9/10 = 90$.
+
+A clip distribution that looks like real speech scores near 100; one that looks like noise scores near 0. The noise anchor gives every feature the same scale, so features with different units can be averaged into factors, and factors into one number.
+
+[TTSDS2](https://arxiv.org/abs/2506.19441) (ICLR 2026) keeps the formula (Sec 2, Eq. 1, p. 4), drops the Environment factor (Table 1, p. 3), and tests 16 other metrics against more than 11,000 human ratings. Its headline claim is that it is the only metric whose correlation with humans (Spearman's, explained in [Section 9](#three-correlation-coefficients)) stays above 0.50 in every domain (clean, noisy, in-the-wild and children's speech) and for every type of listening test (MOS, CMOS and SMOS, explained in [Section 7](#human-tests)) (abstract and Sec 1.3, p. 2; Table 3, p. 7). Section 9 shows what the other metrics do on their worst day.
+
+## Human tests
+
+### MOS
+
+ITU-T Recommendation P.800 defines Absolute Category Rating: listeners score each clip from 1 (bad) to 5 (excellent), and the Mean Opinion Score is the average.
+
+The obvious way to know whether people like a voice is to ask them. Every other metric in this post is ultimately judged by how well it agrees with tests like these.
+
+A MOS without an interval says little. A **confidence interval** is the range in which the true average would probably fall if you could ask everyone, not just your sample of listeners. A 95% interval of ±0.3 means: with this many ratings, the real answer is very likely within 0.3 of what we measured. Fewer or more disagreeing ratings give a wider interval. Five ratings of 4, 5, 3, 4, 4 have mean 4.0 and sample standard deviation 0.707. The 95% interval is
+
+$$
+4.0 \pm t_{0.975,\,4}\,\frac{s}{\sqrt{5}} = 4.0 \pm 2.776 \times 0.316 = 4.0 \pm 0.88
+$$
+
+Here $s$ is the standard deviation (how much the ratings disagree), $\sqrt{5}$ accounts for the number of ratings, and $t_{0.975,\,4} = 2.776$ is a value from a standard statistics table that widens the interval when there are few ratings. So "4.0" means "somewhere from 3.1 to 4.9". Real tests use hundreds of ratings, and the ratings are not independent: the same rater scores many clips, and the same sentence appears for many systems. A naive interval over all ratings is too narrow. Bootstrapping over raters and sentences, or a mixed-effects model, gives an honest one.
+
+Three more things decide whether a MOS can be trusted:
+
+- **Context.** The same system scores differently next to strong or weak competitors. Absolute MOS values from different papers are not comparable.
+- **Rater habits.** Some raters never give a 5, others never go below 3. Hidden real recordings and a deliberately degraded anchor help screen raters and calibrate the scale.
+- **Who listens.** Non-native raters miss mispronunciations and odd prosody. For a low-resource language, a few native speakers are worth more than many crowd workers. [OpenBibleTTS](https://arxiv.org/abs/2606.09553), a 2026 paper that builds TTS for 37 low-resource languages and is examined in [Section 9](#evidence-openbibletts-ten-low-resource-languages), used three native-speaker annotators per language (Sec 4.2, p. 6).
+
+<figure class="blog-figure blog-figure--wide">
+  <MosRaters alt="A 1-to-5 axis with rating histograms for two systems, and each system's MOS drawn as a dot with a 95 percent interval. Raters are added one by one and the intervals shrink. A readout says whether the intervals separate. A button removes each rater's personal offset, which tightens both intervals." />
+  <figcaption><strong>Figure 7. How many listeners does a 0.2 difference need?</strong> Simulated: system B is truly 0.2 better, each rater has a personal offset, and every score is rounded to the 1–5 scale. The interval is taken over raters' averages. Drag the rater count, then remove the offsets: once each rater is compared with themselves, far fewer people are needed.</figcaption>
+</figure>
+
+### The other formats
+
+- **CMOS** (comparative MOS): play A then B, rate B relative to A from −3 to +3. More sensitive to small differences than two separate MOS tests.
+- **SMOS** (similarity MOS): "how similar is this voice to the reference speaker?", from 1 to 5.
+- **A/B preference**: a forced choice, sometimes with a "no preference" option. Report the percentages with a binomial test.
+- **MUSHRA** (ITU-R BS.1534): several versions of the same clip rated side by side from 0 to 100, including a hidden copy of the reference and a low-quality anchor. Raters who fail to score the hidden reference near the top are removed. Suited to fine comparisons of codecs and vocoders.
+
+## Learned MOS predictors
+
+The idea: train a network to predict listener scores from audio, then "run a listening test" in seconds.
+
+- **MOSNet** ([arXiv 1904.08352](https://arxiv.org/abs/1904.08352)) learned from the Voice Conversion Challenge 2018 ratings.
+- **The VoiceMOS Challenge 2022** ([arXiv 2203.11389](https://arxiv.org/abs/2203.11389)) set a main track on BVCC, English samples from many past systems in the Blizzard Challenge (a yearly TTS competition) and the Voice Conversion Challenge systems, and an out-of-domain track on Chinese TTS from the Blizzard Challenge 2019 (Sec 2.1.1–2.1.2, p. 2).
+- **UTMOS** ([arXiv 2204.02152](https://arxiv.org/abs/2204.02152)) was a strong entry to that challenge, built on a self-supervised speech model, one pretrained on large amounts of unlabelled audio, then fine-tuned to predict scores. **UTMOSv2** ([arXiv 2409.09305](https://arxiv.org/abs/2409.09305)) is its successor from the 2024 challenge.
+- **DNSMOS** ([arXiv 2010.15258](https://arxiv.org/abs/2010.15258)) learned from crowd ratings of noise-suppressed speech. It measures noise and distortion, not TTS naturalness.
+- **NISQA** ([arXiv 2104.09494](https://arxiv.org/abs/2104.09494)) learned from telephony and transmission degradations and predicts overall quality plus noisiness, coloration, discontinuity and loudness.
+
+Each predictor learned what its training raters disliked in its training data, which is mostly English (and some Chinese and Japanese). Applied to a new language, or to a newer generation of systems than it was trained on, it can fail without any warning sign. OpenBibleTTS, the paper examined in Section 9, says this directly: UTMOSv2, trained mostly on English read speech, is used only as "a relative ranking signal within each language" (Sec 4.2, p. 6). The next section shows how far that signal goes.
+
+## Do the metrics agree with people?
+
+### Three correlation coefficients
+
+Section 1 introduced correlation as "do two scores go up and down together?". There are three common ways to compute it.
+
+- **Pearson r**: linear agreement of the raw values. Sensitive to outliers and to the scale of each metric.
+- **Spearman ρ** (the Greek letter rho): Pearson computed on ranks, that is, after replacing each score by its position from worst to best. It asks only "do they put things in the same order?". Without ties, $\rho = 1 - \frac{6\sum d_i^2}{n(n^2 - 1)}$, where $d_i$ is the rank difference of item $i$.
+- **Kendall τ**: (concordant pairs − discordant pairs) / all pairs. It has a plain reading: the chance that metric and humans order a random pair the same way is $(1 + \tau)/2$.
+
+Four systems, ranked (1, 2, 3, 4) by the metric and (1, 3, 2, 4) by listeners. Spearman: the rank differences are (0, −1, 1, 0), so $\sum d^2 = 2$ and $\rho = 1 - 12/60 = 0.80$. Kendall: 1 of the 6 pairs is discordant, so $\tau = 4/6 \approx 0.67$, and the metric orders a random pair as listeners do 83% of the time.
+
+### System level against clip level
+
+There are two ways to correlate a metric with listeners:
+
+- **System level**: average the metric and the MOS for each system, then correlate the averages. n is the number of systems.
+- **Clip level**: correlate clip by clip. n is the number of clips.
+
+Averaging cancels per-clip noise, so system-level correlations run much higher. A metric can rank systems correctly and still be nearly useless for finding *which* clip is bad. And with only a handful of systems, ρ is coarse: with 5 systems it can take only 21 values, and a single swapped pair already drops it to 0.90.
+
+<figure class="blog-figure blog-figure--wide">
+  <SystemVsClip alt="A scatter of 200 clips coloured by five systems, human score across and metric score up. The clip-level Spearman correlation is shown at the side. The clouds collapse into five system averages lying almost on a line, and the system-level correlation is shown below. A slider adds per-clip metric noise." />
+  <figcaption><strong>Figure 8. One metric, two correlations.</strong> Simulated: 5 systems with true quality from 3.0 to 4.2, 40 clips each. Raise the metric noise and the clip-level ρ falls quickly while the system-level ρ barely moves. The toy script below repeats this 500 times per noise level.</figcaption>
+</figure>
+
+### Evidence: OpenBibleTTS, ten low-resource languages
+
+[OpenBibleTTS](https://arxiv.org/abs/2606.09553) builds TTS for 37 low-resource languages and runs a native-speaker listening test in 10 of them. Its setup (Sec 4.2, p. 6):
+
+- **WER** from the Omnilingual 1B ASR model (omniASR_LLM_1B_v2, named in the Fig. 2 caption, p. 7), with a Whisper-style normaliser.
+- **UTMOSv2**, used without fine-tuning.
+- **Human MOS** from three native-speaker annotators per language: one 1–5 score covering naturalness and intelligibility together, over 340 clips per language (320 for Haitian Creole) drawn from three test sets.
+
+Table 3 (p. 7) gives the Spearman ρ between each metric and MOS per language. The paper's summary (Sec 5.2, pp. 7–8): WER correlates strongly (|ρ| ≥ 0.7) in 7 of 10 languages, UTMOSv2 in only 3. I checked the count against the table and it holds.
+
+<figure class="blog-figure blog-figure--wide">
+  <OpenBibleRho alt="Ten rows, one per language, each with a dark dot for WER and a purple or red dot for UTMOSv2 on an agreement axis from minus one to one, with a dashed line at 0.7. WER sits right of 0.7 for Hausa, Hindi, Oromo, Swahili, Telugu, Turkish and Yoruba. UTMOSv2 reaches 0.7 only for Haitian Creole, Swahili and Vietnamese, and falls below zero for Oromo, Shona and Yoruba." />
+  <figcaption><strong>Figure 9. Agreement with native listeners, per language.</strong> Values from OpenBibleTTS Table 3 (p. 7). WER is lower-is-better, so its ρ is negated here: right of zero means agreement for both metrics. Source: arXiv 2606.09553.</figcaption>
+</figure>
+
+What the table shows:
+
+- **UTMOSv2 points the wrong way in Oromo** (ρ = −0.61) and gives no signal in Shona (−0.03) and Yoruba (−0.09). In those languages, an English-trained naturalness predictor would mislead a developer choosing between systems.
+- **WER is the better guide, but not everywhere.** Vietnamese (−0.49), Shona (−0.60) and Haitian Creole (−0.66) fall short, and Hausa and Telugu (both −0.71) only just clear the line.
+- **These are almost certainly system-level correlations over very few points.** The paper does not say. But WER and UTMOSv2 are reported as per-system means (over 500 test utterances per system and language), and the values match what Spearman can produce with 6 points: ground truth plus 5 TTS systems. That is my inference, not a stated fact. If it holds, each ρ rests on 6 points, and one swapped pair moves it a lot.
+
+### Evidence: TTSDS2, sixteen metrics on their worst day
+
+TTSDS2 reports each metric's Spearman ρ with human ratings in 12 settings: four domains times three rating types (Table 3, p. 7). The most useful number for a practitioner is the worst one, because you rarely know in advance which setting your data falls in.
+
+<figure class="blog-figure blog-figure--wide">
+  <TtsdsWorstCase alt="Horizontal bars for eight metrics showing the lowest Spearman correlation with human scores across twelve settings. TTSDS2 0.50, SQUIM 0.37, X-Vector 0.29, RawNet3 0.26, ECAPA-TDNN 0.22, UTMOSv2 minus 0.04, UTMOS minus 0.26, NISQA minus 0.64, with the setting named next to each bar." />
+  <figcaption><strong>Figure 10. Each metric on its worst day.</strong> Minimum over 4 domains × 3 rating types, from TTSDS2 Table 3 (p. 7). Only higher-is-better metrics are drawn, so the sign reads the same for every bar; WER and MCD are left out. Source: arXiv 2506.19441.</figcaption>
+</figure>
+
+The pattern matches OpenBibleTTS from another direction. The learned MOS predictors (UTMOS, UTMOSv2, NISQA) collapse or invert on in-the-wild speech. The speaker verifiers hold up better but still sink toward 0.2 in some settings. TTSDS2 was built to survive this test, so its 0.50 is a floor it was designed for, not an independent confirmation.
+
+## Efficiency, briefly
+
+- **Real-time factor (RTF)** = synthesis time / audio duration. RTF 0.1 makes 10 s of audio in 1 s. State the hardware, the batch size, and whether model loading is included.
+- **Time to first audio**: from receiving the text to playing the first sample. This is what matters for streaming and for dialogue systems (see the [cascade vs full-duplex post](/blog/cascade-vs-full-duplex/)). A model can have an excellent RTF and a poor time to first audio if it must finish the whole utterance before playing any of it.
+- Report the median and a high percentile (p90 or p95), not only the mean.
+
+## Toy experiments
+
+Two CPU-only scripts reproduce the arithmetic in this post.
+
+**[wer_by_hand.py](/code/speech-eval/wer_by_hand.py)**: edit distance with a backtrace, the normalisation waterfall, and the code-point CER of a Khmer cluster. Standard library only; if `jiwer` is installed, it checks 50 random pairs against it. Output:
+
+```text
+a cat sat / the cat -> (1, 1, 0) WER 0.667
+raw              'Dr. Smith paid $5.'               WER 100%
++ abbreviations  'Doctor Smith paid $5.'            WER 100%
++ numbers        'Doctor Smith paid five dollars.'  WER 60%
++ lowercase      'doctor smith paid five dollars.'  WER 20%
++ punctuation    'doctor smith paid five dollars'   WER 0%
+code points in ក្រ = 3 ['KHMER LETTER KA', 'KHMER SIGN COENG', 'KHMER LETTER RO']
+CER of dropping the subscript, per code point: 0.67
+```
+
+**[corr_levels.py](/code/speech-eval/corr_levels.py)**: 5 systems × 40 clips, 500 runs per noise level, Spearman at both levels (needs `numpy` and `scipy`). Output:
+
+```text
+metric noise | clip-level rho | system-level rho (median over 500 runs, 5-95%)
+         0.0 |           0.75 |  1.00  [0.90, 1.00]
+         0.4 |           0.62 |  1.00  [0.90, 1.00]
+         0.8 |           0.44 |  1.00  [0.90, 1.00]
+         1.2 |           0.32 |  0.90  [0.70, 1.00]
+```
+
+Even with no metric noise at all, the clip-level ρ is only 0.75, because human raters add their own noise. At noise 0.8 the metric explains little about individual clips, yet still ranks the five systems perfectly in most runs. That is the gap between "this metric agrees with humans" in a paper and "this metric will tell me which of my clips is broken".
+
+## References
+
+- Seed-TTS, [arXiv 2406.02430](https://arxiv.org/abs/2406.02430): evaluation metrics, Sec 3.1, p. 4.
+- F5-TTS, [arXiv 2410.06885](https://arxiv.org/abs/2410.06885): metrics, Sec 4, p. 6.
+- Whisper, [arXiv 2212.04356](https://arxiv.org/abs/2212.04356): normaliser, Sec 3.2 p. 5, Appendix C p. 21, Sec 4.4 p. 12.
+- ECAPA-TDNN, [arXiv 2005.07143](https://arxiv.org/abs/2005.07143); WavLM, [arXiv 2110.13900](https://arxiv.org/abs/2110.13900).
+- Voicebox, [arXiv 2306.15687](https://arxiv.org/abs/2306.15687): SIM-o and SIM-r, Sec 4 "Coherence", p. 10.
+- Fréchet Audio Distance, [arXiv 1812.08466](https://arxiv.org/abs/1812.08466).
+- TTSDS, [arXiv 2407.12707](https://arxiv.org/abs/2407.12707): Table 1 p. 2, Sec 2.3–2.4 p. 3.
+- TTSDS2, [arXiv 2506.19441](https://arxiv.org/abs/2506.19441): Sec 2 Eq. 1 p. 4, Table 1 p. 3, Sec 3.2 p. 6, Table 3 p. 7.
+- ITU-T P.800 (MOS); ITU-R BS.1534 (MUSHRA).
+- MOSNet, [arXiv 1904.08352](https://arxiv.org/abs/1904.08352); VoiceMOS 2022, [arXiv 2203.11389](https://arxiv.org/abs/2203.11389); UTMOS, [arXiv 2204.02152](https://arxiv.org/abs/2204.02152); UTMOSv2, [arXiv 2409.09305](https://arxiv.org/abs/2409.09305); DNSMOS, [arXiv 2010.15258](https://arxiv.org/abs/2010.15258); NISQA, [arXiv 2104.09494](https://arxiv.org/abs/2104.09494).
+- OpenBibleTTS, [arXiv 2606.09553](https://arxiv.org/abs/2606.09553): setup Sec 4.2 p. 6, Table 3 p. 7, Sec 5.2 pp. 7–8.
+
+## Related
+
+- [Whisper review](/paper-reviews/whisper/), effective robustness and the text normaliser
+- [VALL-E review](/paper-reviews/vall-e/) and [F5-TTS review](/paper-reviews/f5-tts/), these metrics applied to zero-shot TTS

@@ -1,0 +1,56 @@
+---
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" tabindex="0" role="region" aria-label={alt} data-mc>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 200" role="img" aria-labelledby="mc-title mc-desc" class="blog-diagram-svg" font-family="Inter, sans-serif">
+<title id="mc-title">Raw audio against Mimi latent, drawn to scale</title><desc id="mc-desc">A long strip of area 24,000 units holds a waveform; it is one second of 24 kilohertz audio. Next to it, a small block of 12.5 by 32 cells, area 400 units, is the same second as Mimi latents. The strip is sixty times larger.</desc>
+<rect data-strip x="20" y="40" width="600" height="80" fill="#ececf1" stroke="#d5d5dc"/>
+<path data-wave d="M20 80 C30 50 40 110 50 80 S70 55 80 80 S100 105 110 80 S125 60 140 80 S160 112 170 80 S185 48 200 80 S220 100 230 80 S245 65 260 80 S280 115 290 80 S305 52 320 80 S340 98 350 80 S365 62 380 80 S400 108 410 80 S425 55 440 80 S460 102 470 80 S485 66 500 80 S520 110 530 80 S545 50 560 80 S580 96 590 80 S605 64 620 80" fill="none" stroke="#5f5f66" stroke-width="1.2"/>
+<g data-latent transform="translate(680 64)">
+<rect width="25" height="32" fill="#4F5D3A" fill-opacity="0.35" stroke="#4F5D3A"/>
+<g stroke="#4F5D3A" stroke-opacity="0.35" stroke-width="0.5"><line x1="4" y1="0" x2="4" y2="32"/><line x1="8" y1="0" x2="8" y2="32"/><line x1="12" y1="0" x2="12" y2="32"/><line x1="16" y1="0" x2="16" y2="32"/><line x1="20" y1="0" x2="20" y2="32"/></g>
+</g>
+<g font-size="13" fill="#2b2b30"><text x="20" y="28">waveform · [24 000] · 24 000 numbers</text><text x="650" y="28">latent · [12.5, 32]</text></g>
+<g font-size="12" fill="#5f5f66"><text x="20" y="142">one number every 41.7 µs, each a pressure value</text><text data-late x="650" y="120">400 numbers</text><text data-late x="650" y="138">one frame per 80 ms</text></g>
+<text data-late x="20" y="178" font-size="13" fill="#4F5D3A">24 000 / 400 = 60: the latent holds one number for every sixty samples</text>
+<rect data-ghost x="20" y="40" width="600" height="80" fill="#4F5D3A" fill-opacity="0.18" stroke="#4F5D3A" opacity="0"/>
+</svg>
+<button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+<p class="blog-figure-reading">Area is to scale. The latent is not sixty times fewer bits, though: both are 32-bit floats here, and the codec only promises to keep what a listener hears.</p>
+
+<script>
+  import { animate, drawStroke, dur, hideStroke, setupFigure, wait } from "../../lib/figure-motion";
+
+  // One second of samples draws across the strip; a copy of the strip then
+  // shrinks, to scale, into the 12.5 x 32 latent: 24 000 numbers into 400.
+  document.querySelectorAll<HTMLElement>("[data-mc]").forEach((root) => {
+    const wave = root.querySelector<SVGPathElement>("[data-wave]")!;
+    const ghost = root.querySelector<SVGRectElement>("[data-ghost]")!;
+    const latent = root.querySelector<SVGGElement>("[data-latent]")!;
+    const late = Array.from(root.querySelectorAll<SVGElement>("[data-late]"));
+    // Map the strip (20, 40, 600 x 80) onto the latent (680, 64, 25 x 32).
+    const sx = 25 / 600, sy = 32 / 80;
+    const target = `translate(${680 - 20 * sx}px, ${64 - 40 * sy}px) scale(${sx}, ${sy})`;
+    setupFigure(
+      root,
+      () => {
+        hideStroke(wave);
+        ghost.style.opacity = "0"; ghost.style.transform = "translate(0px, 0px) scale(1, 1)";
+        latent.style.opacity = "0";
+        late.forEach((t) => (t.style.opacity = "0"));
+      },
+      async (alive) => {
+        await drawStroke(wave, 1.6, "linear");
+        if (!alive()) return;
+        ghost.style.opacity = "1";
+        await animate(ghost, { transform: ["translate(0px, 0px) scale(1, 1)", target] }, { duration: dur(1.3), ease: [0.65, 0, 0.35, 1] });
+        if (!alive()) return;
+        animate(latent, { opacity: [0, 1] }, { duration: dur(0.3) });
+        await animate(ghost, { opacity: [1, 0] }, { duration: dur(0.3) });
+        await wait(0.1);
+        late.forEach((t, i) => animate(t, { opacity: [0, 1] }, { duration: dur(0.4), delay: dur(i * 0.25) }));
+      },
+    );
+  });
+</script>

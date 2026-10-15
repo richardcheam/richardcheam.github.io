@@ -1,0 +1,59 @@
+---
+// Foundations, diffusion post: Euler on the straight and curved paths for
+// 200 seeded starts (seed 7), against the exact ends. Mean miss under 0.01
+// first at 6 steps (straight, 0.008) and 12 steps (curved, 0.0085).
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-race2>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 290" role="img" aria-labelledby="sc2-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="sc2-title">Euler paths on a straight and a curved flow, and the mean miss against the number of steps</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Euler steps N <strong data-vn></strong></span><input class="scrub" data-n type="range" min="1" max="32" step="1" value="6" /></label>
+  </div>
+</div>
+
+<script>
+  import { fmt } from "../../lib/tiny-net";
+  import { INK, MUTED, NEG, JADE, GOLD } from "../../lib/net-diagram";
+  import { txt } from "../../lib/plot";
+  import { gaussStream, vStraight, vCurved, euler, exactEnd } from "../../lib/diffusion";
+  document.querySelectorAll<HTMLElement>("[data-race2]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    let N = 6, cache: { starts: number[]; ends: Record<string, number[]>; miss: Record<string, number[]> } | null = null;
+    const fields = { straight: vStraight, curved: vCurved } as const;
+    // Exact ends need fine integration; compute once, the first time the figure draws.
+    const data = () => {
+      if (cache) return cache;
+      const g = gaussStream(7), starts = Array.from({ length: 200 }, () => g());
+      const ends = { straight: starts.map((x) => exactEnd(x, vStraight)), curved: starts.map((x) => exactEnd(x, vCurved)) };
+      const miss = Object.fromEntries((["straight", "curved"] as const).map((k) => [k, Array.from({ length: 32 }, (_, i) => starts.reduce((s, x, j) => s + Math.abs(euler(x, i + 1, fields[k])[i + 1] - ends[k][j]), 0) / 200)]));
+      return (cache = { starts, ends, miss });
+    };
+    function draw() {
+      const D = data();
+      let s = "";
+      (["straight", "curved"] as const).forEach((k, j) => {
+        const l = 30 + j * 230, w = 200, Y = (x: number) => 150 - Math.max(-2.5, Math.min(2.5, x)) * 40;
+        s += `<rect x="${l}" y="40" width="${w}" height="210" fill="#fafafa" stroke="#eef0f0"/>` + txt(l, 30, k === "straight" ? "straight path (flow matching)" : "curved path (diffusion-style)", `font-size="11.5" font-weight="700" fill="${INK}"`);
+        D.starts.slice(0, 30).forEach((x0) => { const p = euler(x0, N, fields[k]); s += `<polyline fill="none" stroke="${k === "straight" ? NEG : "#3E6E9E"}" stroke-opacity="0.45" points="${p.map((x, i) => `${(l + (i / N) * w).toFixed(1)},${Y(x).toFixed(1)}`).join(" ")}"/>`; });
+        s += txt(l, 270, `N = ${N}: mean miss ${fmt(D.miss[k][N - 1], 4)}`, `font-size="12" font-weight="700" fill="${D.miss[k][N - 1] < 0.01 ? JADE : INK}"`);
+      });
+      // Miss against steps, log scale.
+      const lx = (n: number) => 500 + ((n - 1) / 31) * 230, ly = (v: number) => 50 + ((0 - Math.log10(Math.max(1e-4, v))) / 4) * 190;
+      s += txt(500, 30, "mean miss against N (log)", `font-size="11.5" font-weight="700" fill="${INK}"`);
+      [1, 0.1, 0.01, 0.001].forEach((v) => (s += `<line x1="500" x2="730" y1="${ly(v)}" y2="${ly(v)}" stroke="${v === 0.01 ? GOLD : "#eef0f0"}" stroke-dasharray="${v === 0.01 ? "4 3" : ""}"/>` + txt(494, ly(v) + 4, fmt(v, 3), `font-size="10" text-anchor="end" fill="${MUTED}"`)));
+      (["straight", "curved"] as const).forEach((k) => (s += `<polyline fill="none" stroke="${k === "straight" ? NEG : "#3E6E9E"}" stroke-width="2" points="${D.miss[k].map((v, i) => `${lx(i + 1).toFixed(1)},${ly(v).toFixed(1)}`).join(" ")}"/>`));
+      s += `<line x1="${lx(N)}" x2="${lx(N)}" y1="50" y2="240" stroke="${MUTED}" stroke-dasharray="2 3"/>`;
+      const first = (k: "straight" | "curved") => D.miss[k].findIndex((v) => v < 0.01) + 1;
+      s += txt(500, 268, `under 0.01 first at N = ${first("straight")} (straight), ${first("curved")} (curved)`, `font-size="11.5" font-weight="700" fill="${INK}"`);
+      $("[data-draw]").innerHTML = s;
+      $("[data-vn]").textContent = String(N);
+    }
+    $<HTMLInputElement>("[data-n]").addEventListener("input", (e) => { N = +(e.target as HTMLInputElement).value; draw(); });
+    // Defer the heavy first computation until the figure is near the screen.
+    const io = new IntersectionObserver((es) => { if (es.some((e) => e.isIntersecting)) { io.disconnect(); draw(); } }, { rootMargin: "300px" });
+    io.observe(root);
+  });
+</script>

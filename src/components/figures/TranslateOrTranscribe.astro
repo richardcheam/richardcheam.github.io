@@ -1,0 +1,54 @@
+---
+// Whisper review, Figure 7: which pile the data went into. Khmer: 1.3 h of
+// transcription, 672 h of translation (Fig 11, p. 27), BLEU 6.1 (Table 14,
+// p. 25). Welsh: 73 h and about 9,000 h (Fig 11, p. 27; Sec 3.5, p. 8), BLEU
+// 13. Below, a toy: English-captioned English audio that a language detector
+// mislabels at rate e lands in a small language's translation pile.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram tot" role="region" aria-label={alt} data-tot>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 330" role="img" aria-labelledby="tot-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="tot-title">Transcription and translation hours for Khmer and Welsh, and how detector mistakes fill a translation pile</title>
+    <g data-bars></g>
+    <g data-toy></g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Detector mistakes on English audio, e<strong data-ve></strong></span><input class="scrub" data-e type="range" min="0" max="10" step="0.5" value="1" /></label>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { setupFigure, tween } from "../../lib/figure-motion";
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-tot]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const eIn = $<HTMLInputElement>("[data-e]");
+    const mk = (g: Element, tag: string, a: Record<string, string | number>, txt?: string) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, String(a[k])); if (txt !== undefined) e.textContent = txt; g.append(e); return e; };
+    const L = (h: number) => (Math.log10(Math.max(h, 1)) / 4.2) * 440;
+    function draw(p = 1) {
+      const g = $("[data-bars]"); g.replaceChildren();
+      mk(g, "text", { x: 20, y: 20, "font-size": 11.5, "font-weight": 700, fill: "#2b2b30" }, "Training hours (log scale)");
+      [["Khmer", 1.3, 672, "BLEU 6.1"], ["Welsh", 73, 9000, "BLEU 13"]].forEach(([n, tr, tl, b], i) => {
+        const y = 40 + i * 76;
+        mk(g, "text", { x: 20, y: y + 26, "font-size": 12, "font-weight": 700, fill: "#2b2b30" }, n as string);
+        mk(g, "rect", { x: 110, y, width: Math.max(2, L(tr as number) * p), height: 22, fill: "#4F5D3A", "fill-opacity": 0.85 });
+        mk(g, "text", { x: 116 + L(tr as number) * p, y: y + 15, "font-size": 10.5, fill: "#4F5D3A" }, `${tr} h transcription`);
+        mk(g, "rect", { x: 110, y: y + 28, width: L(tl as number) * p, height: 22, fill: "#35588a", "fill-opacity": 0.85 });
+        mk(g, "text", { x: 116 + L(tl as number) * p, y: y + 43, "font-size": 10.5, fill: "#35588a" }, `${(tl as number).toLocaleString("en")} h translation to English, ${b}`);
+      });
+      const e = +eIn.value / 100, gt = $("[data-toy]"); gt.replaceChildren();
+      mk(gt, "text", { x: 20, y: 214, "font-size": 11.5, "font-weight": 700, fill: "#2b2b30" }, "Toy: 100,000 h of English audio with English captions");
+      mk(gt, "rect", { x: 20, y: 226, width: 440, height: 22, fill: "#b9b9c2" });
+      mk(gt, "rect", { x: 20 + 440 * (1 - e * 5), y: 226, width: 440 * e * 5, height: 22, fill: "#a33b3b", "fill-opacity": 0.85 });
+      mk(gt, "text", { x: 470, y: 242, "font-size": 11, fill: "#2b2b30" }, `${(100000 * e).toLocaleString("en")} h detected as another language`);
+      mk(gt, "text", { x: 20, y: 274, "font-size": 12, fill: "#2b2b30" }, "The text is English but the detector says otherwise, so the rule files the pair as translation data.");
+      mk(gt, "text", { x: 20, y: 296, "font-size": 12.5, "font-weight": 700, fill: 100000 * e > 672 ? "#a33b3b" : "#2b2b30" }, `At e = ${eIn.value}%, ${(100000 * e).toLocaleString("en")} h of mislabelled "translation": ${100000 * e > 672 ? "more than" : "less than"} Khmer's real 672 h.`);
+      mk(gt, "text", { x: 20, y: 320, "font-size": 11, fill: "#5f5f66" }, "The red bar is drawn 5× wider to be visible. This is how most of Welsh's 9,000 h arose (Sec 3.5, p. 8).");
+      $("[data-ve]").textContent = `${eIn.value}%`; eIn.style.setProperty("--p", `${(+eIn.value / 10) * 100}%`);
+    }
+    eIn.addEventListener("input", () => draw());
+    draw();
+    setupFigure(root, () => draw(0), async (alive) => { await tween(1.4, (e) => { if (alive()) draw(e); }); draw(1); });
+  });
+</script>

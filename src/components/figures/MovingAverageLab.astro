@@ -1,0 +1,62 @@
+---
+// Foundations, optimisers post: an exponential moving average of eight noisy
+// gradients 4, 2, 6, 3, 5, 1, 4, 3 (true mean 3.5). With β = 0.9 the raw
+// average reads 0.4, 0.56, 1.104, ..., 1.954; divided by 1 − 0.9^t it reads
+// 4, 2.947, 4.074, ..., 3.431. The "steady 8" mode shows m = 8(1 − 0.9^t).
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-ema>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 290" role="img" aria-labelledby="ma-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="ma-title">Noisy gradients as bars with the raw moving average, the corrected average and the true running mean</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Keep β of the old average <strong data-vb></strong></span><input class="scrub" data-beta type="range" min="0" max="0.99" step="0.01" value="0.9" /></label>
+    <div><span class="fig-panel__name">Gradients</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-mode="noisy" aria-pressed="true">Noisy: 4, 2, 6, 3, 5, 1, 4, 3</button>
+      <button type="button" class="fig-chip" data-mode="steady" aria-pressed="false">Steady: always 8</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt } from "../../lib/tiny-net";
+  import { INK, MUTED, GOLD, JADE } from "../../lib/net-diagram";
+  import { frame, txt } from "../../lib/plot";
+  const NOISY = [4, 2, 6, 3, 5, 1, 4, 3], STEADY = Array(10).fill(8);
+  document.querySelectorAll<HTMLElement>("[data-ema]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    let beta = 0.9, gs = NOISY;
+    const calc = () => { let m = 0, sum = 0; return gs.map((g, i) => { const prev = m; m = beta * m + (1 - beta) * g; sum += g; const c = 1 - beta ** (i + 1); return { g, prev, m, c, mh: m / c, mean: sum / (i + 1) }; }); };
+    const steps = () => calc().map((r, i) => ({
+      say: i === 0 ? "The average starts at 0. The first gradient gets only a small say, so the raw average is far too low. Dividing by 1 − β^t, the share of weight that real gradients hold so far, fixes it." : `Gradient ${i + 1} arrives.${i === 1 ? " The raw average creeps up; the corrected one tracks the real values." : ""}`,
+      math: `m${i + 1} = ${fmt(beta)} × ${fmt(r.prev, 4)} + ${fmt(1 - beta)} × ${r.g} = ${fmt(r.m, 4)}\n1 − ${fmt(beta)}^${i + 1} = ${fmt(r.c, 4)}\nm̂${i + 1} = ${fmt(r.m, 4)} / ${fmt(r.c, 4)} = ${fmt(r.mh, 4)}   (true mean so far ${fmt(r.mean, 4)})`,
+    }));
+    function draw(k: number) {
+      const rs = calc(), n = k + 1, top = Math.max(...gs) + 1;
+      const F = frame({ l: 50, t: 36, w: 440, h: 200, x0: 0.4, x1: gs.length + 0.6, y0: 0, y1: top });
+      let s = F.grid([], Array.from({ length: Math.floor(top / 2) + 1 }, (_, i) => i * 2), 0);
+      s += txt(50, 20, gs === NOISY ? "Eight noisy gradients (bars)" : "A steady gradient of 8 (bars)", `font-size="12" font-weight="700" fill="${INK}"`);
+      gs.forEach((g, i) => {
+        const x = F.X(i + 1), on = i < n;
+        s += `<rect x="${x - 14}" y="${F.Y(g)}" width="28" height="${F.Y(0) - F.Y(g)}" fill="${JADE}" fill-opacity="${on ? 0.28 : 0.08}" stroke="${i === k ? GOLD : "none"}" stroke-width="2"/>` + txt(x, F.Y(0) + 15, String(i + 1), `font-size="10.5" text-anchor="middle" fill="${MUTED}"`);
+      });
+      const line = (vals: number[], col: string, extra: string) => n > 0 ? `<polyline fill="none" stroke="${col}" ${extra} points="${vals.slice(0, n).map((v, i) => `${F.X(i + 1)},${F.Y(v)}`).join(" ")}"/>` + vals.slice(0, n).map((v, i) => `<circle cx="${F.X(i + 1)}" cy="${F.Y(v)}" r="3.5" fill="${col}"/>`).join("") : "";
+      s += line(rs.map((r) => r.mean), INK, `stroke-width="1.2" stroke-dasharray="4 3"`) + line(rs.map((r) => r.m), "#9aa3a1", `stroke-width="2.5"`) + line(rs.map((r) => r.mh), GOLD, `stroke-width="2.5"`);
+      const key = (y: number, col: string, dash: string, label: string, val: string) => `<line x1="520" x2="546" y1="${y - 4}" y2="${y - 4}" stroke="${col}" stroke-width="2.5" stroke-dasharray="${dash}"/>` + txt(554, y, label, `font-size="12" font-weight="700" fill="${INK}"`) + txt(554, y + 18, val, `font-size="12" fill="${INK}"`);
+      const last = rs[Math.max(0, n - 1)];
+      s += key(56, "#9aa3a1", "", "Raw average m", n ? fmt(last.m, 4) : "0");
+      s += key(110, GOLD, "", "Corrected m̂ = m / (1 − β^t)", n ? fmt(last.mh, 4) : "not yet");
+      s += key(164, INK, "4 3", "True mean so far", n ? fmt(last.mean, 4) : "none yet");
+      s += txt(520, 222, `β = ${fmt(beta)}: it remembers about ${beta < 1 ? fmt(1 / (1 - beta), 1) : "∞"} values`, `font-size="11.5" fill="${MUTED}"`);
+      s += txt(520, 240, n ? `real gradients hold ${fmt(100 * last.c, 1)}% of the weight` : "", `font-size="11.5" fill="${MUTED}"`);
+      $("[data-draw]").innerHTML = s;
+      $("[data-vb]").textContent = fmt(beta, 2);
+    }
+    const redraw = stepper(root, steps, draw, { delay: 1.6 });
+    $<HTMLInputElement>("[data-beta]").addEventListener("input", (e) => { beta = +(e.target as HTMLInputElement).value; redraw(); });
+    root.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach((b) => b.addEventListener("click", () => { gs = b.dataset.mode === "steady" ? STEADY : NOISY; root.querySelectorAll("[data-mode]").forEach((o) => o.setAttribute("aria-pressed", String(o === b))); redraw(); }));
+  });
+</script>

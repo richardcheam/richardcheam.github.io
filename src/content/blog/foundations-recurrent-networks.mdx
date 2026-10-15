@@ -1,0 +1,479 @@
+---
+title: "Recurrent networks and vanishing gradients"
+title_key: ["Recurrent networks", "vanishing gradients"]
+date: 2026-10-15
+category: "deep-learning"
+read_time: "32 min"
+series_order: 8
+series: foundations
+featured: false
+excerpt: "Sentences, waveforms and speech frames arrive in order, and their length changes. A recurrent network reads them one step at a time and carries a small memory forward. This post runs one by hand, then follows the gradient backwards through time and watches it shrink to nothing or blow up."
+question: "How can one small network read a sequence of any length, and why does it forget the beginning so easily?"
+my_work: "A concept note. I worked every example by hand, checked every number with a short script, and specified the figures from the standard formulas."
+result: "A one-unit recurrent network with recurrent weight 0.5 keeps only 0.0014 of its first input after ten steps, and the gradient back to that input shrinks by roughly half per step. Trained on a remember-the-first-input toy, it learns a delay of 10 in 25 passes, needs 225 passes at a delay of 15, and never learns a delay of 20; starting the recurrent weight at 1.0 instead fixes all three."
+evidence_limit: "This explains textbook methods on toy data. The trainer is a deterministic one-unit toy, not a real sequence model; real recurrent networks have hundreds of units and the failure is messier, but the cause is the same repeated multiplication."
+lesson: "Backpropagation through time multiplies one factor per step. Anything multiplied by itself twenty times either vanishes or explodes, so a plain recurrent network can only learn what fits inside the range where that product stays near 1."
+---
+
+import RnnUnrollStepper from "../../components/figures/RnnUnrollStepper.astro";
+import MemoryFade from "../../components/figures/MemoryFade.astro";
+import BpttProductStepper from "../../components/figures/BpttProductStepper.astro";
+import VanishExplodeSlider from "../../components/figures/VanishExplodeSlider.astro";
+import SpectralRadiusPlay from "../../components/figures/SpectralRadiusPlay.astro";
+import GradientClipDemo from "../../components/figures/GradientClipDemo.astro";
+import EchoRnnTrainer from "../../components/figures/EchoRnnTrainer.astro";
+import RnnArchitecture from "../../components/figures/RnnArchitecture.astro";
+
+Every network in this series so far takes one fixed-size input and gives one answer. The tiny network from [post 1](/blog/foundations-neurons-backprop/) takes exactly two numbers. The convolutions in [post 7](/blog/foundations-convolutions/) slide a small filter over an image or a sound, but the filter itself still only sees a fixed window.
+
+Language and speech do not come like that. They come **in order**, one piece after another, and the number of pieces changes every time. This post builds the oldest answer to that problem, the **recurrent neural network** (RNN), runs it by hand, and then shows exactly why it struggles to remember anything for long. That struggle, the **vanishing gradient**, is the reason the next post on [LSTM and GRU](/blog/foundations-lstm-gru/) exists, and part of the reason [attention](/blog/foundations-attention/) took over.
+
+
+
+## The whole model at a glance
+
+Here is a whole recurrent network at work before we build it piece by piece. The task: read the word "hell" one character at a time and, at every step, predict the next character. So the targets are "ello". The network is tiny (a hidden state of 3 numbers, with weights trained offline and rounded to one decimal), small enough to show every number.
+
+Watch steps 3 and 4. Both read the letter "l", but the first must predict "l" and the second must predict "o". The input alone cannot tell them apart; only the hidden state, the network's memory of what came before, can.
+
+<figure class="blog-figure blog-figure--wide">
+  <RnnArchitecture alt="Four columns, one per character of hell. At the bottom each character is a one-hot vector; in the middle, a hidden state of three numbers, linked left to right by arrows; at the top, probability bars for the next character with the target outlined. Stepping fills each column: first the hidden state with its arithmetic, then the probabilities and the loss." />
+  <figcaption><strong>Figure 1. An RNN from input to output.</strong> Each step mixes the current character with the previous hidden state, then reads the new hidden state out as next-character probabilities. The two "l" inputs give different predictions because the memory differs. The last steps add up the loss and generate "hello" from "h".</figcaption>
+</figure>
+
+## Sequences: when order matters
+
+A **sequence** is a list where position carries meaning. Three examples, all of which matter for speech models:
+
+1. **A sentence.** "The dog bit the man" and "The man bit the dog" use the same five words. Only the order differs, and the meaning flips.
+2. **A waveform.** As [the audio basics post](/blog/audio-basics/) showed, sound is a long list of air-pressure samples, often 16,000 or 24,000 per second. Shuffle them and you get noise.
+3. **Speech frames.** Speech models usually chop audio into short **frames** (for example 25 milliseconds each, every 10 milliseconds) and describe each frame with a few dozen numbers, such as a row of a mel spectrogram. A one-second word becomes about 100 frames; a ten-second sentence becomes about 1,000.
+
+The everyday picture: reading a book. You cannot understand page 50 from page 50 alone. You carry a summary of the story so far in your head, and each new page updates it.
+
+
+## Why a plain network cannot read a sequence
+
+Suppose we try the simplest thing: glue all the frames of a recording into one long list and feed it to an ordinary network like the one from post 1.
+
+- **The length changes.** A network's first layer has one weight per input number. A network built for 100 frames has nowhere to put frame 101, and nothing to put in the slots when a recording has only 60 frames. You could pad short inputs with zeros and cut long ones, but then the network has a hard maximum length.
+- **Nothing is shared across time.** The weights that look at frame 3 are completely separate from the weights that look at frame 40. If the network learns to recognise the sound "s" at frame 3, it has to learn it again, from scratch, at every other position.
+- **It is huge.** 1,000 frames of 80 numbers each is 80,000 inputs. Connecting those to even 100 hidden neurons is 8 million weights for the first layer alone.
+
+What we want is a network that looks at **one step at a time**, uses **the same weights at every step**, and keeps a **running summary** of what it has seen. That is the recurrent idea.
+
+
+## The recurrent idea: a hidden state carried forward
+
+In one sentence: at every step, mix the new input with the memory from the previous step, squash the result, and call that the new memory.
+
+The memory is called the **hidden state**, written $h_t$ ("h at time t"). It starts at zero before the first input, $h_0 = 0$.
+
+### The scalar version first
+
+Start with the smallest possible recurrent network: **one** hidden unit, so the hidden state is a single number, and one number of input per step.
+
+$$
+h_t = \tanh\left(w_x \, x_t + w_h \, h_{t-1} + b\right)
+$$
+
+- $t$ is the step number: 1, 2, 3, and so on.
+- $x_t$ is the input at step $t$ (one frame, one word's number, one sample).
+- $h_{t-1}$ is the hidden state from the step before: the memory so far.
+- $w_x$ is the **input weight**: how strongly the new input counts.
+- $w_h$ is the **recurrent weight**: how strongly the old memory counts. This one number will decide almost everything in this post.
+- $b$ is a bias, as in post 1.
+- $\tanh$ is the squashing activation from [post 1](/blog/foundations-neurons-backprop/): it maps any number into the range from $-1$ to $1$, with $\tanh(0) = 0$ and $\tanh(1) \approx 0.762$.
+
+This is exactly one neuron from post 1, with two inputs. The twist is that one of its inputs is **its own previous output**. That loop is the "recurrent" in the name.
+
+The everyday picture: a jar of water that you top up each minute. $w_h$ is how much of the old water you keep (the rest leaks away), $w_x$ is how much of the new pour goes in, and $\tanh$ is the jar's rim: it can never hold more than "full", however much you pour.
+
+### Running it by hand
+
+Take $w_x = 1$, $w_h = 0.5$, $b = 0$, and the five-step input sequence $x = (1,\ 0.5,\ -1,\ 0,\ 0)$.
+
+**Step 1.** The memory starts empty, $h_0 = 0$.
+
+$$
+z_1 = 1 \times 1 + 0.5 \times 0 + 0 = 1, \qquad h_1 = \tanh(1) = 0.7616
+$$
+
+**Step 2.** Now the memory is $0.7616$, and it gets mixed with the new input $0.5$.
+
+$$
+z_2 = 1 \times 0.5 + 0.5 \times 0.7616 = 0.5 + 0.3808 = 0.8808, \qquad h_2 = \tanh(0.8808) = 0.7068
+$$
+
+**Step 3.** A negative input pulls the memory down.
+
+$$
+z_3 = 1 \times (-1) + 0.5 \times 0.7068 = -1 + 0.3534 = -0.6466, \qquad h_3 = \tanh(-0.6466) = -0.5694
+$$
+
+**Step 4.** No new input. The memory is just halved and squashed.
+
+$$
+z_4 = 0 + 0.5 \times (-0.5694) = -0.2847, \qquad h_4 = -0.2772
+$$
+
+**Step 5.** Halved again.
+
+$$
+z_5 = 0.5 \times (-0.2772) = -0.1386, \qquad h_5 = -0.1377
+$$
+
+Look at steps 4 and 5. With no input, the memory roughly **halves** each step, because $w_h = 0.5$ and $\tanh$ barely bends small numbers. Hold that thought: it is the whole story of this post in miniature.
+
+<figure class="blog-figure blog-figure--wide">
+  <RnnUnrollStepper alt="Five copies of the same small neuron drawn left to right, one per time step, each receiving an input from below and the previous hidden state from the left. A Step button walks through each step, highlighting the two products, the sum and the tanh, and printing the arithmetic. Sliders set w_x, w_h and b." />
+  <figcaption><strong>Figure 2. An RNN, unrolled.</strong> One neuron reused five times. With the defaults (w_x = 1, w_h = 0.5, b = 0, inputs 1, 0.5, −1, 0, 0) the hidden states are 0.7616, 0.7068, −0.5694, −0.2772, −0.1377. The same three weights are highlighted at every step.</figcaption>
+</figure>
+
+What would change? Raise $w_h$ to 0.9 and the memory leaks more slowly. Set $w_h = 0$ and the network has no memory at all: each $h_t$ depends only on $x_t$. Set $w_x = 0$ and the network ignores its inputs entirely.
+
+### The vector version
+
+One number is a very small memory. Real RNNs keep a **vector** of hidden numbers, say 256 of them, and read a vector input, say 80 mel numbers per frame. The formula keeps its shape; the single weights become weight matrices (grids of weights, one per pair of connected numbers).
+
+$$
+\mathbf{h}_t = \tanh\left(W_x \, \mathbf{x}_t + W_h \, \mathbf{h}_{t-1} + \mathbf{b}\right)
+$$
+
+- $\mathbf{x}_t$ is the input vector at step $t$ (bold means "a list of numbers").
+- $\mathbf{h}_t$ is the hidden-state vector.
+- $W_x$ mixes every input number into every hidden number.
+- $W_h$ mixes every old hidden number into every new hidden number. This is how the units talk to each other across time.
+- $\tanh$ is applied to each number separately.
+
+A tiny example with two hidden units and a one-number input. Take $W_x = \begin{pmatrix} 1 \\ 0.5 \end{pmatrix}$, $W_h = \begin{pmatrix} 0.6 & 0.2 \\ 0.2 & 0.6 \end{pmatrix}$, $\mathbf{b} = 0$, $\mathbf{h}_0 = (0, 0)$, inputs $x_1 = 1$, $x_2 = 0$.
+
+Step 1: $W_x x_1 = (1, 0.5)$, and $W_h \mathbf{h}_0 = (0, 0)$, so $\mathbf{h}_1 = (\tanh 1, \tanh 0.5) = (0.7616,\ 0.4621)$.
+
+Step 2: the input adds nothing, and
+
+$$
+W_h \mathbf{h}_1 = (0.6 \times 0.7616 + 0.2 \times 0.4621,\ \ 0.2 \times 0.7616 + 0.6 \times 0.4621) = (0.5494,\ 0.4296)
+$$
+
+so $\mathbf{h}_2 = (0.5001,\ 0.4050)$. Each unit's new value depends on **both** old values. That mixing is the only real difference from the scalar case, and we will come back to it [when we look at the matrix case](#the-matrix-case-and-the-largest-stretch).
+
+### Unrolling through time
+
+Figure 2 already did the key trick: it drew the one neuron five times in a row. This is called **unrolling** the network through time. The unrolled picture looks like a five-layer network, with one crucial difference: **every layer has the same weights**. $w_x$, $w_h$ and $b$ are three numbers, not fifteen.
+
+Two consequences follow, and they are the two halves of this post:
+
+- **Good:** the network can read any length. Five steps, five hundred steps, it is the same three weights applied again. And anything it learns about "s" at step 3 automatically applies at step 40.
+- **Trouble:** a deep stack where every layer is the same means the same number gets multiplied over and over. That repeated multiplication is where vanishing and exploding gradients come from.
+
+### One output per step, or one at the end
+
+The hidden state is memory, not an answer. To get an answer, add an output layer, for example $y_t = w_o \, h_t$. There are two common shapes:
+
+- **An output at every step.** Labelling each speech frame with its sound, or predicting the next word after each word. With $w_o = 2$ in our example, the five outputs are $1.5232,\ 1.4136,\ -1.1388,\ -0.5544,\ -0.2754$.
+- **One output at the end.** Classifying a whole recording as "yes" or "no", or the remember-the-first-input task below. Only $y_5 = 2 \times (-0.1377) = -0.2754$ is used; the earlier hidden states still matter, but only through $h_5$.
+
+The loss (from [post 2](/blog/foundations-loss-gradient-descent/)) is then either one number at the end, or a sum of one loss per step.
+
+
+## A tiny task where memory fades
+
+Here is the simplest memory test I can think of. Feed the network one important number at step 1, then zeros. At the end, ask: "what was the first number?"
+
+$$
+x = (s,\ 0,\ 0,\ \dots,\ 0), \qquad \text{target at the last step} = s
+$$
+
+where $s$ is either $+1$ or $-1$. To answer, the final hidden state must still "know" the sign of $s$ after all those zeros.
+
+With $w_x = 1$, $b = 0$ and the input $s = 1$, step 1 gives $h_1 = \tanh(1) = 0.7616$, as before. After that every input is zero, so each step is just $h_t = \tanh(w_h \, h_{t-1})$.
+
+With $w_h = 0.5$ over ten steps:
+
+| step | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| $h_t$ | 0.7616 | 0.3634 | 0.1797 | 0.0896 | 0.0448 | 0.0224 | 0.0112 | 0.0056 | 0.0028 | 0.0014 |
+
+By step 10 the memory is **0.0014**. With $s = -1$ everything is mirrored, so the final state is $-0.0014$. The whole difference between "the first input was +1" and "the first input was −1" is now **0.0028**. Any noise would drown it.
+
+A fair question: why not just make $w_h$ bigger? Here is the final state after ten steps, for $s = +1$, at several values of $w_h$:
+
+| $w_h$ | 0.5 | 0.9 | 1.0 | 1.5 | 3.0 |
+|---|---|---|---|---|---|
+| $h_{10}$ | 0.0014 | 0.1892 | 0.3563 | 0.8585 | 0.9949 |
+
+With $w_h = 1.5$ or $3$ the memory holds. It even grows at first: with $w_h = 3$, $h_2 = \tanh(3 \times 0.7616) = 0.9795$. The $\tanh$ rim stops it at just under 1. So the **forward** memory can be kept by a big recurrent weight. The catch, as we will see, is in the **backward** pass: learning needs gradients, and a saturated $\tanh$ passes almost no gradient.
+
+<figure class="blog-figure blog-figure--wide">
+  <MemoryFade alt="Two lines of hidden states over ten steps, one for first input +1 (gold) and one for first input −1 (blue), mirrored around zero, with the gap between them shaded. A slider sets w_h from 0 to 3. A readout shows the final gap and the final state." />
+  <figcaption><strong>Figure 3. How long does the first input last?</strong> The shaded gap is everything the network still knows about step 1. At w_h = 0.5 it is 0.0028 after ten steps; at 0.9 it is 0.3785; at 1.5 it is 1.7171. Drag the slider and watch the gap collapse or hold.</figcaption>
+</figure>
+
+
+## Backpropagation through time
+
+To train an RNN we need the gradient of the loss with respect to $w_x$, $w_h$ and $b$, just as in [post 1](/blog/foundations-neurons-backprop/). The method has a name, **backpropagation through time** (BPTT), but it is nothing new: unroll the network into its stack of identical layers, then run ordinary backpropagation through that stack. Werbos (1990) named and described it, and Rumelhart, Hinton and Williams (1986) already showed that a recurrent network can be trained by unfolding it into a layered one.
+
+Because the weights are shared, each weight collects a gradient contribution from **every** step, and the contributions are added up. That part is bookkeeping. The interesting question is: how much does the hidden state at the last step depend on the hidden state at the first step? That number decides whether a mistake at the end can ever teach the network about something it saw at the start.
+
+### One link of the chain
+
+In one sentence: a small nudge to $h_{t-1}$ reaches $h_t$ after being multiplied by $w_h$ and then by the slope of $\tanh$ at that step.
+
+$$
+\frac{\partial h_t}{\partial h_{t-1}} = w_h \times \tanh'(z_t) = w_h \times \left(1 - h_t^2\right)
+$$
+
+- $\frac{\partial h_t}{\partial h_{t-1}}$ reads "how much $h_t$ moves per unit nudge of $h_{t-1}$".
+- $\tanh'(z_t)$ is the slope of $\tanh$ at this step's sum. A handy fact from post 1: the slope of $\tanh$ equals $1 - (\tanh z)^2$, so it is $1 - h_t^2$, which we already have.
+- The slope is 1 when $h_t = 0$ and falls towards 0 as $h_t$ approaches $\pm 1$: a full jar does not notice an extra drop.
+
+### Chaining the links
+
+The chain rule from post 1 says: to go back several links, **multiply** the link factors.
+
+$$
+\frac{\partial h_5}{\partial h_1}
+= \frac{\partial h_5}{\partial h_4} \times \frac{\partial h_4}{\partial h_3} \times \frac{\partial h_3}{\partial h_2} \times \frac{\partial h_2}{\partial h_1}
+$$
+
+Let us work it for the run in Figure 2 ($w_h = 0.5$, hidden states $0.7616,\ 0.7068,\ -0.5694,\ -0.2772,\ -0.1377$).
+
+| link | $h_t$ | $1 - h_t^2$ | factor $= 0.5 \times (1 - h_t^2)$ | running product |
+|---|---|---|---|---|
+| step 2 to step 1 | 0.7068 | 0.5004 | 0.2502 | 0.2502 |
+| step 3 to step 2 | −0.5694 | 0.6758 | 0.3379 | 0.0845 |
+| step 4 to step 3 | −0.2772 | 0.9231 | 0.4616 | 0.0390 |
+| step 5 to step 4 | −0.1377 | 0.9810 | 0.4905 | 0.0191 |
+
+Four links, and the gradient from step 5 back to step 1 is **0.0191**: less than 2 percent survives. Every factor is below 1, because $w_h = 0.5$ and the $\tanh$ slope can only make things smaller.
+
+Now two other settings, same inputs:
+
+- **Exploding.** Take $w_x = 0.01$ (tiny inputs, so $\tanh$ stays in its straight middle) and $w_h = 1.5$. The hidden states are $0.0100,\ 0.0200,\ 0.0200,\ 0.0300,\ 0.0449$, the slopes all stay above 0.997, and the factors are $1.4994,\ 1.4994,\ 1.4987,\ 1.4970$. The running product is $1.4994,\ 2.2482,\ 3.3693,\ 5.0437$. It **grows**, close to $1.5^4 = 5.0625$.
+- **Big weight, saturated.** Take $w_x = 1$, $w_h = 3$. The hidden states shoot to $0.9924,\ 0.9624,\ 0.9938,\ 0.9949$ for steps 2 to 5, the slopes collapse, and the factors are $0.0454,\ 0.2215,\ 0.0370,\ 0.0307$. The product is **0.00001** after four links. A big weight did not save the gradient; the full jar swallowed it.
+
+<figure class="blog-figure blog-figure--wide">
+  <BpttProductStepper alt="The five hidden states from Figure 2 in a row, with arrows pointing backwards. Each Step press highlights one backward link, prints w_h times (1 minus h squared) with numbers, and adds the factor to a running product shown both as a number and as a bar on a logarithmic scale from 0.00001 to 100000." />
+  <figcaption><strong>Figure 4. The gradient, walked backwards.</strong> Each link multiplies by w_h × (1 − h²). Defaults (w_x = 1, w_h = 0.5) end at 0.0191. Presets: "explode" (w_x = 0.01, w_h = 1.5) ends at 5.0437; "saturate" (w_x = 1, w_h = 3) ends at 0.00001.</figcaption>
+</figure>
+
+
+## Vanishing and exploding gradients
+
+Strip away the $\tanh$ slopes (pretend they are all 1, the best case) and every link factor is just $w_h$. Going back $k$ steps multiplies by $w_h$ $k$ times:
+
+$$
+\frac{\partial h_t}{\partial h_{t-k}} \approx w_h^{\,k}
+$$
+
+Repeated multiplication is ruthless:
+
+- $0.5^{20} = 0.00000095$, about **one in a million**.
+- $0.9^{30} = 0.042$. Even a factor close to 1 loses 96 percent over 30 steps.
+- $1.1^{30} = 17.4$.
+- $1.5^{20} = 3{,}325$, and $1.5^{30} \approx 191{,}751$.
+
+The everyday picture is a whispering game passed along a line of children. If each child repeats the message at half volume, the twentieth hears nothing. If each one shouts a little louder than they heard, the twentieth is deafening. Only a factor of exactly 1 passes the message unchanged, and a network has no reason to land exactly there.
+
+This is the **vanishing gradient problem** (factors below 1) and the **exploding gradient problem** (factors above 1). Hochreiter analysed it in his 1991 diploma thesis, and Bengio, Simard and Frasconi (1994) showed that for this kind of network, storing information robustly and learning long-range dependencies with gradient descent pull against each other. Their conclusion, in plain words: the further back the cause, the weaker its gradient, so plain RNNs learn short-range patterns and miss long-range ones.
+
+What does each failure look like in practice?
+
+- **Vanishing:** training runs without errors, the loss goes down a little, then stalls. The network learns what happens in the last few steps and never connects the end of a sentence to its start. It fails silently.
+- **Exploding:** one unlucky batch produces an enormous gradient, the update throws the weights far away, and the loss jumps or becomes "NaN" (not a number). It fails loudly.
+
+Notice also that **$\tanh$ only ever helps vanishing**. Its slope is at most 1, so it can shrink a factor but never grow it. With $\tanh$, explosion needs $w_h$ above 1 *and* hidden states near 0.
+
+<figure class="blog-figure blog-figure--wide">
+  <VanishExplodeSlider alt="A line chart of gradient magnitude against steps back, from 0 to 30, on a logarithmic vertical axis from 10 to the minus 10 to 10 to the 6. A horizontal line marks 1. A slider sets w_h from 0.1 to 2.0; a toggle adds the tanh slopes using the memory task of Figure 3. Readouts show the magnitude at 10, 20 and 30 steps back." />
+  <figcaption><strong>Figure 5. Vanish or explode.</strong> With tanh slopes off, the curve is w_h to the power k: a straight line on a log axis. At w_h = 0.5, step 20 reads 0.00000095; at 0.9, step 30 reads 0.042; at 1.5, step 20 reads 3,325. Only w_h = 1 stays flat.</figcaption>
+</figure>
+
+### The matrix case and the largest stretch
+
+With a hidden vector, each link factor is a matrix: $W_h$, with each row scaled by its unit's $\tanh$ slope. Going back $k$ steps multiplies by (roughly) $W_h$ $k$ times. What plays the role of "is $w_h$ above or below 1" for a matrix?
+
+The gentle answer: most matrices have a few special directions where multiplying just **stretches** the vector without turning it. The stretch factors are called **eigenvalues**. After many multiplications, the direction with the biggest stretch wins, and the vector's length grows or shrinks like that biggest stretch to the power $k$. The size of the largest eigenvalue is called the **spectral radius**.
+
+Our two-unit $W_h = \begin{pmatrix} 0.6 & 0.2 \\ 0.2 & 0.6 \end{pmatrix}$ has eigenvalues **0.8** (direction $(1, 1)$: $0.6 + 0.2 = 0.8$) and **0.4** (direction $(1, -1)$: $0.6 - 0.2 = 0.4$). Start with $(1, 0)$ and multiply repeatedly:
+
+| times multiplied | 1 | 2 | 3 | 4 | 5 |
+|---|---|---|---|---|---|
+| vector | (0.6, 0.2) | (0.4, 0.24) | (0.288, 0.224) | (0.2176, 0.192) | (0.1690, 0.1587) |
+| length | 0.6325 | 0.4665 | 0.3649 | 0.2902 | 0.2318 |
+
+The vector swings round to point along $(1, 1)$, the direction of the larger stretch, and from then on its length shrinks by about 0.8 each time. Change the matrix to $\begin{pmatrix} 1.2 & 0.3 \\ 0.3 & 1.2 \end{pmatrix}$, whose eigenvalues are **1.5** and **0.9**, and after 10 multiplications $(1, 0)$ has length **40.8**: the 1.5 direction takes over and explodes.
+
+So the rule of thumb carries over: **largest stretch below 1, gradients vanish; above 1, they can explode** (this is the condition Pascanu, Mikolov and Bengio (2013) make precise; the exact statement is about the $\tanh$-scaled matrices, and "below 1" is sufficient for vanishing while "above 1" is only necessary for explosion).
+
+<figure class="blog-figure blog-figure--wide">
+  <SpectralRadiusPlay alt="A 2-D plane with a starting arrow at (1, 0). Each step multiplies the arrow by a 2-by-2 matrix and draws the new arrow, leaving a trail. The two eigen-directions are drawn as faint lines labelled with their stretch factors. Sliders set the diagonal entry a and the off-diagonal entry c of the symmetric matrix [[a, c], [c, a]]." />
+  <figcaption><strong>Figure 6. Repeated multiplication by a matrix.</strong> With a = 0.6, c = 0.2 the stretches are 0.8 and 0.4; the arrow turns towards the 0.8 direction and shrinks: length 0.6325, 0.4665, 0.3649, 0.2902, 0.2318. Set a = 1.2, c = 0.3 and the length reaches 40.8 after ten steps.</figcaption>
+</figure>
+
+
+## Remedies
+
+Nothing below makes a plain RNN remember perfectly. Each one attacks one side of the problem.
+
+### Gradient clipping, for explosions
+
+In one sentence: if the gradient vector is longer than a chosen limit, shrink it to that length, keeping its direction.
+
+$$
+\mathbf{g} \leftarrow \mathbf{g} \times \min\left(1,\ \frac{c}{\lVert \mathbf{g} \rVert}\right)
+$$
+
+- $\mathbf{g}$ is the full gradient: one number per weight, as a vector.
+- $\lVert \mathbf{g} \rVert$ is its length (square each number, add, take the square root).
+- $c$ is the threshold, a setting you choose (values like 1 or 5 are common).
+- $\min(1, \dots)$ means "leave it alone if it is already short enough".
+
+Worked: $\mathbf{g} = (3, 4)$ and $c = 1$. The length is $\sqrt{9 + 16} = 5$. Since 5 is more than 1, scale by $1/5$: the clipped gradient is $(0.6, 0.8)$, length 1, same direction. With $\mathbf{g} = (6, 8)$ and $c = 5$: length 10, scale by $5/10$, result $(3, 4)$. With $\mathbf{g} = (0.3, 0.4)$ and $c = 1$: length 0.5, below the threshold, unchanged.
+
+The everyday picture: a speed limiter on a car. You still steer where you want to go, but you cannot take a single wild leap off a cliff edge in the loss landscape. Pascanu, Mikolov and Bengio (2013) proposed exactly this rescale-by-norm rule for RNNs. It is now standard far beyond RNNs; most Transformer training recipes clip at a norm of 1.
+
+Clipping fixes explosions only. A vanishing gradient is already tiny, and clipping never makes anything bigger.
+
+<figure class="blog-figure blog-figure--wide">
+  <GradientClipDemo alt="A 2-D plane with a circle of radius c around the origin. A draggable arrow shows the raw gradient; when its tip is outside the circle, a second arrow shows the clipped gradient on the circle, along the same line. Readouts show the length, the scale factor and both vectors." />
+  <figcaption><strong>Figure 7. Clip by norm.</strong> Default gradient (3, 4), threshold 1: length 5, scale 0.2, clipped (0.6, 0.8). Drag the tip inside the circle and the scale reads 1: nothing changes.</figcaption>
+</figure>
+
+### Careful initialisation, for vanishing
+
+Training starts from the initial weights, and if the starting $w_h$ already makes the gradient vanish, there is no signal to learn from. So start where the factor is near 1. In the [trainer below](#a-tiny-rnn-that-learns-or-fails), changing only the starting $w_h$ from 0.5 to 1.0 turns a delay the network could never learn into one it learns in **5** passes. For vector RNNs the same idea means starting $W_h$ with stretches near 1, for example as an **orthogonal** matrix (one that rotates but never stretches), or as the identity matrix with ReLU units (Le, Jaitly and Hinton, 2015).
+
+This helps at the start, but training is free to move $W_h$ away from that sweet spot.
+
+### Gated units, the real fix
+
+The lasting fix changes the cell itself. Instead of forcing memory through "multiply by $W_h$, then squash" at every step, an **LSTM** (long short-term memory, Hochreiter and Schmidhuber, 1997) keeps a separate memory lane that is updated mostly by **adding**, with learned **gates** deciding what to keep and what to write. When the "keep" gate is near 1, the backward factor along that lane is near 1, and the whisper survives. The **GRU** (gated recurrent unit, Cho et al., 2014) is a lighter version of the same idea. That is the whole of [the next post](/blog/foundations-lstm-gru/).
+
+### Truncated backpropagation through time
+
+A practical point, not a cure. For a 1,000-frame recording, backpropagating through all 1,000 steps needs every hidden state stored and is slow. **Truncated BPTT** runs forward over the whole sequence, carrying the hidden state along, but only backpropagates through the last, say, 50 steps of each chunk (Williams and Peng, 1990). The network can still *carry* information further than 50 steps, but it can only *learn* dependencies up to the truncation length. Given how small the gradient is beyond a few dozen steps anyway, little is lost.
+
+
+## A tiny RNN that learns, or fails
+
+Time to see all of this in one training run. The task is the memory test from earlier: input $(s, 0, 0, \dots, 0)$ with $s = +1$ or $-1$, and after $T$ steps the network must output $s$. The **delay** $T$ is how many steps it must remember.
+
+The network is the one-unit RNN with no bias, plus an output weight: $h_t = \tanh(w_x x_t + w_h h_{t-1})$ and $y = w_o h_T$. The loss is half the squared error, averaged over the two examples $s = +1$ and $s = -1$. Every pass (epoch) computes the full gradient by BPTT and takes one gradient-descent step with learning rate $\eta = 0.5$. There is no randomness at all: every run starts from $w_x = 0.5$, $w_h = 0.5$, $w_o = 0.5$, so anyone can reproduce the numbers exactly.
+
+At the start, the network outputs almost 0 for both examples, so the loss is close to $\tfrac{1}{2} \times 1^2 = 0.5$. How big is the very first gradient for the input weight $w_x$, the only thing that can teach the network to "write" $s$ into memory?
+
+| delay $T$ | 1 | 5 | 10 | 15 | 20 |
+|---|---|---|---|---|---|
+| first gradient for $w_x$ | −0.302 | −0.0226 | −0.00072 | −0.000022 | −0.0000007 |
+| passes until loss is below 0.01 | 6 | 8 | 25 | 225 | never (in 2,000) |
+
+Every extra 5 steps of delay cuts the first gradient by roughly 30 times, because the signal passes through 5 more factors of about 0.5. At $T = 20$ the gradient is less than a millionth, and after 2,000 passes the loss is still **0.4999989**: the network has learned nothing. Note that the forward signal fades too: at $T = 20$ the untrained network's final hidden state is only 0.00000086, the same fade as in Figure 3.
+
+Now change one thing: start $w_h$ at **1.0** instead of 0.5. The delay-20 task is solved in **5** passes, and delay 30 in **4**, with $w_h$ ending around 1.7 and 1.8. Starting the factor near 1 lets the gradient through, and gradient descent does the rest.
+
+Do not read too much into the rescue: a one-unit network with a single bit to remember is the easiest possible case. In real tasks the network must remember some things and forget others, and a single $w_h$ cannot do both. That is exactly what gates are for.
+
+<figure class="blog-figure blog-figure--wide">
+  <EchoRnnTrainer alt="Left: the unrolled one-unit RNN for the chosen delay, with the hidden state drawn as a coloured bar at each step for s = +1. Right: the loss curve over passes, and a log-scale bar for the size of the w_x gradient. Controls: delay T from 1 to 30, starting w_h, learning rate, Train (which becomes Pause while running), One pass and Start over." />
+  <figcaption><strong>Figure 8. Remember the first input.</strong> Defaults (T = 10, start w_h = 0.5, η = 0.5): loss 0.4996 at pass 1, below 0.01 at pass 25. Set T = 20 and it stays at 0.5 forever. Then set start w_h = 1.0: solved in 5 passes.</figcaption>
+</figure>
+
+
+## Recurrent networks in speech, and what replaced them
+
+RNNs, mostly LSTMs and GRUs, were the workhorse of speech for most of the 2010s:
+
+- **Speech recognition.** Graves, Mohamed and Hinton (2013) used deep bidirectional LSTMs to reach the best result at the time on the TIMIT phoneme benchmark. Many production recognisers of that era were LSTM-based.
+- **Text to speech.** Tacotron (Wang et al., 2017) and Tacotron 2 (Shen et al., 2018) generated mel spectrograms frame by frame with recurrent decoders, and WaveRNN (Kalchbrenner et al., 2018) generated the waveform itself with a single recurrent layer, one sample at a time.
+
+Then the Transformer (Vaswani et al., 2017) replaced them almost everywhere. The main reason is **parallelism**. An RNN cannot compute $h_{10}$ until it has $h_9$, so a 1,000-frame recording takes 1,000 steps one after another, however many processors you have. Attention lets every position look at every other position directly, all at once, so training uses the whole GPU (graphics processing unit). And because any position can reach any other in a single hop, there is no long chain of factors for the gradient to vanish along. That is the subject of [the attention post](/blog/foundations-attention/), and you can see it at work in [Pocket TTS](/blog/pocket-tts-calm-explained/).
+
+Recurrence has not disappeared, though. Generating speech in real time means producing one frame after another, and a Transformer has to look back over a growing history each time. A newer family of models, **state-space models** such as Mamba (Gu and Dao, 2023), carries a fixed-size state from step to step like an RNN, yet is designed so training can still run in parallel. The idea from this post, a small memory updated one step at a time, keeps coming back.
+
+
+## Counting the parameters
+
+A recurrent layer with input size $n$ and hidden size $m$ has
+
+$$
+n m + m^2 + m
+$$
+
+parameters.
+
+- $n m$: the input matrix $W_x$, one weight per (input number, hidden unit) pair.
+- $m^2$: the recurrent matrix $W_h$, one weight per (old unit, new unit) pair.
+- $m$: one bias per hidden unit.
+
+The count does not depend on the sequence length: the same weights are reused at every step, which is the whole point of a recurrent network. The one-neuron toy ($n = m = 1$) has $1 + 1 + 1 = 3$. The "hell" model of [Figure 1](#the-whole-model-at-a-glance) has $n = 4$ letters and $m = 3$ hidden numbers: $12 + 9 + 3 =$ **24**, plus an output layer from 3 hidden numbers to 4 letter scores, $3 \times 4 + 4 = 16$, so **40** in all.
+
+```python
+import torch.nn as nn
+
+# the "hell" model: 4 letters in, 3 hidden numbers, 4 letter scores out
+rnn = nn.RNN(input_size=4, hidden_size=3)
+out = nn.Linear(3, 4)
+for name, p in rnn.named_parameters():
+    print(name, tuple(p.shape))
+print("rnn", sum(p.numel() for p in rnn.parameters()))
+print("output layer", sum(p.numel() for p in out.parameters()))
+```
+
+It prints:
+
+```text
+weight_ih_l0 (3, 4)
+weight_hh_l0 (3, 3)
+bias_ih_l0 (3,)
+bias_hh_l0 (3,)
+rnn 27
+output layer 16
+```
+
+PyTorch prints **27**, not 24, because it keeps two bias vectors (`bias_ih` on the input side and `bias_hh` on the recurrent side). They are always added together, so the second one adds no expressive power; it is a convention inherited from older GPU libraries. The [LSTM post](/blog/foundations-lstm-gru/#how-many-weights) counts the gated versions.
+
+## What to remember
+
+- An RNN is one neuron (or layer) reused at every time step, with its previous output fed back in: $h_t = \tanh(w_x x_t + w_h h_{t-1} + b)$. The same weights at every step let it read any length.
+- Unrolled, it is a deep network with shared weights. Training it is ordinary backpropagation on that unrolled stack: backpropagation through time.
+- Going back one step multiplies the gradient by $w_h \times (1 - h_t^2)$. Going back $k$ steps multiplies $k$ such factors.
+- Factors below 1 vanish ($0.5^{20} \approx 0.000001$); factors above 1 explode ($1.5^{20} \approx 3{,}325$). For a matrix, the largest stretch (spectral radius) plays the role of $w_h$.
+- $\tanh$ saturation only makes vanishing worse: a big $w_h$ keeps the forward memory but kills the backward gradient.
+- Clipping by norm tames explosions; starting near a factor of 1 helps vanishing; gates (LSTM, GRU) are the lasting fix; truncated BPTT limits cost and how far back the network can learn.
+- Transformers replaced RNNs mainly because they train in parallel and connect distant steps directly.
+
+
+## Try it yourself
+
+- **RnnUnrollStepper:** keep the defaults and step to the end. You should see $h_5 = -0.1377$. Set $w_h = 0$ and $h_2$ becomes $\tanh(0.5) = 0.4621$, with no trace of step 1.
+- **MemoryFade:** set $w_h = 0.9$. The final state should read $0.1892$ and the gap $0.3785$. Set $w_h = 1.0$: $0.3563$.
+- **BpttProductStepper:** step through the defaults; the product should read $0.2502$, $0.0845$, $0.0390$, $0.0191$. Choose the "explode" preset: $5.0437$.
+- **VanishExplodeSlider:** with tanh slopes off, set $w_h = 0.9$: the readout at 30 steps should be $0.0424$. Set $w_h = 1.1$: $17.45$.
+- **SpectralRadiusPlay:** set $a = 0.6$, $c = 0.2$ and step five times: lengths $0.6325$, $0.4665$, $0.3649$, $0.2902$, $0.2318$.
+- **GradientClipDemo:** set the gradient to $(6, 8)$ and the threshold to 5: clipped $(3, 4)$, scale $0.5$.
+- **EchoRnnTrainer:** set $T = 15$ with the other defaults: the loss falls below 0.01 at pass **225**. Set $T = 20$, start $w_h = 1.0$: pass **5**.
+
+
+## Sources
+
+- Jordan, M. I. (1986). *Serial order: a parallel distributed processing approach.* ICS Report 8604, Institute for Cognitive Science, University of California, San Diego.
+- Rumelhart, D. E., Hinton, G. E. and Williams, R. J. (1986). Learning representations by back-propagating errors. *Nature* 323, 533 to 536. (The longer chapter "Learning internal representations by error propagation", in *Parallel Distributed Processing*, Vol. 1, MIT Press, 1986, describes unfolding a recurrent network in time.)
+- Elman, J. L. (1990). Finding structure in time. *Cognitive Science* 14(2), 179 to 211.
+- Werbos, P. J. (1990). Backpropagation through time: what it does and how to do it. *Proceedings of the IEEE* 78(10), 1550 to 1560.
+- Williams, R. J. and Peng, J. (1990). An efficient gradient-based algorithm for on-line training of recurrent network trajectories. *Neural Computation* 2(4), 490 to 501.
+- Hochreiter, S. (1991). *Untersuchungen zu dynamischen neuronalen Netzen.* Diploma thesis, Technische Universität München.
+- Bengio, Y., Simard, P. and Frasconi, P. (1994). Learning long-term dependencies with gradient descent is difficult. *IEEE Transactions on Neural Networks* 5(2), 157 to 166.
+- Hochreiter, S. and Schmidhuber, J. (1997). Long short-term memory. *Neural Computation* 9(8), 1735 to 1780.
+- Pascanu, R., Mikolov, T. and Bengio, Y. (2013). On the difficulty of training recurrent neural networks. *ICML 2013*. arXiv:1211.5063.
+- Graves, A., Mohamed, A. and Hinton, G. (2013). Speech recognition with deep recurrent neural networks. *ICASSP 2013*. arXiv:1303.5778.
+- Cho, K. et al. (2014). Learning phrase representations using RNN encoder-decoder for statistical machine translation. *EMNLP 2014*. arXiv:1406.1078.
+- Le, Q. V., Jaitly, N. and Hinton, G. E. (2015). A simple way to initialize recurrent networks of rectified linear units. arXiv:1504.00941.
+- Wang, Y. et al. (2017). Tacotron: towards end-to-end speech synthesis. *Interspeech 2017*. arXiv:1703.10135.
+- Vaswani, A. et al. (2017). Attention is all you need. *NeurIPS 2017*. arXiv:1706.03762.
+- Shen, J. et al. (2018). Natural TTS synthesis by conditioning WaveNet on mel spectrogram predictions. *ICASSP 2018*. arXiv:1712.05884.
+- Kalchbrenner, N. et al. (2018). Efficient neural audio synthesis. *ICML 2018*. arXiv:1802.08435.
+- Gu, A. and Dao, T. (2023). Mamba: linear-time sequence modeling with selective state spaces. arXiv:2312.00752.
+

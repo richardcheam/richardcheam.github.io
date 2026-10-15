@@ -1,0 +1,9 @@
+# Build output and dependencies
+dist/
+.astro/
+node_modules/
+
+# Local tooling
+.DS_Store
+harness/
+vendor/

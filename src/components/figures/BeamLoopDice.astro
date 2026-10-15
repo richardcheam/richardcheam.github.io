@@ -1,0 +1,70 @@
+---
+// VALL-E review, Figure 5: Toy 2, the loop trap. Six toy tokens A to F; F ends
+// the utterance. From each state: stay 0.40, move to the next letter 0.35,
+// any of the other four 0.0625 each. Decode 30 steps from A with greedy,
+// beam search (width 4) and sampling (seed 0, 1,000 runs). The paper's claim:
+// beam search "may lead the LM into an infinity loop" (Sec 4.3, p. 7).
+const { alt } = Astro.props;
+---
+<div class="blog-diagram bld" role="region" aria-label={alt} data-bld>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 350" role="img" aria-labelledby="bld-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="bld-title">Greedy and beam search stuck repeating a token while sampling reaches the end</title>
+    <g data-strips></g>
+    <text data-r1 x="20" y="300" font-size="12.5" font-weight="700" fill="#2b2b30"></text>
+    <text data-r2 x="20" y="322" font-size="12" fill="#2b2b30"></text>
+    <text data-r3 x="20" y="342" font-size="11.5" fill="#5f5f66"></text>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Sampling</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-again>Draw another sample</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { setupFigure, wait } from "../../lib/figure-motion";
+  import { rng } from "../../lib/flow-math";
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-bld]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const mk = (g: Element, tag: string, a: Record<string, string | number>, txt?: string) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, String(a[k])); if (txt !== undefined) e.textContent = txt; g.append(e); return e; };
+    const L = "ABCDEF", COL = ["#35588a", "#2f6f6a", "#8a7a1f", "#b8722c", "#8a3f6e", "#4F5D3A"], STEPS = 30;
+    const P = (from: number) => Array.from({ length: 6 }, (_, to) => (to === from ? 0.4 : to === from + 1 ? 0.35 : 0.0625));
+    const greedy = () => { const s = [0]; for (let i = 0; i < STEPS && s[s.length - 1] !== 5; i++) { const p = P(s[s.length - 1]); s.push(p.indexOf(Math.max(...p))); } return s; };
+    // Beam search over unfinished paths, also remembering the best finished one.
+    function beam() {
+      let beams = [{ s: [0], lp: 0 }], best: { s: number[]; lp: number } | null = null;
+      for (let i = 0; i < STEPS; i++) {
+        const cand: { s: number[]; lp: number }[] = [];
+        beams.forEach((b) => P(b.s[b.s.length - 1]).forEach((p, to) => { const c = { s: [...b.s, to], lp: b.lp + Math.log(p) }; if (to === 5) { if (!best || c.lp > best.lp) best = c; } else cand.push(c); }));
+        beams = cand.sort((a, b) => b.lp - a.lp).slice(0, 4);
+      }
+      return { top: beams[0], best: best! };
+    }
+    const sample = (r: () => number) => { const s = [0]; for (let i = 0; i < STEPS && s[s.length - 1] !== 5; i++) { const p = P(s[s.length - 1]); let u = r(), to = 0; while (u > p[to]) { u -= p[to]; to++; } s.push(Math.min(to, 5)); } return s; };
+    const G = greedy(), B = beam();
+    let r0 = rng(0), fin = 0, len = 0;
+    for (let i = 0; i < 1000; i++) { const s = sample(r0); if (s[s.length - 1] === 5) { fin++; len += s.length - 1; } }
+    let rs = rng(1), S = sample(rs), shown = STEPS + 1;
+    function strip(y: number, name: string, s: number[], note: string) {
+      const g = $("[data-strips]");
+      mk(g, "text", { x: 20, y, "font-size": 11.5, "font-weight": 700, fill: "#2b2b30" }, name);
+      mk(g, "text", { x: 760, y, "font-size": 10.5, "text-anchor": "end", fill: "#5f5f66" }, note);
+      s.slice(0, shown).forEach((t, i) => { mk(g, "rect", { x: 20 + i * 24, y: y + 8, width: 22, height: 26, rx: 3, fill: COL[t], "fill-opacity": t === 5 ? 1 : 0.8 }); mk(g, "text", { x: 31 + i * 24, y: y + 26, "font-size": 11, "font-weight": 700, "text-anchor": "middle", fill: "#fff" }, L[t]); });
+    }
+    function draw() {
+      $("[data-strips]").replaceChildren();
+      strip(22, "Greedy: always the likeliest next token", G, G[G.length - 1] === 5 ? "finished" : "never finishes");
+      strip(90, "Beam search, 4 unfinished paths kept", B.top.s, `log-probability ${B.top.lp.toFixed(1)}: still repeating`);
+      strip(158, "Beam search, finished paths compared too", B.best.s, `log-probability ${B.best.lp.toFixed(2)}: ends at once`);
+      strip(226, "Sampling: draw the next token by its probability", S, S[S.length - 1] === 5 ? `finished after ${S.length - 1} steps` : "not finished in 30");
+      $("[data-r1]").textContent = `Sampling, 1,000 runs (seed 0): ${(fin / 10).toFixed(1)}% reach F within 30 steps, after ${(len / Math.max(1, fin)).toFixed(1)} steps on average.`;
+      $("[data-r2]").textContent = "Staying put is the single likeliest move, so the most-likely search repeats one sound; comparing finished paths instead picks the shortest exit.";
+      $("[data-r3]").textContent = "A toy chain, not VALL-E's tokens. It shows why VALL-E samples row 1 instead of searching for the likeliest one.";
+    }
+    $("[data-again]").addEventListener("click", () => { S = sample(rs); shown = STEPS + 1; draw(); });
+    draw();
+    setupFigure(root, () => { shown = 0; draw(); }, async (alive) => { for (let i = 1; i <= STEPS + 1; i++) { if (!alive()) return; shown = i; draw(); await wait(0.12); } });
+  });
+</script>

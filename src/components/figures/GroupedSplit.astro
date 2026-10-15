@@ -1,0 +1,98 @@
+---
+// Why the split groups documents that share sentences. Top: a toy of eight
+// documents (illustrative). Bottom: the real dev and test sets from the
+// project report, section 3.5.
+const { alt } = Astro.props;
+// Each document lists the sentences it contains; neighbours share one.
+const docs = [["a", "b"], ["b", "c"], ["d", "e"], ["e", "f"], ["g", "h"], ["h", "i"], ["j", "k"], ["k", "l"]];
+const naiveDev = [1, 6];
+const groupedDev = [6, 7];
+---
+<div class="blog-diagram gs" role="region" aria-label={alt} data-gs data-cfg={JSON.stringify({ docs, naiveDev, groupedDev })}>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 400" role="img" aria-labelledby="gs-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="gs-title">Splitting documents with and without grouping</title>
+    <text x="24" y="26" font-size="11" letter-spacing="1" fill="#5f5f66">TOY: 8 DOCUMENTS, EACH SHARES A SENTENCE WITH A NEIGHBOUR</text>
+    <rect x="24" y="150" width="480" height="70" rx="6" fill="#4F5D3A" fill-opacity="0.06" stroke="#4F5D3A" stroke-opacity="0.4" />
+    <text x="34" y="214" font-size="10.5" font-weight="600" fill="#4F5D3A">TRAIN</text>
+    <rect x="520" y="150" width="236" height="70" rx="6" fill="#594578" fill-opacity="0.06" stroke="#594578" stroke-opacity="0.4" />
+    <text x="530" y="214" font-size="10.5" font-weight="600" fill="#594578">DEV</text>
+    <g data-leaks></g>
+    <g data-docs></g>
+    <text data-verdict x="24" y="246" font-size="11.5" font-weight="600"></text>
+
+    <line x1="24" y1="268" x2="756" y2="268" stroke="#ececf1" />
+    <text x="24" y="292" font-size="11" letter-spacing="1" fill="#5f5f66">REAL: ONE DEV SET, THREE JOBS</text>
+    <g transform="translate(24 304)">
+      <rect width="88" height="22" fill="#594578" />
+      <rect x="88" width="442" height="22" fill="#594578" fill-opacity="0.35" />
+      <rect x="474" width="10" height="22" fill="none" stroke="#2b2b30" stroke-dasharray="2 2" />
+      <text y="42" font-size="10.5" fill="#594578" font-weight="600">200 "core": picks checkpoints</text>
+      <text x="200" y="42" font-size="10.5" fill="#2b2b30">1,060: compares systems (23 of the 1,260 are listening-only)</text>
+      <text y="60" font-size="10" fill="#5f5f66">Dev: 1,260 sentences, 1% of the hours. The 96 items from 2 held-out speakers (0.34 h) are the only unseen voices.</text>
+      <rect x="560" width="172" height="22" rx="3" fill="#2b2b30" />
+      <text x="572" y="15" font-size="10.5" fill="#fff">🔒 test: 1,209, sealed</text>
+      <text x="560" y="42" font-size="10" fill="#5f5f66">hash committed, never opened</text>
+    </g>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Split by</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-mode="naive" aria-pressed="true">Document, at random</button>
+      <button type="button" class="fig-chip" data-mode="grouped" aria-pressed="false">Group of linked documents</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { setupFigure, tween } from "../../lib/figure-motion";
+
+  const NS = "http://www.w3.org/2000/svg";
+  const el = (tag: string, a: Record<string, string | number>, t?: string) => { const e = document.createElementNS(NS, tag); Object.entries(a).forEach(([k, v]) => e.setAttribute(k, String(v))); if (t) e.textContent = t; return e; };
+
+  document.querySelectorAll<HTMLElement>("[data-gs]").forEach((root) => {
+    const c = JSON.parse(root.dataset.cfg!);
+    const docsG = root.querySelector<SVGGElement>("[data-docs]")!, leaksG = root.querySelector<SVGGElement>("[data-leaks]")!;
+    const chips = Array.from(root.querySelectorAll<HTMLButtonElement>("[data-mode]"));
+    let mode = "naive";
+    const W = 54, H = 44;
+    const home = (i: number) => ({ x: 24 + i * 60, y: 44 });
+    const slot = (i: number, dev: number[]) => {
+      const inDev = dev.includes(i), k = (inDev ? dev : c.docs.map((_: unknown, j: number) => j).filter((j: number) => !dev.includes(j))).indexOf(i);
+      return inDev ? { x: 532 + k * 60, y: 160 } : { x: 34 + k * 78, y: 160 };
+    };
+    const cards = c.docs.map((d: string[], i: number) => {
+      const g = el("g", {}) as SVGGElement;
+      g.append(el("rect", { width: W, height: H, rx: 4, fill: "#fff", stroke: "#d6d6dd" }));
+      g.append(el("text", { x: 6, y: 13, "font-size": 9, fill: "#5f5f66" }, `doc ${i + 1}`));
+      d.forEach((s, j) => g.append(el("text", { x: 8 + j * 22, y: 34, "font-size": 13, "font-weight": 700, fill: "#2b2b30", "font-family": "ui-monospace, monospace" }, s)));
+      docsG.append(g);
+      return g;
+    });
+    const pos = (i: number, p: { x: number; y: number }) => cards[i].setAttribute("transform", `translate(${p.x} ${p.y})`);
+
+    function leaks(dev: number[]) {
+      leaksG.replaceChildren();
+      let n = 0;
+      c.docs.forEach((a: string[], i: number) => c.docs.forEach((b: string[], j: number) => {
+        if (i < j && dev.includes(i) !== dev.includes(j) && a.some((s) => b.includes(s))) {
+          const p = slot(i, dev), q = slot(j, dev);
+          leaksG.append(el("path", { d: `M${p.x + W / 2} ${p.y} C${p.x + W / 2} ${p.y - 40}, ${q.x + W / 2} ${q.y - 40}, ${q.x + W / 2} ${q.y}`, fill: "none", stroke: "#a33b3b", "stroke-width": 2 }));
+          n++;
+        }
+      }));
+      const v = root.querySelector("[data-verdict]")!;
+      v.setAttribute("fill", n ? "#a33b3b" : "#4F5D3A");
+      v.textContent = n ? `${n} sentences appear in both train and dev: the dev score partly measures memory.` : "No sentence crosses the split: dev measures reading, not memory.";
+    }
+    async function run(animateIt: boolean) {
+      chips.forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.mode === mode)));
+      const dev = mode === "naive" ? c.naiveDev : c.groupedDev;
+      leaksG.replaceChildren(); root.querySelector("[data-verdict]")!.textContent = "";
+      if (animateIt) await tween(0.9, (t) => cards.forEach((_: SVGGElement, i: number) => { const a = home(i), b = slot(i, dev); pos(i, { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }); }));
+      else cards.forEach((_: SVGGElement, i: number) => pos(i, slot(i, dev)));
+      leaks(dev);
+    }
+    chips.forEach((b) => b.addEventListener("click", () => { mode = b.dataset.mode!; run(true); }));
+    setupFigure(root, () => { mode = "naive"; cards.forEach((_: SVGGElement, i: number) => pos(i, home(i))); leaksG.replaceChildren(); }, async (alive) => { if (alive()) await run(true); });
+  });
+</script>

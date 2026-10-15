@@ -1,0 +1,488 @@
+---
+title: "SoundStream: One Codec, Every Bitrate"
+published: true
+date: 2026-10-14
+question: "Can one neural network, trained end to end, compress speech and music at low bitrates better than the hand-built codecs on our phones, and still run live?"
+excerpt: "SoundStream turns 24 kHz audio into 75 small vectors a second, squeezes each with a stack of residual codebooks, and rebuilds the sound with a GAN-trained decoder. Trained with quantizer dropout, one model serves 3 to 18 kbps; at 3 kbps raters prefer it to Opus at 12 kbps."
+type: paper
+topic: [speech, audio-codecs]
+tags: [Neural audio codec, RVQ, Quantizer dropout, GAN, FiLM, Streaming, Google]
+org: "Google Research"
+authors: "Neil Zeghidour, Alejandro Luebs, Ahmed Omran, Jan Skoglund, Marco Tagliasacchi"
+source_url: https://arxiv.org/abs/2107.03312
+source_label: "Read the paper (IEEE/ACM TASLP 2021)"
+source_date: 2021-07-07
+links:
+  - label: "Audio examples"
+    url: https://google-research.github.io/seanet/soundstream/examples/
+math: true
+tldr:
+  - "**Authors' claim:** a fully convolutional encoder, a residual vector quantizer and a decoder, trained end to end with adversarial and reconstruction losses, compress speech, music and general audio; a single model covers **3 to 18 kbps** and runs in real time on a smartphone CPU (Abstract, p. 1)."
+  - "**The trick:** quantizer dropout. For each training example a random number of codebooks between 1 and the maximum is used, so the same weights learn every bitrate (Sec III-C, p. 5)."
+  - "**Evidence:** in a MUSHRA-inspired listening test, SoundStream at **3 kbps** beats Opus at 6 kbps and EVS at 5.9 kbps; EVS needs at least **9.6 kbps** and Opus at least **12 kbps** to match it, **3.2× to 4×** more bits (Sec V-A, Fig. 5, p. 7)."
+  - "**My reading:** the lasting contribution is the recipe, not the score: strided causal convolutions plus RVQ plus quantizer dropout plus a GAN decoder became the template for EnCodec, DAC and Mimi, and SoundStream tokens fed AudioLM. The listening test has no released numbers in the text and compares against codecs tuned for a different goal."
+---
+import StrideLadder from "../../components/figures/StrideLadder.astro";
+import HingeReferee from "../../components/figures/HingeReferee.astro";
+import MelZoomLoss from "../../components/figures/MelZoomLoss.astro";
+import FilmKnob from "../../components/figures/FilmKnob.astro";
+import LatencyBudgetSlider from "../../components/figures/LatencyBudgetSlider.astro";
+import BitsToMatch from "../../components/figures/BitsToMatch.astro";
+import CapacitySeesaw from "../../components/figures/CapacitySeesaw.astro";
+
+## The question and why it matters
+
+Imagine you have to describe a song to a friend over a walkie-talkie that only lets you send a few words per second. You cannot read out every note. You have to pick the few things that matter most, send those, and trust your friend to fill in the rest so it sounds right. That is the job of an **audio codec**: a coder and decoder pair that shrinks sound into a small stream of bits on one side and rebuilds it on the other.
+
+Your phone already does this on every call. The two codecs the paper compares against are **Opus**, the codec inside Zoom, WebRTC apps such as Google Meet and Microsoft Teams, and YouTube streaming, and **EVS (Enhanced Voice Services)**, the codec standardised by 3GPP (the 3rd Generation Partnership Project, the body that writes mobile phone standards) for VoLTE (Voice over LTE, phone calls carried over 4G data) (Sec IV-C, p. 7). Both are built by hand from decades of signal processing tricks (Sec II, p. 2).
+
+The paper sorts old codecs into two families (Sec I, p. 1):
+- **Waveform codecs** try to rebuild every sample faithfully. They work on any sound but get crackly at low bitrates.
+- **Parametric codecs** assume the sound is speech, send the settings of a speech model, and rebuild something that *sounds* the same rather than *is* the same. Good at low bitrates, but only for speech.
+
+SoundStream's question: can a single neural network, learned from data, get the best of both? Low bitrates like a parametric codec, but for speech, music and everyday sound like a waveform codec. And can it do it live, on a phone, at several bitrates with one set of weights? The abstract claims yes on all counts (Abstract, p. 1).
+
+**Bitrate** is how many bits per second the codec sends; **kbps** means thousands of bits per second. For scale, uncompressed 16-bit audio at 24 kHz is $24000 \times 16 = 384000$ bits per second, so **3 kbps** is **128 times** smaller (my arithmetic; see [How precise each sample is](/blog/audio-basics/) in the audio-basics post for where 16 bits comes from).
+
+Why I read it: every speech codec I care about, Mimi in Moshi and Pocket TTS, EnCodec, DAC, descends from this design. The [Mimi post](/blog/mimi-codec-explained/) walks through Mimi's layers one by one; the [RVQ post](/blog/residual-vector-quantization/) explains residual codebooks from scratch. This review asks a different question: what did SoundStream add first, and what did the paper actually measure? We come back to the family tree in [What came after](#what-came-after).
+
+## The pipeline in one breath
+
+SoundStream has three parts in a row (Sec III, p. 3; Fig. 2, p. 2):
+1. An **encoder** that turns a waveform into a short sequence of vectors called **embeddings**.
+2. A **residual vector quantizer (RVQ)** that replaces each embedding with a sum of entries picked from small lists of vectors (codebooks), so it can be sent as a few integers. See [Residual vector quantization, briefly](#residual-vector-quantization-briefly).
+3. A **decoder** that turns the quantized embeddings back into a waveform.
+
+All three are trained together, "end to end", which means one loss at the very end teaches every part at once. A separate network, the **discriminator**, judges the output during training only (Sec III, p. 3). See [Teaching the decoder to sound real](#teaching-the-decoder-to-sound-real).
+
+## The encoder: a ladder of strides
+
+### Squeezing time
+
+The encoder is a stack of 1D convolutions, like small sliding windows that each look at a few neighbouring samples and output a new value. It starts with one convolution with $C_{enc}$ channels, then $B_{enc}$ blocks. Each block has three residual units with **dilated** convolutions (dilation 1, 3 and 9, meaning the window skips 0, 2 and 8 samples between taps, so it sees far without being big), then a **strided** convolution that keeps only every $S$-th output (Sec III-A, p. 3; Fig. 3, p. 4). Channels double at every downsampling step. It uses the ELU activation and no normalisation (Sec III-A, p. 3).
+
+With the default strides $(2, 4, 5, 8)$, the total squeeze is
+
+$$
+M = 2 \cdot 4 \cdot 5 \cdot 8 = 320
+$$
+
+(Sec III-A, p. 3).
+
+- $M$: how many input samples collapse into one embedding, the total stride.
+- $2, 4, 5, 8$: the stride of each of the four encoder blocks. A stride of 4 means "keep one output out of every 4".
+
+Intuition: it is like folding a long paper strip in half, then in quarters, then in fifths, then in eighths. Each fold multiplies how much paper sits under one crease.
+
+Worked example: one second at 24 kHz is 24000 samples. After the first block, $24000 / 2 = 12000$; then $12000 / 4 = 3000$; then $3000 / 5 = 600$; then $600 / 8 = 75$. So **75 embeddings per second**, matching "Embeddings @ 75 Hz" in Fig. 3 (p. 4).
+
+The encoder output has shape $S \times D$ with $S = T / M$ (Sec III-A, p. 3):
+- $T$: number of input samples.
+- $S$: number of embeddings.
+- $D$: length of each embedding vector. The paper does not give its value in the text.
+
+Example: $T = 48000$ (two seconds), so $S = 48000 / 320 = 150$.
+
+<figure class="blog-figure blog-figure--wide">
+  <StrideLadder alt="Five strips: 24,000 samples, then the count after each of four strided blocks, ending at 75 embeddings. Dropdowns change each stride; readouts give the total stride, embeddings per second and the wait before each embedding." />
+  <figcaption><strong>Figure 1. A ladder of strides.</strong> Default strides (2, 4, 5, 8) from Sec III-A (p. 3). Try (1, 4, 5, 8) or (4, 4, 5, 8), the two other settings in <a href="#latency-more-delay-same-quality">Table III</a>.</figcaption>
+</figure>
+
+### Never peeking at the future
+
+Every convolution is **causal**: it only looks at the past. Padding is added only on the past side during training, and no padding is used when streaming (Sec III-A, p. 3). Because of this, the paper says the delay built into the model is set "solely by the temporal resampling ratio" (Sec I, p. 2): the codec has to wait for 320 new samples before it can emit the next embedding, and that is all. $320 / 24000 = 0.0133$ s, or **13.3 ms** (Sec V-D, p. 9). The [Mimi post section on causal padding](/blog/mimi-codec-explained/#causal-padding-and-why-streaming-needs-it) shows the padding sample by sample. We revisit the delay in [Latency: more delay, same quality](#latency-more-delay-same-quality).
+
+### The decoder mirrors it
+
+The decoder is the encoder run backwards: a 1D convolution, then blocks that each start with a **transposed convolution** (a convolution that stretches time instead of squeezing it, explained in [the Mimi post](/blog/mimi-codec-explained/#how-a-transposed-convolution-upsamples)) followed by the same three residual units. Strides are reversed, $(8, 5, 4, 2)$, and channels halve at each step. A last convolution with one filter and kernel 7 makes the waveform (Sec III-B, p. 4; Fig. 3, p. 4). By default the encoder and decoder have the same width, $C_{enc} = C_{dec} = C$, but the paper also tries lopsided widths, see [Small encoder, big decoder](#small-encoder-big-decoder).
+
+## Residual vector quantization, briefly
+
+### Why one codebook cannot do it
+
+At **6000 bps** with 75 frames a second, each frame gets
+
+$$
+r = \frac{6000}{75} = 80 \text{ bits}
+$$
+
+(Sec III-C, p. 4).
+
+- $r$: bits available per frame.
+- $6000$: bitrate in bits per second.
+- $75$: frames per second.
+
+A plain vector quantizer with one codebook would need $2^{80}$ entries to spend 80 bits, which the paper calls "obviously unfeasible" (Sec III-C, p. 4). Intuition: a box of crayons with one crayon for every possible colour you might ever need. Example: $2^{10} = 1024$ crayons is fine; $2^{80}$ is about $1.2 \times 10^{24}$, more crayons than grains of sand on Earth by many estimates (my arithmetic).
+
+### Quantize the leftover
+
+RVQ stacks $N_q$ small quantizers. The first picks its nearest entry; the next quantizes what is left over; and so on (Algorithm 1, p. 4). Bits are split evenly:
+
+$$
+r_i = \frac{r}{N_q} = \log_2 N
+$$
+
+(Sec III-C, p. 4).
+
+- $r_i$: bits used by quantizer number $i$.
+- $N_q$: number of quantizers in the stack.
+- $N$: number of entries in each codebook.
+- $\log_2 N$: how many bits it takes to name one entry out of $N$.
+
+Intuition: paying a price with coins. The biggest coin gets you close, the next coin fixes most of the gap, and each smaller coin fixes what remains.
+
+Worked example: $r = 80$, $N_q = 8$, so each quantizer gets $80 / 8 = 10$ bits and $N = 2^{10} = 1024$ entries, exactly the paper's example (Sec III-C, p. 4). Eight lists of 1024 vectors replace one impossible list of $2^{80}$.
+
+The full story, with nearest-neighbour search, k-means and coins, is in the RVQ post: [Quantize what is left over](/blog/residual-vector-quantization/#quantize-what-is-left-over). SoundStream's own contribution is that this is, to the authors' knowledge, the first time RVQ was trained end to end inside a neural network (Sec II, p. 3).
+
+The [residual zoom figure in the RVQ post](/blog/residual-vector-quantization/#quantize-what-is-left-over) lets you drag a point through three codebooks and watch each stage fix the last one's leftover.
+
+### Keeping every codebook busy
+
+Codebooks are updated with an exponential moving average, as in VQ-VAE-2 (Sec III-C, p. 4). Two fixes stop entries from going unused (Sec III-C, p. 5):
+- Codebooks start from **k-means** centroids of the first training batch, not random vectors.
+- An entry whose moving-average usage (decay **0.99**) drops below **2** is replaced by a random frame from the current batch.
+
+The RVQ post covers why dead entries happen: [Paints nobody uses](/blog/residual-vector-quantization/#paints-nobody-uses).
+
+## Quantizer dropout: one model, many bitrates
+
+### The idea
+
+With fixed codebook size $N$, the bitrate depends only on how many quantizers you use. Normally you would train a separate model for each bitrate. SoundStream instead does this during training: for each example, draw $n_q$ uniformly from $1$ to $N_q$ and use only quantizers $1$ to $n_q$ (Sec III-C, p. 5). At inference, choose $n_q$ to match the bitrate you want. The paper calls it a form of structured dropout (Sec III-C, p. 5).
+
+Intuition: a cooking class where each night the teacher randomly says "tonight you only get 2 spices" or "tonight you get 9". After enough nights, you can cook a decent meal with any number of spices, and the first spices you reach for become the most important ones.
+
+Why RVQ makes this easy: the quantized vector is a sum, so it has the same shape whether you add 1 term or 24. Concatenating codebook outputs, as earlier codecs did, would change the shape and need a new decoder (Sec III-C, p. 5).
+
+### Counting the bitrates
+
+Bitrate in bits per second $= 75 \cdot n_q \cdot \log_2 N$. With $N = 1024$ (10 bits per quantizer) this gives:
+
+$$
+R = 75 \cdot n_q \cdot 10 = 750 \, n_q
+$$
+
+- $R$: bitrate in bits per second.
+- $n_q$: number of quantizers used for this clip.
+- $10$: bits per quantizer, $\log_2 1024$.
+
+Example: $n_q = 4$ gives $3000$ bps (**3 kbps**); $n_q = 8$ gives **6 kbps**; $n_q = 16$ gives **12 kbps**; $n_q = 24$ gives **18 kbps**. These quantizer counts are my arithmetic from $N = 1024$ and 75 Hz; the paper states the 18 kbps training bitrate (Sec V-C, p. 8) and $N_q = 8$ at 6 kbps (Table III, p. 9), but does not write out the 24.
+
+The RVQ post shows the dial from the bit side: [One model, many bitrates](/blog/residual-vector-quantization/#one-model-many-bitrates).
+
+The [dropout figure in the RVQ post](/blog/residual-vector-quantization/#one-model-many-bitrates) rolls the dice for you and counts how often each stage gets trained: stage 1 every time, the last stage one time in $N_q$.
+
+## Teaching the decoder to sound real
+
+### Two judges
+
+Rebuilding audio sample by sample is not the goal; sounding right is. So SoundStream borrows the training style of GAN (generative adversarial network) vocoders such as MelGAN and HiFi-GAN (Sec II, p. 2). A **generator** $G(x) = \text{dec}(Q(\text{enc}(x)))$ makes the decoded audio $\hat{x}$ (Sec III-E, p. 5). Judges called **discriminators** try to tell real audio from decoded audio (Sec III-D, p. 5):
+- A **wave-based** discriminator: three identical networks looking at the waveform at full, half and quarter resolution (from MelGAN).
+- An **STFT-based** discriminator: it looks at the short-time Fourier transform (the slice-by-slice frequency picture from [the audio-basics post](/blog/audio-basics/)) with window **1024** and hop **256**, as real and imaginary parts, through 2D convolutions (Sec III-D, p. 5; Fig. 4, p. 5).
+
+So there are $K + 1 = 4$ judges in total, with $k = 0$ the STFT one and $K = 3$ wave ones (Sec III-E, p. 6).
+
+### The hinge loss
+
+The judges learn by minimising (Eq. 1, p. 6):
+
+$$
+\mathcal{L}_D = \mathbb{E}_x\left[\frac{1}{K}\sum_k \frac{1}{T_k}\sum_t \max(0, 1 - D_{k,t}(x))\right] + \mathbb{E}_x\left[\frac{1}{K}\sum_k \frac{1}{T_k}\sum_t \max(0, 1 + D_{k,t}(G(x)))\right]
+$$
+
+and the generator learns by minimising (Eq. 2, p. 6):
+
+$$
+\mathcal{L}^{adv}_G = \mathbb{E}_x\left[\frac{1}{K}\sum_{k,t} \frac{1}{T_k}\max(0, 1 - D_{k,t}(G(x)))\right]
+$$
+
+- $D_{k,t}(\cdot)$: the score judge $k$ gives at time step $t$. Positive means "looks real", negative means "looks fake".
+- $x$: a real clip. $G(x)$: the decoded clip.
+- $T_k$: how many time steps judge $k$ outputs, so $\frac{1}{T_k}\sum_t$ is an average over time.
+- $\frac{1}{K}\sum_k$: average over judges.
+- $\mathbb{E}_x$: average over training clips.
+- $\max(0, \cdot)$: clip at zero, so a judge that is already confident enough gets no further push. That clipping is what "hinge" means.
+
+Intuition: a referee is told "score real clips at +1 or above, fake ones at −1 or below; beyond that line, I stop caring". The generator is told "make the referee score your clip at +1 or above".
+
+Worked example, one judge, one time step: the judge scores a real clip $0.4$ and a fake clip $-0.2$. Judge loss $= \max(0, 1 - 0.4) + \max(0, 1 + (-0.2)) = 0.6 + 0.8 = 1.4$. Generator loss $= \max(0, 1 - (-0.2)) = 1.2$. If the fake had scored $-1.5$, the judge's fake term would be $\max(0, -0.5) = 0$: it already wins there, so it gets no gradient from that example.
+
+<figure class="blog-figure blog-figure--wide">
+  <HingeReferee alt="A number line from minus 3 to 3 with a green token for the judge's score on a real clip and a red token for a decoded clip, dashed lines at plus and minus 1, and bars showing the remaining hinge loss. Readouts give the judge and generator losses." />
+  <figcaption><strong>Figure 2. The hinge referee.</strong> Eq 1 and 2 (p. 6) for one judge and one time step. Defaults are the worked example: 0.6 + 0.8 = 1.4 for the judge, 1.2 for the generator. Drag the tokens past the dashed lines to see the loss stop.</figcaption>
+</figure>
+
+### Feature matching
+
+The judges' inner layers are also used as a ruler (Eq. 3, p. 6):
+
+$$
+\mathcal{L}^{feat}_G = \mathbb{E}_x\left[\frac{1}{KL}\sum_{k,l}\frac{1}{T_{k,l}}\sum_t \left|D^{(l)}_{k,t}(x) - D^{(l)}_{k,t}(G(x))\right|\right]
+$$
+
+- $D^{(l)}_{k,t}$: output of inner layer $l$ of judge $k$ at time $t$.
+- $L$: number of inner layers.
+- $T_{k,l}$: length of that layer in time.
+- $|\cdot|$: absolute difference.
+
+Intuition: instead of only asking the referee "real or fake?", you compare what the referee *noticed* on the way to the answer for both clips, and ask the generator to make those notes match.
+
+Example: one judge, two layers, one time step each. Layer 1 gives $0.5$ for the real clip and $0.2$ for the fake; layer 2 gives $-1.0$ and $-0.4$. Loss $= \frac{1}{2}(|0.5 - 0.2| + |-1.0 - (-0.4)|) = \frac{1}{2}(0.3 + 0.6) = 0.45$.
+
+### The multi-scale spectral loss
+
+The last term compares mel spectrograms (the frequency picture with a pitch-like axis, see [the audio-basics post](/blog/audio-basics/)) at six zoom levels (Eq. 4 and 5, p. 6):
+
+$$
+\mathcal{L}^{rec}_G = \sum_{s \in 2^6, \dots, 2^{11}} \sum_t \left\| S^s_t(x) - S^s_t(G(x)) \right\|_1 + \alpha_s \sum_t \left\| \log S^s_t(x) - \log S^s_t(G(x)) \right\|_2
+$$
+
+- $s$: window length in samples, one of $64, 128, 256, 512, 1024, 2048$.
+- $S^s_t(x)$: frame $t$ of a 64-bin mel spectrogram with window $s$ and hop $s/4$.
+- $\|\cdot\|_1$: add up absolute differences across the 64 bins.
+- $\|\cdot\|_2$: square root of the sum of squared differences.
+- $\log$: compresses loud values so quiet detail counts too.
+- $\alpha_s$: a weight on the log term, $\alpha_s = \sqrt{s/2}$ (Sec III-E, p. 6), so long windows count more in log space.
+
+Intuition: checking a painting through six magnifying glasses. Short windows (64 samples, 2.7 ms) catch exact timing of clicks; long windows (2048 samples, 85 ms) catch exact pitch. Matching at all zooms at once leaves fewer places for mistakes to hide.
+
+Worked example on a 2-bin toy instead of 64 bins: real frame $(4, 1)$, decoded frame $(3, 2)$. L1 part $= |4 - 3| + |1 - 2| = 2$. Log part (natural log): $\log 4 - \log 3 = 0.288$, $\log 1 - \log 2 = -0.693$; L2 $= \sqrt{0.288^2 + 0.693^2} = \sqrt{0.083 + 0.480} = 0.750$. With $s = 64$, $\alpha_s = \sqrt{32} = 5.66$, so the log part adds $5.66 \times 0.750 = 4.24$, and this scale contributes $2 + 4.24 = 6.24$.
+
+<figure class="blog-figure blog-figure--wide">
+  <MelZoomLoss alt="Two heat maps of the difference between a real and a decoded mel spectrogram, one with a 64-sample window and one with a 2048-sample window, and bars for the loss at all six window sizes. Sliders add a pitch error and a timing error to the decoded clip." />
+  <figcaption><strong>Figure 3. Six magnifying glasses.</strong> A toy clip (440 Hz tone and a click), not the paper's data. Loss terms as in Eq 4 and 5 (p. 6) with 64 mel bins, hop s/4 and α<sub>s</sub> = √(s/2). A 15 Hz pitch error is <strong>4%</strong> of the picture at s = 64 and about <strong>24%</strong> at s = 2048: long windows see pitch. A 3 ms click shift stays at 3 to 6% everywhere, because in this clip the click is a tiny part of the sound.</figcaption>
+</figure>
+
+### Putting the losses together
+
+$$
+\mathcal{L}_G = \lambda_{adv}\mathcal{L}^{adv}_G + \lambda_{feat}\mathcal{L}^{feat}_G + \lambda_{rec}\mathcal{L}^{rec}_G
+$$
+
+with $\lambda_{adv} = 1$, $\lambda_{feat} = 100$, $\lambda_{rec} = 1$ (Eq. 6, p. 6).
+
+- $\lambda$: a volume knob for each loss.
+
+Example: using the toy numbers above, $1 \times 1.2 + 100 \times 0.45 + 1 \times 6.24 = 1.2 + 45 + 6.24 = 52.44$ (with $\alpha_s = 5.66$). Toy values, not paper values; the point is that feature matching gets a big knob.
+
+## Compress and clean in one pass
+
+### The everyday picture
+
+Normally, noise removal is a separate step before sending or after receiving, and each step adds its own delay (Sec III-F, p. 6). SoundStream does both in the same network, with a switch.
+
+### How the training data teaches the switch
+
+Training examples are triples (inputs, targets, denoise) (Sec III-F, p. 6):
+- denoise = false: target = input, noise included.
+- denoise = true: target = the clean speech inside the input.
+- Clean speech or music: target = input, and denoise is randomly true or false, so the switch never damages clean audio.
+
+### FiLM
+
+The switch reaches the network through **FiLM (Feature-wise Linear Modulation)** layers (Eq. 7, p. 6):
+
+$$
+\tilde{a}_{n,c} = \gamma_{n,c}\, a_{n,c} + \beta_{n,c}
+$$
+
+- $a_{n,c}$: activation number $n$ in channel $c$.
+- $\gamma_{n,c}$: a scale, how much to turn that channel up or down.
+- $\beta_{n,c}$: a shift added afterwards.
+- $\tilde{a}_{n,c}$: the modulated activation.
+- $\gamma$ and $\beta$ come from a linear layer fed a two-value one-hot code, $(1, 0)$ or $(0, 1)$, for the mode. It can change over time (Sec III-F, p. 6).
+
+Intuition: a mixing desk where flipping the "denoise" switch moves every channel's fader and offset at once.
+
+Example: $a = 2$. Denoise off gives, say, $\gamma = 1, \beta = 0$, so $\tilde{a} = 2$. Denoise on gives $\gamma = 0.25, \beta = -0.1$, so $\tilde{a} = 0.25 \times 2 - 0.1 = 0.4$: a channel that carried noise is turned down. Toy values.
+
+FiLM placed at the bottleneck, on either the encoder side (before quantizing) or the decoder side, was enough; placing it deeper helped nothing in preliminary experiments (Sec III-F, p. 6). Results are in [Denoising: where the switch goes](#denoising-where-the-switch-goes).
+
+<figure class="blog-figure blog-figure--wide">
+  <FilmKnob alt="Eight channel faders, four carrying speech and four carrying noise, with their scale and shift values, above an output trace over one second. A slider sets when the denoise switch turns on; after that point the noise faders drop and the trace turns clean." />
+  <figcaption><strong>Figure 4. FiLM as a mixing desk.</strong> Eq 7 (p. 6) on a toy layer; the γ and β values are mine, not learned ones. The point: one switch changes every channel at once, mid-stream, with no extra delay.</figcaption>
+</figure>
+
+## Running live on a phone
+
+The **real-time factor (RTF)** is the length of the audio divided by the time taken to process it, so above 1× means faster than real time (Sec V-D, p. 9). Profiled on one CPU thread of a Pixel 4 phone, the default model ($C_{enc} = C_{dec} = 32$, **8.4 M** parameters) runs at **2.4×** for the encoder and **2.3×** for the decoder (Table I, p. 9).
+
+Example: RTF 2.3× means 1 second of audio is decoded in $1 / 2.3 = 0.43$ s.
+
+## What the evidence shows
+
+### Setup
+
+- Training data at 24 kHz: clean speech from LibriTTS, noisy speech made by mixing LibriTTS with Freesound noise at a gain drawn from **−30 dB to 0 dB**, and music from MagnaTagATune (Sec IV-A, pp. 6 to 7).
+- Test set: **200** clips of 2 to 4 seconds, **50** each from clean speech, noisy speech, music, and a real-world noisy and reverberant speech set (Sec IV-A, p. 7).
+- Listening test: a crowd-sourced test "inspired by MUSHRA" (MUltiple Stimuli with Hidden Reference and Anchor, a standard where listeners score several versions of a clip from 0 to 100 against a hidden original). Here there is a hidden reference but **no low-pass anchor**; each clip was rated **20** times by native English speakers on headphones; raters who scored the reference below 90 more than 20% of the time, or non-references above 90 more than 50% of the time, were dropped (Sec IV-B, p. 7).
+- Objective metric for development and ablations: **ViSQOL** (Virtual Speech Quality Objective Listener, a score roughly from 1 to 5 predicting how similar a clip sounds to its reference), chosen over PESQ and POLQA because those have licensing restrictions (Sec IV-B, p. 7).
+- Baselines: Opus (6 to 510 kbps), EVS (5.9 to 128 kbps), and Lyra at 3 kbps (Sec IV-C, p. 7).
+
+### SoundStream against Opus and EVS
+
+The headline (Sec V-A, p. 7; Fig. 5, p. 8):
+- **Low, 3 kbps:** SoundStream beats Opus at 6 kbps and EVS at 5.9 kbps, the lowest settings those codecs support. EVS needs at least **9.6 kbps** and Opus at least **12 kbps** to match, **3.2× to 4×** more bits. It also beats Lyra at 3 kbps.
+- **Medium, 6 kbps:** EVS and Opus need **2.2× to 2.6×** more bits.
+- **High, 12 kbps:** **1.3× to 1.6×** more bits.
+
+Exact MUSHRA scores per system appear only as bars in Fig. 5, and the text does not say which Opus and EVS bitrates produce the 2.2×, 2.6×, 1.3× and 1.6× ratios.
+
+Ratio check for the low case: $9.6 / 3 = 3.2$ and $12 / 3 = 4$.
+
+By content type (Fig. 6, p. 8; Sec V-A, p. 7): quality stays consistent between clean and noisy speech, and music at 3 kbps scores significantly better than Opus at 12 kbps and EVS at 5.9 kbps.
+
+<figure class="blog-figure blog-figure--wide">
+  <BitsToMatch alt="A bitrate axis from 0 to 20 kbps with three rows. In the low row, SoundStream at 3 kbps is matched by EVS at 9.6 and Opus at 12 kbps; in the medium and high rows, bands show the ratio ranges given in the text." />
+  <figcaption><strong>Figure 5. Bits needed to match.</strong> Sec V-A (p. 7). Only the low row names exact codec bitrates.</figcaption>
+</figure>
+
+### Quality across bitrates
+
+ViSQOL falls gracefully as the bitrate drops and stays **above 3.7** even at 3 kbps (Sec V-B, p. 7; Fig. 7a, p. 9). Clean speech scores highest and music is hardest (Fig. 7b, p. 9).
+
+The codec spends the same bits on every frame. Measuring the empirical entropy of the codes (how unpredictable they really are) suggests entropy coding could save **7% to 20%** (Sec V-B, p. 7; Fig. 7a, p. 9). Example: 6 kbps minus 7% is 5.58 kbps; minus 20% is 4.8 kbps.
+
+### Does one model really match many?
+
+Three setups per bitrate (Sec V-C, p. 8; Fig. 7c, p. 9):
+1. **Bitrate specific:** trained and tested at that bitrate.
+2. **18 kbps, no dropout:** trained with all quantizers, tested with only the first $n_q$.
+3. **Bitrate scalable:** trained with quantizer dropout.
+
+Setup 2 holds up surprisingly well but drops more the further it is from 18 kbps. Setup 3 closes that gap, and even seems to marginally beat the specific models at 9 and 12 kbps, which the authors read as dropout acting as a regulariser (Sec V-C, p. 8). In the listening test, the scalable model is slightly worse than the specific one at 3 kbps and equal at 6 and 12 kbps (Sec V-C, p. 8). The values are only plotted, not printed.
+
+### Learning the encoder matters
+
+Replacing the learned encoder with a fixed mel filterbank, like Lyra, drops ViSQOL from **3.96** to **3.33** at 6 kbps, worse than the learned encoder at half the bitrate (**3.76** at 3 kbps) (Sec V-D, p. 8).
+
+### Small encoder, big decoder
+
+Table I (p. 9), all at 6 kbps:
+
+| $C_{enc}$ | $C_{dec}$ | Params | RTF enc | RTF dec | ViSQOL |
+|---|---|---|---|---|---|
+| 32 | 32 | 8.4 M | 2.4× | 2.3× | 4.01 ± 0.03 |
+| 16 | 16 | 2.4 M | 7.5× | 7.1× | 3.98 ± 0.03 |
+| 16 | 32 | 5.5 M | 7.5× | 2.3× | 4.02 ± 0.03 |
+| 8 | 32 | 4.8 M | 18.6× | 2.3× | 3.99 ± 0.03 |
+| 32 | 16 | 5.3 M | 2.4× | 7.1× | 3.97 ± 0.03 |
+| 32 | 8 | 4.4 M | 2.4× | 17.1× | 3.90 ± 0.03 |
+
+
+The text says a smaller encoder costs almost nothing (ViSQOL **3.96 → 3.94**, encoder RTF **18.6×**) while a smaller decoder costs more (**3.96 → 3.84**) (Sec V-D, p. 9). These text numbers do not match Table I's ViSQOL column (4.01, 3.99, 3.90). The direction agrees; the values do not, which suggests different runs, and the paper does not explain it. The authors link the finding to neural image compression, which also uses light encoders and heavy decoders (Sec V-D, p. 9).
+
+<figure class="blog-figure blog-figure--wide">
+  <CapacitySeesaw alt="An encoder block and a decoder block sized by channel width, speed bars for each on a log scale, and a dial for ViSQOL. Buttons switch between the six encoder and decoder width settings of Table I." />
+  <figcaption><strong>Figure 6. Small encoder, big decoder.</strong> All values from Table I (p. 9), 6 kbps, one Pixel 4 CPU thread.</figcaption>
+</figure>
+
+### Many tiny codebooks or a few big ones
+
+Table II (p. 9), all at 6 kbps, 80 bits per frame:
+
+| $N_q$ | $N$ | Bits per frame | ViSQOL |
+|---|---|---|---|
+| 8 | 1024 | $8 \times 10 = 80$ | 4.01 ± 0.03 |
+| 16 | 32 | $16 \times 5 = 80$ | 3.98 ± 0.03 |
+| 80 | 2 | $80 \times 1 = 80$ | 3.92 ± 0.03 |
+
+Fewer, bigger codebooks are best but cost more compute; even **80** one-bit quantizers lose only a little, which shows very deep RVQ trains without trouble (Sec V-D, p. 9).
+
+### Latency: more delay, same quality
+
+Table III (p. 9), all at 6 kbps with $N = 1024$:
+
+| Strides | Latency | $N_q$ | RTF enc | RTF dec | ViSQOL |
+|---|---|---|---|---|---|
+| (1, 4, 5, 8) | 7.5 ms | 4 | 1.6× | 1.5× | 4.01 ± 0.02 |
+| (2, 4, 5, 8) | 13 ms | 8 | 2.4× | 2.3× | 4.01 ± 0.03 |
+| (4, 4, 5, 8) | 26 ms | 16 | 4.1× | 4.0× | 4.01 ± 0.03 |
+
+Same quality at all three; longer frames mean fewer frames per second and so a higher RTF (Sec V-D, p. 10). The bit budget per frame doubles with the frame: 80 bits at 13.3 ms, 160 at 26.6 ms (Sec V-D, p. 10).
+
+Check: stride product 160 gives $160 / 24000 = 6.7$ ms, not 7.5 ms as printed. 320 gives 13.3 ms and 640 gives 26.7 ms. The paper does not explain the 7.5 ms. Also, 160 samples gives 150 frames a second, so 6 kbps is 40 bits per frame, 4 quantizers of 10 bits: consistent with $N_q = 4$.
+
+<figure class="blog-figure blog-figure--wide">
+  <LatencyBudgetSlider alt="Eighty milliseconds of audio split into frames, each with a stack of 10-bit quantizer blocks. Buttons switch between the three stride settings of Table III; readouts give frame length, bits per frame, quantizers, speed and quality." />
+  <figcaption><strong>Figure 7. Same bits, different frames.</strong> Speed and ViSQOL as printed in Table III (p. 9). Frame lengths are my arithmetic from the strides.</figcaption>
+</figure>
+
+### Denoising: where the switch goes
+
+On 1000 noisy speech samples, turning denoising on improves ViSQOL substantially, with no significant difference between encoder-side and decoder-side conditioning, and the switchable model costs nothing compared with a model that always denoises (Sec V-E, p. 10; Fig. 8, p. 10). Encoder-side and fixed denoising leave codes that are cheaper to entropy-code than decoder-side denoising, because noise is removed before quantizing (Sec V-E, p. 10). The values are only plotted.
+
+The bitrate lower bound uses a cross-entropy (Sec V-E, p. 10):
+
+$$
+H(r, p) = -\sum_{i,q} r^{(q)}_i \log_2 p^{(q)}_i
+$$
+
+- $q$: which quantizer in the stack, $1$ to $N_q$.
+- $i$: which codebook entry, $1$ to $N$.
+- $p^{(q)}_i$: how often entry $i$ of quantizer $q$ is used on **3200** training samples.
+- $r^{(q)}_i$: how often it is used on the **1000** test samples.
+- $-\log_2 p$: bits a code designed for $p$ would spend on that entry.
+
+Intuition: if some codes are common, give them short nicknames; this formula counts the average nickname length.
+
+Example: one quantizer, two entries. Training use $p = (0.75, 0.25)$, test use $r = (0.5, 0.5)$. $H = -(0.5 \log_2 0.75 + 0.5 \log_2 0.25) = -(0.5 \times -0.415 + 0.5 \times -2) = 0.208 + 1 = 1.21$ bits, versus 1 bit for a fixed code. Mismatch can cost bits.
+
+### Joint versus two separate models
+
+On VCTK (not used in training), at four input SNRs (signal-to-noise ratio, how much louder speech is than noise), Table IV (p. 11):
+
+| Input SNR | SoundStream (joint) | SoundStream → SEANet | SEANet → SoundStream |
+|---|---|---|---|
+| 0 dB | 2.93 ± 0.02 | 3.02 ± 0.03 | 3.05 ± 0.02 |
+| 5 dB | 3.18 ± 0.02 | 3.30 ± 0.02 | 3.31 ± 0.02 |
+| 10 dB | 3.42 ± 0.02 | 3.51 ± 0.02 | 3.50 ± 0.02 |
+| 15 dB | 3.58 ± 0.02 | 3.64 ± 0.02 | 3.63 ± 0.02 |
+
+The joint model is close but slightly behind two separate models, at half the compute and no extra latency; the gap shrinks as SNR rises (Sec V-F, p. 10). Gap check: $3.05 - 2.93 = 0.12$ at 0 dB; $3.64 - 3.58 = 0.06$ at 15 dB.
+
+### What the evidence does not show
+
+- No MUSHRA numbers in the text, so the size of each win can only be read off bar charts.
+- The listening test drops the low-pass anchor and uses crowd raters, so it is "MUSHRA-inspired", not a standard MUSHRA (Sec IV-B, p. 7).
+- Opus and EVS are designed for low delay and packet-loss robustness; the paper does not compare robustness to lost packets.
+- Ablations use ViSQOL, not listeners (Sec IV-B, p. 7), and the Table I and text numbers disagree (see above).
+- No training cost, data hours or training steps are reported.
+
+## What came after
+
+All outside the paper:
+- **AudioLM** (Borsos et al., 2022) used SoundStream tokens as its acoustic tokens.
+- **EnCodec** (Défossez et al., Meta, 2022) kept the strided convolutional encoder, RVQ and multi-scale discriminators, added an LSTM and a loss balancer.
+- **DAC** (Descript Audio Codec, Kumar et al., 2023) kept RVQ with quantizer dropout and added factorized, normalized codebook lookups.
+- **Mimi** (Kyutai, in the Moshi paper, 2024) is SoundStream-shaped with transformers in the bottleneck and a semantic first codebook; walked through in the [Mimi post](/blog/mimi-codec-explained/). SoundStream's first author, Neil Zeghidour, is also a co-founder of Kyutai and an author on [MoshiRAG](/paper-reviews/moshirag/).
+
+
+## Toy experiments
+
+All run in the browser with no trained model.
+
+1. **Stride arithmetic.** Inputs: sample rate 24000, strides from the set $\{1, 2, 4, 5, 8\}$, four blocks. Output: $M$, frames per second $24000 / M$, latency $M / 24000$ in ms. Default must print 320, 75, 13.33 ms.
+2. **RVQ on 2D points.** 500 points from a mixture of 3 Gaussians (seeded, seed 7), 4 codebooks of 4 entries each, trained by k-means one stage at a time on the residuals. Report mean squared error after 1, 2, 3, 4 stages. Expected shape: error drops at each stage.
+3. **Quantizer dropout on the same toy.** Train codebooks jointly by alternating updates where each step uses a random $n_q \in \{1, \dots, 4\}$, versus training always with all 4. Compare error when only the first 1 or 2 stages are kept. Expected: dropout version is better at small $n_q$, which mirrors Fig. 7c in miniature.
+4. **Hinge loss calculator.** Sliders for one real score and one fake score in $[-3, 3]$; print judge loss, generator loss, and which terms are zero.
+5. **Multi-scale mel loss on synthetic tones.** A 440 Hz tone with a short click at 50 ms, 0.25 s at 24 kHz, against a copy with a pitch error or a shifted click (64 mel bins, hop $s/4$, all six windows). Measured in Figure 3: a 15 Hz pitch error grows from 4% of the spectrogram's mass at $s = 64$ to about 24% at $s = 2048$. A 3 ms click shift stays between 3% and 6% at every window, so in a clip dominated by a steady tone the short windows do not single out the timing error. I expected they would; the click is simply too small a share of the sound.
+6. **Bit budget table.** For bitrate in $\{3, 6, 12, 18\}$ kbps and codebook size in $\{2, 32, 1024\}$, print bits per frame and quantizers needed at 75 Hz.
+
+## My interpretation
+
+SoundStream's biggest idea is not any one layer; most layers were borrowed (SEANet's encoder, MelGAN's discriminator, VQ-VAE-2's codebook updates). The new pieces are training RVQ end to end inside the network and quantizer dropout. Quantizer dropout is the one that changed how people think: it turns the RVQ stack into a ladder where the first rung carries the most, which is exactly what later language models over audio tokens exploit when they predict coarse codes first and fine codes after.
+
+The second idea I keep is the asymmetry result: the encoder can shrink a lot, the decoder cannot. That matches the intuition that rebuilding a realistic waveform is the hard, generative part. For a Khmer TTS system that only ever *decodes*, it says the decoder is where to spend.
+
+What I would be careful with: the headline compares against codecs optimised for robustness and delay over real networks, not only for quality per bit, and the text gives ratios rather than scores.
+
+## Open questions
+
+- How does SoundStream hold up under packet loss compared with Opus and EVS?
+- Is the regularising effect of quantizer dropout at 9 and 12 kbps real, or within noise? Fig. 7c error bars would tell.
+- Why do the text and Table I disagree on ViSQOL for the capacity ablation?
+- How much of the quality comes from the GAN losses versus the spectral loss? The paper does not ablate the losses.
+- Would entropy coding the codes (the 7% to 20% saving) survive the streaming, constant-bitrate requirement?
+- How well would a SoundStream-style codec trained on English and music encode Khmer speech?

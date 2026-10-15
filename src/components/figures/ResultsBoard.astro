@@ -1,0 +1,74 @@
+---
+// Figure 9: Table 1 of the paper (p. 8) as small dot plots. Lower is better in
+// every cell. The two buttons walk Score Matching to FM w/ Diffusion (change
+// the loss, same path) and then to FM w/ OT (change the path).
+const { alt } = Astro.props;
+const methods = ["DDPM", "Score Matching", "ScoreFlow", "FM w/ Diffusion", "FM w/ OT"];
+const colors = ["#b9b9c2", "#a33b3b", "#b9b9c2", "#594578", "#4F5D3A"];
+// [dataset][metric][method]; metrics NLL (bits per dimension), FID, NFE.
+const T = [
+  [[3.12, 3.16, 3.09, 3.10, 2.99], [7.48, 19.94, 20.78, 8.06, 6.35], [274, 242, 428, 183, 142]],
+  [[3.54, 3.56, 3.55, 3.54, 3.53], [6.99, 5.68, 14.14, 6.37, 5.02], [262, 178, 195, 193, 122]],
+  [[3.32, 3.40, 3.36, 3.33, 3.31], [17.36, 19.74, 24.95, 16.88, 14.45], [264, 441, 601, 187, 138]],
+];
+const sets = ["CIFAR-10", "ImageNet 32×32", "ImageNet 64×64"];
+const mets = ["NLL (bits/dim)", "FID", "NFE"];
+---
+<div class="blog-diagram rb" role="region" aria-label={alt} data-rb data-table={JSON.stringify(T)}>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 420" role="img" aria-labelledby="rb-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="rb-title">Table 1 of the flow matching paper as dot plots</title>
+    {sets.map((s, c) => <text x={150 + c * 222} y="22" font-size="11.5" font-weight="700" text-anchor="middle" fill="#2b2b30">{s}</text>)}
+    {mets.map((m, r) => <text x="20" y={80 + r * 104} font-size="11" font-weight="700" fill="#2b2b30">{m}</text>)}
+    {T.map((ds, c) => ds.map((row, r) => {
+      const lo = Math.min(...row), hi = Math.max(...row), pad = (hi - lo) * 0.12 || 0.05;
+      const X = (v: number) => 60 + c * 222 + 12 + ((v - (lo - pad)) / (hi - lo + 2 * pad)) * 186;
+      const y = 60 + r * 104;
+      return (
+        <g>
+          <line x1={60 + c * 222 + 12} x2={60 + c * 222 + 198} y1={y + 30} y2={y + 30} stroke="#ececf1" />
+          {row.map((v, k) => <circle cx={X(v)} cy={y + 30} r={k === 4 ? 6 : 4.5} fill={colors[k]}><title>{methods[k]}: {v}</title></circle>)}
+          <text x={X(row[4])} y={y + 52} font-size="10.5" font-weight="700" text-anchor="middle" fill="#4F5D3A">{row[4]}</text>
+          <circle data-walker={`${c}-${r}`} cx={X(row[1])} cy={y + 30} r="10" fill="none" stroke="#2b2b30" stroke-width="2" data-xs={JSON.stringify([X(row[1]), X(row[3]), X(row[4])])} />
+          <text data-delta={`${c}-${r}`} x={60 + c * 222 + 12} y={y + 12} font-size="10.5" fill="#2b2b30"></text>
+        </g>
+      );
+    }))}
+    <text x="20" y="384" font-size="10.5" fill="#5f5f66">Lower is better everywhere. Left on each line = better.</text>
+    {methods.map((m, k) => <g><circle cx={30 + k * 150} cy="404" r="5" fill={colors[k]} /><text x={40 + k * 150} y="408" font-size="10.5" fill="#2b2b30">{m}</text></g>)}
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Follow the ring</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-go="0" aria-pressed="true">Score Matching</button>
+      <button type="button" class="fig-chip" data-go="1" aria-pressed="false">Change the loss</button>
+      <button type="button" class="fig-chip" data-go="2" aria-pressed="false">Change the path</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { setupFigure, tween, wait } from "../../lib/figure-motion";
+  document.querySelectorAll<HTMLElement>("[data-rb]").forEach((root) => {
+    const T: number[][][] = JSON.parse(root.dataset.table!);
+    const walkers = [...root.querySelectorAll<SVGCircleElement>("[data-walker]")];
+    let at = 0;
+    const fmt = (v: number) => (Math.abs(v) >= 100 || Number.isInteger(v) ? String(Math.round(v)) : v.toFixed(2));
+    function label(stage: number) {
+      root.querySelectorAll<SVGTextElement>("[data-delta]").forEach((t) => {
+        const [c, r] = t.dataset.delta!.split("-").map(Number), row = T[c][r];
+        t.textContent = stage === 0 ? `Score Matching ${fmt(row[1])}` : stage === 1 ? `${fmt(row[1])} → ${fmt(row[3])} (loss only)` : `${fmt(row[1])} → ${fmt(row[3])} → ${fmt(row[4])}`;
+        const better = stage === 0 ? true : (stage === 1 ? row[3] <= row[1] : row[4] <= row[3]);
+        t.setAttribute("fill", better ? "#2b2b30" : "#a33b3b");
+      });
+      root.querySelectorAll("[data-go]").forEach((b, i) => b.setAttribute("aria-pressed", String(i === stage)));
+    }
+    async function go(to: number) {
+      const from = at; at = to; label(to);
+      await tween(0.8, (e) => walkers.forEach((w) => { const xs = JSON.parse(w.dataset.xs!); w.setAttribute("cx", String(xs[from] + (xs[to] - xs[from]) * e)); }));
+    }
+    root.querySelectorAll<HTMLButtonElement>("[data-go]").forEach((b) => b.addEventListener("click", () => go(+b.dataset.go!)));
+    const jump = (s: number) => { at = s; label(s); walkers.forEach((w) => w.setAttribute("cx", String(JSON.parse(w.dataset.xs!)[s]))); };
+    jump(2);
+    setupFigure(root, () => jump(0), async (alive) => { await wait(0.6); if (!alive()) return; await go(1); await wait(1.4); if (!alive()) return; await go(2); });
+  });
+</script>

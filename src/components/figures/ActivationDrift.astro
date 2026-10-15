@@ -1,0 +1,52 @@
+---
+// Foundations, normalisation post: 256 random examples through five random
+// ReLU layers of 64 neurons (numpy default_rng(7), weights N(0, 0.25²)).
+// Spread per layer without normalisation 1.133, 1.581, 2.459, 3.094, 3.385;
+// with layer norm before each ReLU 0.582, 0.583, 0.612, 0.572, 0.571.
+// Data precomputed into src/data/foundations/activation-drift.json.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-drift>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 250" role="img" aria-labelledby="ad2-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="ad2-title">Histograms of activations in five layers, widening without normalisation and steady with it</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Layer norm before each ReLU</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-norm="0" aria-pressed="true">Off</button>
+      <button type="button" class="fig-chip" data-norm="1" aria-pressed="false">On</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt } from "../../lib/tiny-net";
+  import { INK, MUTED, JADE, NEG, GOLD } from "../../lib/net-diagram";
+  import { txt } from "../../lib/plot";
+  import DRIFT from "../../data/foundations/activation-drift.json";
+  document.querySelectorAll<HTMLElement>("[data-drift]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    let norm = false;
+    const layers = () => (norm ? DRIFT.norm : DRIFT.raw);
+    const steps = () => layers().map((L, i) => ({ say: i === 0 ? `Layer 1: weighted sums of the random inputs, then ReLU. ${norm ? "Layer norm rescales each example's 64 sums before the ReLU." : "No normalisation."}` : `Layer ${i + 1} takes layer ${i}'s outputs as its input.${!norm && i === 4 ? " The spread has tripled since layer 1." : ""}`, math: `layer ${i + 1}: mean ${fmt(L.mean, 3)}, standard deviation ${fmt(L.std, 3)}, ${fmt(100 * L.zeros, 1)}% exactly zero (ReLU)` }));
+    function draw(k: number) {
+      const ls = layers();
+      let s = txt(30, 20, `256 examples through 5 random layers of 64 ReLU neurons, layer norm ${norm ? "on" : "off"}`, `font-size="12" font-weight="700" fill="${INK}"`);
+      // Shared vertical scale: the tallest non-zero bin across both modes, so widths compare fairly.
+      const top = Math.max(...[...DRIFT.raw, ...DRIFT.norm].flatMap((L) => L.hist.slice(1)));
+      ls.forEach((L, i) => {
+        const l = 30 + i * 146, on = i <= k;
+        s += `<line x1="${l}" x2="${l + 130}" y1="190" y2="190" stroke="#cfd5d4"/>`;
+        L.hist.forEach((c, b) => { if (b === 0) return; const h = (Math.min(c, top) / top) * 130; s += `<rect x="${l + b * 5.4}" y="${190 - h}" width="4.6" height="${h}" fill="${norm ? JADE : NEG}" fill-opacity="${on ? 0.8 : 0.12}"/>`; });
+        s += txt(l, 206, "0", `font-size="10" fill="${MUTED}"`) + txt(l + 130, 206, "8", `font-size="10" text-anchor="end" fill="${MUTED}"`);
+        s += txt(l, 46, `Layer ${i + 1}`, `font-size="12" font-weight="700" fill="${on ? INK : "#B9C0BF"}"`);
+        s += txt(l, 226, on ? `spread ${fmt(L.std, 2)}` : "", `font-size="12" font-weight="700" fill="${INK}"`) + txt(l, 243, on ? `mean ${fmt(L.mean, 2)}` : "", `font-size="11" fill="${MUTED}"`);
+      });
+      $("[data-draw]").innerHTML = s;
+    }
+    const redraw = stepper(root, steps, draw, { delay: 1.5 });
+    root.querySelectorAll<HTMLButtonElement>("[data-norm]").forEach((b) => b.addEventListener("click", () => { norm = b.dataset.norm === "1"; root.querySelectorAll("[data-norm]").forEach((o) => o.setAttribute("aria-pressed", String(o === b))); redraw(); }));
+  });
+</script>

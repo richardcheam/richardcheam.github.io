@@ -1,0 +1,91 @@
+---
+// SIM-o vs SIM-r on a unit circle (a 2-D cartoon of a speaker-embedding
+// space; real embeddings have hundreds of dimensions, but cosine similarity
+// only ever looks at the angle). O = original prompt, R = prompt passed
+// through the codec/vocoder, G = generated speech.
+const { alt } = Astro.props;
+const CX = 230, CY = 190, RAD = 140;
+---
+<div class="blog-diagram so" role="region" aria-label={alt} data-so data-cfg={JSON.stringify({ CX, CY, RAD })}>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 360" role="img" aria-labelledby="so-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="so-title">Original, resynthesised and generated embeddings on a circle</title>
+    <circle cx={CX} cy={CY} r={RAD} fill="none" stroke="#ececf1" />
+    <line x1={CX - RAD - 16} y1={CY} x2={CX + RAD + 16} y2={CY} stroke="#ececf1" />
+    <line x1={CX} y1={CY - RAD - 16} x2={CX} y2={CY + RAD + 16} stroke="#ececf1" />
+    <path data-arc-o fill="none" stroke="#2b2b30" stroke-width="1.5" />
+    <path data-arc-r fill="none" stroke="#594578" stroke-width="1.5" stroke-dasharray="4 3" />
+    <path data-arc-loss fill="#8a6a1f" fill-opacity="0.18" stroke="none" />
+    {[
+      { k: "o", label: "O  original", c: "#2b2b30" },
+      { k: "r", label: "R  resynthesised", c: "#594578" },
+      { k: "g", label: "G  generated", c: "#4F5D3A" },
+    ].map((p) => (
+      <g data-pt={p.k}>
+        <line x1={CX} y1={CY} stroke={p.c} stroke-width="2" />
+        <circle r="6" fill={p.c} />
+        <text font-size="11.5" font-weight="600" fill={p.c}>{p.label}</text>
+      </g>
+    ))}
+    <g transform="translate(540 70)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">
+      <text font-size="11" letter-spacing="1" fill="#5f5f66" font-family="Inter, sans-serif">COSINE SIMILARITY</text>
+      <text y="40" font-size="13" fill="#2b2b30">SIM-o = cos(G, O)</text>
+      <text data-simo y="72" font-size="28" font-weight="700" fill="#2b2b30"></text>
+      <text y="116" font-size="13" fill="#594578">SIM-r = cos(G, R)</text>
+      <text data-simr y="148" font-size="28" font-weight="700" fill="#594578"></text>
+      <text y="196" font-size="10.5" fill="#8a6a1f" font-family="Inter, sans-serif">shaded wedge: what the vocoder alone</text>
+      <text y="211" font-size="10.5" fill="#8a6a1f" font-family="Inter, sans-serif">does to the voice</text>
+      <text data-gap y="244" font-size="10.5" fill="#5f5f66" font-family="Inter, sans-serif"></text>
+    </g>
+  </svg>
+  <div class="fig-panel">
+    <label>
+      <span class="fig-panel__name">Vocoder quality<strong data-val></strong></span>
+      <input class="scrub" data-q type="range" min="0" max="10" step="1" value="3" style="--n: 10; --p: 30%" />
+    </label>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { setupFigure, tween } from "../../lib/figure-motion";
+
+  const G_ANGLE = 52; // degrees between generated and original
+  document.querySelectorAll<HTMLElement>("[data-so]").forEach((root) => {
+    const c = JSON.parse(root.dataset.cfg!);
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const q = $<HTMLInputElement>("[data-q]");
+    const pt = (deg: number, r = c.RAD) => [c.CX + r * Math.cos((-deg * Math.PI) / 180), c.CY + r * Math.sin((-deg * Math.PI) / 180)];
+    const arc = (a: number, b: number, r: number) => {
+      const [x1, y1] = pt(a, r), [x2, y2] = pt(b, r);
+      return `M${x1} ${y1} A${r} ${r} 0 0 0 ${x2} ${y2}`;
+    };
+    function place(k: string, deg: number) {
+      const g = $(`[data-pt="${k}"]`), [x, y] = pt(deg), [lx, ly] = pt(deg, c.RAD + 22);
+      g.querySelector("line")!.setAttribute("x2", String(x)); g.querySelector("line")!.setAttribute("y2", String(y));
+      g.querySelector("circle")!.setAttribute("cx", String(x)); g.querySelector("circle")!.setAttribute("cy", String(y));
+      const t = g.querySelector("text")!;
+      t.setAttribute("x", String(lx)); t.setAttribute("y", String(ly + 4));
+      t.setAttribute("text-anchor", lx < c.CX - 20 ? "end" : "start");
+    }
+    function frame(quality: number, grow = 1) {
+      // A worse vocoder rotates R further from O, toward G's side.
+      const rDeg = (1 - quality / 10) * 40;
+      const gDeg = G_ANGLE * grow;
+      place("o", 0); place("r", rDeg * grow); place("g", gDeg);
+      $("[data-arc-o]").setAttribute("d", arc(0, gDeg, 46));
+      $("[data-arc-r]").setAttribute("d", arc(rDeg * grow, gDeg, 70));
+      const [x1, y1] = pt(0, 110), [x2, y2] = pt(rDeg * grow, 110);
+      $("[data-arc-loss]").setAttribute("d", `M${c.CX} ${c.CY} L${x1} ${y1} A110 110 0 0 0 ${x2} ${y2} Z`);
+      const so = Math.cos((gDeg * Math.PI) / 180), sr = Math.cos(((gDeg - rDeg * grow) * Math.PI) / 180);
+      $("[data-simo]").textContent = so.toFixed(3);
+      $("[data-simr]").textContent = sr.toFixed(3);
+      $("[data-gap]").textContent = `SIM-r − SIM-o = ${(sr - so).toFixed(3)}`;
+      $("[data-val]").textContent = `${quality}/10`;
+      q.style.setProperty("--p", `${quality * 10}%`);
+    }
+    q.addEventListener("input", () => frame(+q.value));
+    setupFigure(root, () => frame(+q.value, 0), async (alive) => {
+      await tween(1.4, (t) => alive() && frame(+q.value, t));
+    });
+  });
+</script>

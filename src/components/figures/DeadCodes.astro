@@ -1,0 +1,109 @@
+---
+// RVQ post, Figure 5: dead codes and random restarts. An 8-entry codebook
+// learns by EMA (decay gamma) from batches of 32 points drawn from two blobs.
+// Five entries start far from the data. With restarts on, an entry whose
+// smoothed count N_j falls below the threshold (SoundStream uses 2) is moved
+// onto a random point of the current batch.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram dc" role="region" aria-label={alt} data-dc>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 380" role="img" aria-labelledby="dc-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="dc-title">Codebook entries that never win stay stuck, unless they are restarted on real data</title>
+    <rect x="20" y="20" width="340" height="340" fill="none" stroke="#ececf1" />
+    <g data-pts></g>
+    <g data-ents></g>
+    <text x="400" y="30" font-size="11.5" font-weight="700" fill="#2b2b30">Smoothed wins per batch, N_j</text>
+    <g data-bars></g>
+    <line data-th x1="400" x2="760" stroke="#a33b3b" stroke-dasharray="5 4" />
+    <text data-tht x="760" font-size="10.5" text-anchor="end" fill="#a33b3b"></text>
+    <text data-r1 x="400" y="292" font-size="12.5" font-weight="700" fill="#2b2b30"></text>
+    <text data-r2 x="400" y="314" font-size="12" fill="#2b2b30"></text>
+    <text data-r3 x="400" y="336" font-size="12" fill="#2b2b30"></text>
+    <text data-r4 x="400" y="358" font-size="11.5" fill="#5f5f66"></text>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Training</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-run>Run</button>
+      <button type="button" class="fig-chip" data-reset>Reset</button>
+    </div></div>
+    <div><span class="fig-panel__name">Random restarts</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-rs="off" aria-pressed="true">Off</button>
+      <button type="button" class="fig-chip" data-rs="on" aria-pressed="false">On</button>
+    </div></div>
+    <label><span class="fig-panel__name">Restart threshold<strong data-vt></strong></span><input class="scrub" data-t type="range" min="0.5" max="5" step="0.5" value="2" /></label>
+    <div><span class="fig-panel__name">Decay γ</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-g="0.9" aria-pressed="true">0.9</button>
+      <button type="button" class="fig-chip" data-g="0.99" aria-pressed="false">0.99</button>
+    </div></div>
+  </div>
+</div>
+
+<script>
+  import { setupFigure, wait } from "../../lib/figure-motion";
+  import { rng, gauss } from "../../lib/flow-math";
+  import { nearest, health, PALETTE, type P2 } from "../../lib/vq-math";
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-dc]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const tIn = $<HTMLInputElement>("[data-t]");
+    const X = (v: number) => 190 + v * 30, Y = (v: number) => 190 - v * 30;
+    const mk = (g: Element, tag: string, a: Record<string, string | number>, txt?: string) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, String(a[k])); if (txt !== undefined) e.textContent = txt; g.append(e); return e; };
+    const START: P2[] = [[-2, 1.5], [2, -1], [-1.6, 2], [5, 5], [-5, -5], [5, -5], [-5, 5], [0, -5.2]];
+    let ents: P2[] = [], N: number[] = [], M: P2[] = [], step = 0, restarts = 0, flash = -1, batch: P2[] = [], wins: number[] = [];
+    let restart = false, gamma = 0.9, g = gauss(5), u = rng(6);
+    const sample = (): P2 => (u() < 0.5 ? [-2 + 0.8 * g(), 1.5 + 0.7 * g()] : [2 + 0.7 * g(), -1 + 0.8 * g()]);
+    function reset() { g = gauss(5); u = rng(6); ents = START.map((e) => [e[0], e[1]] as P2); N = ents.map(() => 4); M = ents.map((e) => [4 * e[0], 4 * e[1]] as P2); step = 0; restarts = 0; flash = -1; batch = Array.from({ length: 32 }, sample); wins = ents.map(() => 0); }
+    function train() {
+      batch = Array.from({ length: 32 }, sample);
+      const n = ents.map(() => 0), s = ents.map(() => [0, 0] as P2);
+      batch.forEach((p) => { const { k } = nearest(p, ents); n[k]++; s[k][0] += p[0]; s[k][1] += p[1]; });
+      wins = n; flash = -1;
+      ents.forEach((_, j) => {
+        N[j] = gamma * N[j] + (1 - gamma) * n[j];
+        M[j] = [gamma * M[j][0] + (1 - gamma) * s[j][0], gamma * M[j][1] + (1 - gamma) * s[j][1]];
+        ents[j] = [M[j][0] / N[j], M[j][1] / N[j]];
+        if (restart && N[j] < +tIn.value) {
+          const p = batch[Math.floor(u() * batch.length)];
+          ents[j] = [p[0], p[1]]; N[j] = +tIn.value + 1; M[j] = [ents[j][0] * N[j], ents[j][1] * N[j]]; restarts++; flash = j;
+        }
+      });
+      step++;
+    }
+    function draw() {
+      const gp = $("[data-pts]"); gp.replaceChildren();
+      batch.forEach((p) => mk(gp, "circle", { cx: X(p[0]), cy: Y(p[1]), r: 3, fill: PALETTE[nearest(p, ents).k], "fill-opacity": 0.75 }));
+      const ge = $("[data-ents]"); ge.replaceChildren();
+      ents.forEach((e, j) => {
+        const x = Math.max(28, Math.min(352, X(e[0]))), y = Math.max(28, Math.min(352, Y(e[1])));
+        mk(ge, "path", { d: `M${x} ${y - 9} l9 9 l-9 9 l-9 -9 z`, fill: PALETTE[j], stroke: j === flash ? "#2b2b30" : "#fff", "stroke-width": j === flash ? 3 : 2 });
+        mk(ge, "text", { x: x + 11, y: y - 6, "font-size": 10, "font-weight": 700, fill: PALETTE[j] }, String(j + 1));
+      });
+      const gb = $("[data-bars]"); gb.replaceChildren();
+      const H = (v: number) => 250 - Math.min(v, 12) * 17;
+      ents.forEach((_, j) => {
+        const x = 410 + j * 43;
+        mk(gb, "rect", { x, y: H(N[j]), width: 32, height: 250 - H(N[j]), fill: PALETTE[j], "fill-opacity": N[j] < +tIn.value ? 0.35 : 0.9 });
+        mk(gb, "text", { x: x + 16, y: 266, "font-size": 10.5, "text-anchor": "middle", fill: "#2b2b30" }, String(j + 1));
+      });
+      const th = $("[data-th]"); th.setAttribute("y1", String(H(+tIn.value))); th.setAttribute("y2", String(H(+tIn.value)));
+      const tt = $("[data-tht]"); tt.setAttribute("y", String(H(+tIn.value) - 5)); tt.textContent = `threshold ${tIn.value}`;
+      const h = health(wins);
+      $("[data-r1]").textContent = `Step ${step}: ${h.used} of 8 entries won points this batch.`;
+      $("[data-r2]").textContent = `Perplexity ${h.ppl.toFixed(2)}: worth ${h.ppl.toFixed(1)} equally used entries (${h.H.toFixed(2)} bits of 3).`;
+      $("[data-r3]").textContent = restart ? `Restarts so far: ${restarts}.` : "Restarts off: far entries never win, so they never move.";
+      $("[data-r4]").textContent = "Entries beyond the box are drawn at its edge.";
+      $("[data-vt]").textContent = tIn.value; tIn.style.setProperty("--p", `${((+tIn.value - 0.5) / 4.5) * 100}%`);
+    }
+    let token = 0;
+    async function run(alive: () => boolean, steps = 120) { for (let i = 0; i < steps; i++) { if (!alive()) return; train(); draw(); await wait(i < 10 ? 0.25 : 0.06); } }
+    $("[data-run]").addEventListener("click", () => { const my = ++token; run(() => my === token); });
+    $("[data-reset]").addEventListener("click", () => { token++; reset(); draw(); });
+    const chips = (attr: string, set: (v: string) => void) => root.querySelectorAll<HTMLButtonElement>(`[data-${attr}]`).forEach((b) => b.addEventListener("click", () => {
+      set(b.getAttribute(`data-${attr}`)!); root.querySelectorAll(`[data-${attr}]`).forEach((o) => o.setAttribute("aria-pressed", String(o === b))); token++; reset(); draw();
+    }));
+    chips("rs", (v) => (restart = v === "on")); chips("g", (v) => (gamma = +v));
+    tIn.addEventListener("input", draw);
+    reset(); draw();
+    setupFigure(root, () => { reset(); draw(); }, async (alive) => { await run(alive, 60); });
+  });
+</script>

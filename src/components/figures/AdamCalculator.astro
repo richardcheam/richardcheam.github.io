@@ -1,0 +1,76 @@
+---
+// Foundations, optimisers post: Adam on one weight of L = w² (w₁ of the
+// bowl), one operation per step. Defaults w = 4, η 0.5, β₁ 0.9, β₂ 0.999:
+// g 8, 7, 6.006; m̂ 8, 7.474, 6.932; v̂ 64, 56.496, 49.680; steps 0.5,
+// 0.497, 0.492; w 3.5, 3.003, 2.511. Without bias correction step 1 is 1.581.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-adam>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 210" role="img" aria-labelledby="ad-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="ad-title">A table filling one Adam update at a time for a single weight</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Learning rate η <strong data-v="eta"></strong></span><input class="scrub" data-k="eta" type="range" min="0.05" max="1" step="0.05" value="0.5" /></label>
+    <label><span class="fig-panel__name">β₁ (direction memory) <strong data-v="b1"></strong></span><input class="scrub" data-k="b1" type="range" min="0" max="0.99" step="0.01" value="0.9" /></label>
+    <label><span class="fig-panel__name">β₂ (size memory) <strong data-v="b2"></strong></span><input class="scrub" data-k="b2" type="range" min="0.9" max="0.999" step="0.001" value="0.999" /></label>
+    <div><span class="fig-panel__name">Bias correction</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-corr="1" aria-pressed="true">On</button>
+      <button type="button" class="fig-chip" data-corr="0" aria-pressed="false">Off</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt } from "../../lib/tiny-net";
+  import { INK, MUTED, GOLD, TINT } from "../../lib/net-diagram";
+  import { txt } from "../../lib/plot";
+  import { run } from "../../lib/optimisers";
+  const T = 3;
+  const COLS = ["t", "w", "g = 2w", "m", "v", "m̂", "v̂", "√v̂", "step", "new w"];
+  const CX = [24, 60, 120, 190, 260, 360, 440, 530, 610, 690];
+  // Which columns each of the five operations in an update fills.
+  const OPS = [[0, 1, 2], [3], [4], [5, 6, 7], [8, 9]];
+  document.querySelectorAll<HTMLElement>("[data-adam]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const p: Record<string, number> = { eta: 0.5, b1: 0.9, b2: 0.999 };
+    let corr = true;
+    const rows = () => run("adam", (w) => [2 * w[0]], [4], { eta: p.eta, beta1: p.b1, beta2: p.b2, correct: corr }, T);
+    const steps = () => {
+      const rs = rows(), out: { say: string; math: string }[] = [];
+      rs.forEach((r, i) => {
+        const pm = i ? rs[i - 1].state.m[0] : 0, pv = i ? rs[i - 1].state.v[0] : 0, c = r.state.c, t = i + 1;
+        out.push({ say: `Update ${t}: measure the gradient at the current weight.`, math: `g = 2 × ${fmt(r.w[0], 4)} = ${fmt(r.g[0], 4)}` });
+        out.push({ say: "Update the direction memory m: mostly the old m, plus a little of the new gradient.", math: `m = ${fmt(p.b1)} × ${fmt(pm, 4)} + ${fmt(1 - p.b1, 3)} × ${fmt(r.g[0], 4)} = ${fmt(r.state.m[0], 4)}` });
+        out.push({ say: "Update the size memory v with the squared gradient. Its β₂ is closer to 1, so it remembers much longer.", math: `v = ${fmt(p.b2, 3)} × ${fmt(pv, 6)} + ${fmt(1 - p.b2, 3)} × ${fmt(r.g[0], 4)}² = ${fmt(r.state.v[0], 6)}` });
+        out.push(corr
+          ? { say: "Correct both for starting at zero: divide by the share of weight real gradients hold so far.", math: `m̂ = ${fmt(r.state.m[0], 4)} / (1 − ${fmt(p.b1)}^${t}) = ${fmt(r.state.m[0], 4)} / ${fmt(c[0], 6)} = ${fmt(r.state.mh[0], 4)}\nv̂ = ${fmt(r.state.v[0], 6)} / (1 − ${fmt(p.b2, 3)}^${t}) = ${fmt(r.state.v[0], 6)} / ${fmt(c[1], 6)} = ${fmt(r.state.vh[0], 4)},  √v̂ = ${fmt(Math.sqrt(r.state.vh[0]), 4)}` }
+          : { say: "Bias correction is off: m and v are used as they are, both still far too small.", math: `m̂ = m = ${fmt(r.state.m[0], 4)},  v̂ = v = ${fmt(r.state.v[0], 6)},  √v̂ = ${fmt(Math.sqrt(r.state.vh[0]), 4)}` });
+        out.push({ say: `Step along the remembered direction, divided by the remembered size.${t === 1 && corr ? " At step 1 that is exactly η." : t === 1 ? " Without correction it is far bigger than η." : ""}`, math: `step = ${fmt(p.eta)} × ${fmt(r.state.mh[0], 4)} / ${fmt(Math.sqrt(r.state.vh[0]), 4)} = ${fmt(r.step[0], 4)},  new w = ${fmt(r.w[0], 4)} − ${fmt(r.step[0], 4)} = ${fmt(r.next[0], 4)}` });
+      });
+      return out;
+    };
+    function draw(k: number) {
+      const rs = rows();
+      let s = "";
+      COLS.forEach((h, j) => (s += txt(CX[j], 24, h, `font-size="11.5" font-weight="700" fill="${MUTED}"`)));
+      rs.forEach((r, i) => {
+        const y = 60 + i * 42, cells = [String(i + 1), fmt(r.w[0], 4), fmt(r.g[0], 4), fmt(r.state.m[0], 4), fmt(r.state.v[0], 6), fmt(r.state.mh[0], 4), fmt(r.state.vh[0], 3), fmt(Math.sqrt(r.state.vh[0]), 4), fmt(r.step[0], 4), fmt(r.next[0], 4)];
+        const base = i * 5, cur = k - base;
+        if (cur >= 0 && cur < 5) { const [c0] = OPS[cur], c1 = OPS[cur][OPS[cur].length - 1]; s += `<rect x="${CX[c0] - 6}" y="${y - 18}" width="${(CX[c1 + 1] ?? 750) - CX[c0]}" height="28" rx="4" fill="${TINT}"/>`; }
+        cells.forEach((c, j) => {
+          const op = OPS.findIndex((o) => o.includes(j)), shown = k >= base + op;
+          s += txt(CX[j], y, shown ? c : "", `font-size="12.5" font-weight="${j === 8 ? 700 : 400}" fill="${j === 8 ? GOLD : INK}"`);
+        });
+      });
+      s += txt(24, 196, corr ? "With bias correction the first step is exactly η, whatever the size of the gradient." : "Without correction: m is 10 times too small, √v about 32 times too small, so the step is about 3.16 times too big.", `font-size="11.5" fill="${MUTED}"`);
+      $("[data-draw]").innerHTML = s;
+      root.querySelectorAll<HTMLElement>("[data-v]").forEach((el) => (el.textContent = fmt(p[el.dataset.v!], 3)));
+    }
+    const redraw = stepper(root, steps, draw, { delay: 1.5 });
+    root.querySelectorAll<HTMLInputElement>("[data-k]").forEach((inp) => inp.addEventListener("input", () => { p[inp.dataset.k!] = +inp.value; redraw(); }));
+    root.querySelectorAll<HTMLButtonElement>("[data-corr]").forEach((b) => b.addEventListener("click", () => { corr = b.dataset.corr === "1"; root.querySelectorAll("[data-corr]").forEach((o) => o.setAttribute("aria-pressed", String(o === b))); redraw(); }));
+  });
+</script>

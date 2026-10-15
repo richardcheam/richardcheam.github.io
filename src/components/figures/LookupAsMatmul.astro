@@ -1,0 +1,63 @@
+---
+// Foundations, embeddings post: reading row k of the table is the same as
+// multiplying the one-hot vector for k by the table. Twelve products, one
+// per step; dog gives (0.8, 0.9, 0.2), bus gives (0.2, 0.1, 0.8).
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-lookup>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 230" role="img" aria-labelledby="lm-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="lm-title">A one-hot vector times the embedding table, product by product</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Word to embed</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-w="0" aria-pressed="false">cat</button>
+      <button type="button" class="fig-chip" data-w="1" aria-pressed="true">dog</button>
+      <button type="button" class="fig-chip" data-w="2" aria-pressed="false">car</button>
+      <button type="button" class="fig-chip" data-w="3" aria-pressed="false">bus</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt } from "../../lib/tiny-net";
+  import { INK, MUTED, JADE, GOLD, TINT } from "../../lib/net-diagram";
+  import { txt } from "../../lib/plot";
+  const W = ["cat", "dog", "car", "bus"], E = [[0.9, 0.8, 0.1], [0.8, 0.9, 0.2], [0.1, 0.2, 0.9], [0.2, 0.1, 0.8]];
+  document.querySelectorAll<HTMLElement>("[data-lookup]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    let w = 1;
+    const x = () => W.map((_, i) => (i === w ? 1 : 0));
+    const steps = () => [0, 1, 2].flatMap((c) => [0, 1, 2, 3].map((i) => {
+      const terms = [0, 1, 2, 3].slice(0, i + 1).map((t) => `${x()[t]} × ${fmt(E[t][c])}`), sum = [0, 1, 2, 3].slice(0, i + 1).reduce((s, t) => s + x()[t] * E[t][c], 0);
+      return { say: i === 0 ? `Column ${c + 1}: multiply each slot of the one-hot vector by the matching number in this column, and add.` : x()[i] ? "This slot holds the 1, so this term keeps the table's number." : "This slot holds a 0, so the term vanishes.", math: `column ${c + 1}: ${terms.join(" + ")} = ${fmt(sum)}` };
+    }));
+    function draw(k: number) {
+      const c = k < 0 ? -1 : Math.floor(k / 4), i = k < 0 ? -1 : k % 4, xs = x();
+      let s = txt(30, 22, `one-hot for ${W[w]}`, `font-size="12" font-weight="700" fill="${INK}"`) + txt(250, 22, "embedding table E (rows: words)", `font-size="12" font-weight="700" fill="${INK}"`) + txt(560, 22, "result", `font-size="12" font-weight="700" fill="${INK}"`);
+      W.forEach((name, r) => {
+        const y = 60 + r * 36, lit = r === i;
+        s += `<rect x="40" y="${y - 18}" width="44" height="28" rx="4" fill="${lit ? TINT : "#fff"}" stroke="${xs[r] ? GOLD : "#cfd5d4"}" stroke-width="${xs[r] ? 2.5 : 1}"/>` + txt(62, y + 1, String(xs[r]), `font-size="14" font-weight="700" text-anchor="middle" fill="${xs[r] ? INK : "#B9C0BF"}"`) + txt(100, y + 1, name, `font-size="11" fill="${MUTED}"`);
+        const rowOn = k >= 11 && r === w;
+        if (rowOn) s += `<rect x="236" y="${y - 20}" width="270" height="32" rx="5" fill="none" stroke="${GOLD}" stroke-width="2.5"/>`;
+        E[r].forEach((v, j) => {
+          const on = j === c && r === i, done = j < c || (j === c && r <= i), dead = done && !xs[r];
+          if (on) s += `<rect x="${250 + j * 85}" y="${y - 18}" width="70" height="28" rx="4" fill="${TINT}"/>`;
+          s += txt(285 + j * 85, y + 1, fmt(v), `font-size="13" text-anchor="middle" font-weight="${on ? 700 : 400}" fill="${dead ? "#C9CFCE" : INK}"`);
+        });
+      });
+      [0, 1, 2].forEach((j) => {
+        const full = j < c || (j === c && i === 3), partial = j === c && i < 3;
+        const v = [0, 1, 2, 3].slice(0, j < c ? 4 : i + 1).reduce((s2, t) => s2 + xs[t] * E[t][j], 0);
+        s += `<rect x="${545 + j * 62}" y="42" width="54" height="30" rx="4" fill="${full ? TINT : "#fff"}" stroke="${j === c ? JADE : "#cfd5d4"}"/>` + txt(572 + j * 62, 62, full || partial ? fmt(v) : "?", `font-size="13" font-weight="700" text-anchor="middle" fill="${full ? INK : partial ? MUTED : "#B9C0BF"}"`);
+      });
+      s += txt(545, 100, k >= 11 ? `= row ${w} of E, the row for ${W[w]}` : "Each column of the result is filled by four products.", `font-size="11.5" fill="${k >= 11 ? GOLD : MUTED}" font-weight="${k >= 11 ? 700 : 400}"`);
+      s += txt(545, 122, "Every term multiplied by 0 drops out,", `font-size="11" fill="${MUTED}"`) + txt(545, 138, "so a lookup just reads one row.", `font-size="11" fill="${MUTED}"`);
+      $("[data-draw]").innerHTML = s;
+    }
+    const redraw = stepper(root, steps, draw, { delay: 0.9 });
+    root.querySelectorAll<HTMLButtonElement>("[data-w]").forEach((b) => b.addEventListener("click", () => { w = +b.dataset.w!; root.querySelectorAll("[data-w]").forEach((o) => o.setAttribute("aria-pressed", String(o === b))); redraw(); }));
+  });
+</script>

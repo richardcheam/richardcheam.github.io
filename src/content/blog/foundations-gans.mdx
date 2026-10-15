@@ -1,0 +1,372 @@
+---
+title: "GANs: a generator and a judge training each other"
+date: 2026-10-15
+category: "deep-learning"
+read_time: "30 min"
+series_order: 13
+series: foundations
+featured: false
+excerpt: "A generative adversarial network trains two networks against each other: a forger that turns random noise into samples and a detective that scores how real they look. Every loss worked by hand, a one-number GAN trained live, and the ways the game goes wrong."
+question: "How can a network learn to make realistic data when nobody can write down a score for 'realistic'?"
+my_work: "A concept note. I worked every example by hand, checked each number with a short seeded script, and specified the figures from the standard formulas."
+result: "A one-number GAN (an affine forger and a quadratic logistic detective, seeded) moves its samples from mean 0.01 and spread 1.00 to mean 3.03 and spread 0.52, matching data drawn with mean 3 and spread 0.5. On two-peak data the same forger, started near one peak, collapses onto it and never visits the other."
+evidence_limit: "Explains textbook methods on toy one-dimensional data. No experiments beyond a seeded toy; the toy is far too small to show everything real GANs do."
+lesson: "A GAN replaces a hand-written loss with a learned judge. That is powerful, but the two players chase each other instead of rolling downhill, so stability tricks matter as much as the idea."
+---
+
+import ForgerDetectiveStepper from "../../components/figures/ForgerDetectiveStepper.astro";
+import SaturationGradientPlot from "../../components/figures/SaturationGradientPlot.astro";
+import OptimalJudgeDensities from "../../components/figures/OptimalJudgeDensities.astro";
+import ToyGanTrainer from "../../components/figures/ToyGanTrainer.astro";
+import ModeCollapseToggle from "../../components/figures/ModeCollapseToggle.astro";
+import BilinearSpiralStepper from "../../components/figures/BilinearSpiralStepper.astro";
+import GanArchitecture from "../../components/figures/GanArchitecture.astro";
+
+In [the last post](/blog/foundations-autoencoders-vae/) a variational autoencoder learned to make new data by rebuilding its input and keeping its code space tidy. Its score was a hand-written formula: squared error plus a KL term. The trouble is that "squared error is small" and "looks real" are not the same thing. Averaging two plausible faces gives a blurry face with a small squared error. Averaging two plausible sound waves gives a muffled one.
+
+A **generative adversarial network** (GAN) gets around this by not writing the score down at all. It trains a second network to be the score. Goodfellow and colleagues introduced the idea in 2014, and for about six years it produced the sharpest images and the most natural vocoder audio of any method. It is also the reason the codecs in my speech posts have "discriminators" in their training recipe.
+
+
+## The whole model at a glance
+
+Here is one whole round of GAN training with every number shown, in the same one-number setting as the [live trainer](#a-one-number-gan-trained-live) later in this post: real data around 3, a generator that is just a straight line, and a detective with three weights. Step through it once now. The detective's loss, the forger's loss and the turn-taking each get their own section below.
+
+<figure class="blog-figure blog-figure--wide">
+  <GanArchitecture alt="Boxes for noise, the generator, a fake sample, the real data and a real sample, all feeding a detective box, with its two scores and the two losses. A number line at the bottom shows the real data, the detective's belief curve and the fake sample moving. Stepping goes through one detective update and one generator update, with gradient arrows." />
+  <figcaption><strong>Figure 1. One GAN training round, from noise to updated weights.</strong> The detective learns first while the generator is frozen, then the generator learns through the frozen detective. After one round the same noise makes a fake that sits closer to the real data. At the end only the generator is kept.</figcaption>
+</figure>
+
+## The forger and the detective
+
+Picture a forger who paints fake banknotes and a detective who inspects notes and says "real" or "fake". At first the forger is terrible and the detective wins easily. But every time the detective explains (through gradients) what gave a fake away, the forger fixes exactly that. The detective then has to look harder. If both keep improving, the forger ends up making notes the detective cannot tell apart from real ones.
+
+The two networks are:
+
+- The **generator** $G$. It takes a handful of random numbers $z$ (the **noise**, drawn from a simple distribution such as a standard bell curve) and outputs a sample $G(z)$: a picture, a sound clip, or in our toy, one number.
+- The **discriminator** $D$. It takes a sample $x$ and outputs one number $D(x)$ between 0 and 1: its probability that $x$ is real.
+
+The generator never sees real data. Everything it learns comes through $D$'s gradient. That is the key difference from the autoencoder, whose decoder was compared directly against the input.
+
+## The minimax objective
+
+In one sentence: the detective wants to give real samples high scores and fakes low scores, and the forger wants the same quantity the detective is maximising to be as small as possible. Goodfellow et al. (2014) wrote it as
+
+$$
+\min_G \max_D \; V(D, G) = \mathbb{E}_{x \sim p_{\text{data}}}\big[\log D(x)\big] + \mathbb{E}_{z \sim p_z}\big[\log\big(1 - D(G(z))\big)\big]
+$$
+
+Every symbol:
+
+- $V(D, G)$ is the **value** of the game: one number that depends on both players.
+- $\max_D$: the discriminator picks its weights to make $V$ as large as possible.
+- $\min_G$: the generator picks its weights to make that same $V$ as small as possible. A game where one player's gain is the other's loss is called **minimax** or zero-sum.
+- $p_{\text{data}}$ is the distribution of real data; $x \sim p_{\text{data}}$ means "$x$ is a real sample".
+- $p_z$ is the noise distribution; $z \sim p_z$ means "$z$ is a fresh random draw".
+- $\mathbb{E}[\ldots]$ is the **expected value**: the average over many draws. In practice, the average over a mini-batch.
+- $\log D(x)$ is large (close to 0, its maximum) when $D$ says "real" to a real sample.
+- $\log(1 - D(G(z)))$ is large when $D$ says "fake" (a score near 0) to a generated sample.
+
+Everyday picture: the detective earns points for every correct call; the forger loses exactly those points.
+
+If you have read [the loss post](/blog/foundations-loss-gradient-descent/#surprise-and-why-the-loss-is-minus-log), the two log terms should look familiar. They are cross-entropy in disguise.
+
+## The detective's loss is binary cross-entropy
+
+Flip the sign of $V$ and the discriminator's job becomes minimising an ordinary loss. Give every real sample the label $y = 1$ and every fake the label $y = 0$. Then
+
+$$
+L_D = -\frac{1}{2m}\left[\sum_{i=1}^{m} \log D(x_i) + \sum_{i=1}^{m} \log\big(1 - D(G(z_i))\big)\right]
+$$
+
+In words: for each real sample, the surprise at calling it real; for each fake, the surprise at calling it fake; average them all.
+
+- $m$ is the number of real samples in the batch, and also the number of fakes.
+- $x_i$ is real sample $i$; $G(z_i)$ is fake sample $i$.
+- The $\frac{1}{2m}$ makes it an average over all $2m$ samples.
+
+This is exactly **binary cross-entropy** (BCE): the two-class version of the cross-entropy from post 2. So the detective is just a classifier with a label it can always trust, because we know which samples we made.
+
+### Worked by hand on six scores
+
+Three real notes get scores $D = 0.9, 0.8, 0.6$. Three fakes get $D = 0.3, 0.2, 0.5$. (Natural logs throughout.)
+
+Real terms, $-\log D$:
+
+- $-\log 0.9 = 0.1054$
+- $-\log 0.8 = 0.2231$
+- $-\log 0.6 = 0.5108$
+
+Fake terms, $-\log(1 - D)$:
+
+- $-\log 0.7 = 0.3567$
+- $-\log 0.8 = 0.2231$
+- $-\log 0.5 = 0.6931$
+
+Sum: $0.1054 + 0.2231 + 0.5108 + 0.3567 + 0.2231 + 0.6931 = 2.1123$. Divide by 6: $L_D = $ **0.352**.
+
+What changes if a number changes: the worst term is the fake scored $0.5$ (a shrug). Pushing that fake's score down to $0.1$ makes its term $-\log 0.9 = 0.1054$, and the loss drops to $(2.1122 - 0.6931 + 0.1054)/6 = 0.254$. A perfectly confident correct detective would score 0.
+
+<figure class="blog-figure blog-figure--wide">
+  <ForgerDetectiveStepper alt="Six notes in a row, three marked real in green and three fake in red, each with a discriminator score. Step buttons compute each log term in turn, then the discriminator loss, then both generator losses." />
+  <figcaption><strong>Figure 2. The detective's scorecard.</strong> Step through the six scores: each step shows one cross-entropy term, then the average 0.352, then the forger's two possible losses on the same three fakes. The slider changes the third fake's score; every number updates.</figcaption>
+</figure>
+
+## The forger's loss: saturating and non-saturating
+
+The forger only affects the second term, so the minimax rule says: minimise $\log(1 - D(G(z)))$. This is called the **saturating** generator loss. On our three fakes it is $(\log 0.7 + \log 0.8 + \log 0.5)/3 = (-0.3567 - 0.2231 - 0.6931)/3 = $ **−0.4243**.
+
+Goodfellow et al. noticed a problem in the same paper. Early in training the forger is bad, so the detective scores its fakes near 0. And near $D = 0$, the curve $\log(1 - D)$ is almost flat. A flat loss means a tiny gradient: the forger is told "you are losing" but not "which way to go".
+
+Their fix: instead of minimising "the detective is right about my fakes", maximise "the detective is wrong about my fakes". The **non-saturating** loss is
+
+$$
+L_G = -\frac{1}{m}\sum_{i=1}^{m} \log D(G(z_i))
+$$
+
+In words: the forger's surprise that its fake was called real. Both losses want $D(G(z))$ to rise; they just push with very different strength. On our three fakes: $(-\log 0.3 - \log 0.2 - \log 0.5)/3 = (1.2040 + 1.6094 + 0.6931)/3 = $ **1.1689**.
+
+### Why the non-saturating gradient is bigger early
+
+Write the detective's output as $D = \sigma(s)$, where $s$ is its raw score (the **logit**) and $\sigma$ is the sigmoid from [the first post](/blog/foundations-neurons-backprop/). The sigmoid has the handy slope $\sigma'(s) = D(1 - D)$. Then, by the chain rule:
+
+- Saturating: $\frac{d}{ds}\log(1 - D) = -\frac{1}{1-D} \cdot D(1-D) = -D$.
+- Non-saturating: $\frac{d}{ds}\big(-\log D\big) = -\frac{1}{D} \cdot D(1-D) = -(1 - D)$.
+
+Both are negative, so both say "raise $s$". Now plug in numbers:
+
+| $D(G(z))$ | saturating push | non-saturating push |
+|---|---|---|
+| 0.01 (forger hopeless) | 0.01 | **0.99** |
+| 0.1 | 0.1 | 0.9 |
+| 0.5 (even match) | 0.5 | 0.5 |
+| 0.9 (forger winning) | 0.9 | 0.1 |
+
+When the forger is hopeless, the saturating loss pushes **99 times** more weakly. The non-saturating loss is strongest exactly when the forger most needs help. Almost every GAN since uses it, or one of the alternatives [further down](#fixes-in-brief).
+
+<figure class="blog-figure blog-figure--wide">
+  <SaturationGradientPlot alt="Two curves of generator loss against the discriminator's score on a fake, from 0 to 1: the saturating log of one minus D, flat near zero, and the non-saturating minus log D, steep near zero. A slider moves a marker and draws each curve's slope." />
+  <figcaption><strong>Figure 3. Two ways to tell the forger it lost.</strong> Slide D(G(z)). At 0.01 the saturating curve is nearly flat (push 0.01) while the non-saturating curve is steep (push 0.99). They cross at 0.5.</figcaption>
+</figure>
+
+## The best possible detective
+
+Suppose we freeze the forger and let the detective train forever. What does it end up saying? For any one point $x$, real samples land there with density $p_{\text{data}}(x)$ and fakes with density $p_g(x)$. The detective's best answer is the fraction of samples at $x$ that are real:
+
+$$
+D^*(x) = \frac{p_{\text{data}}(x)}{p_{\text{data}}(x) + p_g(x)}
+$$
+
+- $D^*$ (D-star) is the optimal detective for the current forger.
+- $p_g$ is the distribution of the forger's outputs.
+
+Everyday picture: at a market stall where 8 of every 10 notes are real, the best you can say about any note is "80 percent real".
+
+### A one-dimensional example
+
+Let real data be a bell curve centred at 0 with spread 1, and the forger's output a bell curve centred at 2 with spread 1. The bell-curve height at distance $d$ from the centre is $\frac{1}{\sqrt{2\pi}}e^{-d^2/2}$: $0.3989$ at $d = 0$, $0.2420$ at $d = 1$, $0.0540$ at $d = 2$, $0.0044$ at $d = 3$.
+
+- At $x = 0$: $D^* = 0.3989 / (0.3989 + 0.0540) = $ **0.881**.
+- At $x = 1$, halfway: both heights are $0.2420$, so $D^* = $ **0.5**. A coin flip.
+- At $x = 2$: $D^* = 0.0540 / (0.0540 + 0.3989) = $ **0.119**.
+- At $x = 3$: $D^* = 0.0044 / (0.0044 + 0.2420) = $ **0.018**.
+
+If the forger slid its curve onto 0, the two densities would be equal everywhere and $D^*(x) = 0.5$ for every $x$. A perfect forger leaves the best detective shrugging.
+
+<figure class="blog-figure blog-figure--wide">
+  <OptimalJudgeDensities alt="Two bell curves, real in green centred at 0 and generated in red centred at a slider value, with the optimal discriminator curve in between running from near 1 on the left to near 0 on the right, and a readout of the Jensen-Shannon divergence." />
+  <figcaption><strong>Figure 4. The best detective for a frozen forger.</strong> At the default (forger centred at 2) the judge reads 0.881 at x = 0, 0.5 at x = 1 and 0.119 at x = 2. Slide the forger to 0 and the judge flattens to 0.5 everywhere.</figcaption>
+</figure>
+
+### What the forger is really minimising
+
+Plug $D^*$ back into $V$. Goodfellow et al. showed the result is
+
+$$
+V(D^*, G) = 2\,\mathrm{JSD}(p_{\text{data}} \,\|\, p_g) - \log 4
+$$
+
+- **JSD** is the **Jensen-Shannon divergence**: a distance between two distributions. It is the average KL divergence (from [the VAE post](/blog/foundations-autoencoders-vae/)) of each distribution from their halfway blend. It is 0 when the two match and at most $\log 2 = 0.693$ when they do not overlap at all.
+- $\log 4 = 1.386$ is a constant offset.
+
+So against a perfect detective, the forger is pushing the Jensen-Shannon distance to zero, and the best value of the game is $-\log 4 = -1.386$, reached only when $p_g = p_{\text{data}}$. For our two bell curves, computed numerically:
+
+| forger centre | JSD | $V(D^*, G)$ |
+|---|---|---|
+| 0 | 0 | −1.386 |
+| 1 | 0.111 | −1.163 |
+| 2 | 0.337 | −0.713 |
+| 4 | 0.633 | −0.121 |
+| 8 | 0.693 | −0.000 |
+
+Look at the bottom two rows. Once the curves stop overlapping, JSD sits at its ceiling and barely changes: moving from 8 to 7 gives the forger almost no signal. That observation is where [Wasserstein GANs](#fixes-in-brief) start.
+
+## Training: take turns
+
+Nobody trains the detective to perfection between forger moves; it is too expensive. Instead the two take turns, one mini-batch each:
+
+1. Draw $m$ real samples and $m$ noise vectors; make $m$ fakes.
+2. **Detective step**: compute $L_D$ on the $2m$ samples and take one gradient step on $D$'s weights only.
+3. Draw fresh noise, make fresh fakes.
+4. **Forger step**: compute $L_G$ (non-saturating) and take one gradient step on $G$'s weights only. The gradient flows backward through $D$ into $G$, but $D$'s weights are not changed.
+5. Repeat.
+
+Goodfellow et al. allowed $k$ detective steps per forger step and used $k = 1$ in their experiments. Any optimiser from [the optimisers post](/blog/foundations-optimisers/) works; Adam with a low momentum setting is the classic choice for image GANs (Radford, Metz and Chintala's DCGAN, 2016, used Adam with β₁ = 0.5 instead of the usual 0.9).
+
+## A one-number GAN, trained live
+
+Small enough to follow every weight:
+
+- **Real data**: one number drawn from a bell curve with mean 3 and spread 0.5.
+- **Forger**: $G(z) = a z + b$ with $z$ from a standard bell curve. Two weights; start at $a = 1$, $b = 0$, so the forger begins centred at 0 with spread 1.
+- **Detective**: $D(x) = \sigma(w_2 x^2 + w_1 x + c)$. A logistic classifier on $x$ and $x^2$, all three weights starting at 0. The $x^2$ feature lets it notice a spread that is too wide or too narrow, not only a wrong centre.
+- **Training**: batch of 64 real and 64 fake, alternating one detective step and one forger step, plain gradient descent, detective learning rate 0.5, forger learning rate 0.02, non-saturating forger loss, seed 7.
+
+Measured on a fixed set of 2000 noise draws:
+
+| step | $a$ | $b$ | sample mean | sample spread |
+|---|---|---|---|---|
+| 0 | 1.000 | 0.000 | 0.011 | 0.999 |
+| 100 | 1.442 | 1.149 | 1.165 | 1.441 |
+| 300 | 0.476 | 3.012 | 3.017 | 0.475 |
+| 1000 | 0.505 | 2.943 | 2.949 | 0.505 |
+| 3000 | 0.523 | 3.026 | **3.031** | **0.522** |
+
+Notice step 100: the spread grows to 1.44 before it shrinks. The detective first learns "real is to the right", the forger runs right and briefly widens, then the $x^2$ feature catches the overshoot and squeezes it back. The ending is not perfectly still: the two keep nudging each other, and the numbers wobble around the target.
+
+A slow detective is worse. With the detective learning rate cut to 0.05 (same seed), the forger arrives at mean 3.07 but its spread keeps shrinking to **0.001**: every fake is nearly the same number. The detective never learns fast enough to complain that "everything identical" is suspicious. That is a first taste of mode collapse.
+
+<figure class="blog-figure blog-figure--wide">
+  <ToyGanTrainer alt="A histogram of real samples in green near 3 and a histogram of generated samples in red that starts near 0 and slides over to cover the green one, with the discriminator's curve drawn above and running readouts of a, b, mean and spread." />
+  <figcaption><strong>Figure 5. A GAN you can watch.</strong> Seeded toy, one forger step per detective step. The red histogram moves from mean 0.01 to 3.03 with spread 0.52, on top of the green data (mean 3, spread 0.5). Pause at any point; choose the slow detective rate 0.05 to see the spread collapse to 0.001.</figcaption>
+</figure>
+
+## When the game goes wrong
+
+### Mode collapse
+
+Now make the real data two peaks: half the samples near $-2$, half near $+2$, each with spread 0.3. Give the detective seven bump features (bell curves of width 0.5 centred at −3, −2, …, 3) so it can tell the two peaks apart. Keep the affine forger.
+
+Start the forger narrow and to the right ($a = 0.3$, $b = 1$). Within 200 steps the spread $a$ drops to **0.0002** and the centre sits at **2.06**. For the remaining 4000 steps, every single sample is positive (100 percent), and the centre wanders between about 1.5 and 2.5 while the detective keeps chasing it. The peak at $-2$ is never visited.
+
+That is **mode collapse**: the forger finds one kind of output the detective accepts and makes only that. The detective then learns "things near 2 are fake", the forger shuffles a little, the detective follows, and nobody's gradient points toward the far peak, which sits behind a valley where the detective has no opinion.
+
+Started wide instead ($a = 1$, $b = 0$), the same forger covers both sides (about 50 percent positive) but, being a single bell curve, it smears across the gap with spread about **2.6**. An affine forger cannot make two peaks at all; real GANs have flexible forgers and still collapse, because collapse comes from the game, not only from capacity.
+
+<figure class="blog-figure blog-figure--wide">
+  <ModeCollapseToggle alt="Two-peak real data in green at minus 2 and plus 2. A toggle picks the forger's start: narrow on the right, where the red histogram shrinks to a spike near 2 and stays there, or wide, where it spreads across both peaks and the gap." />
+  <figcaption><strong>Figure 6. Stuck on one peak.</strong> Narrow start: by step 200 the spread is 0.0002 and 100 percent of samples are positive, for all 4000 steps. Wide start: about half the samples on each side, but spread across the empty gap.</figcaption>
+</figure>
+
+### Oscillation: a game is not a hill
+
+Gradient descent on one loss rolls downhill. Two players each rolling down their own hill can circle forever. The smallest example is the **bilinear game**: player $x$ wants to minimise $f(x, y) = x y$ and player $y$ wants to maximise it. The answer is $x = y = 0$.
+
+Gradients: $\frac{\partial f}{\partial x} = y$ and $\frac{\partial f}{\partial y} = x$. With step size $\eta = 0.5$:
+
+**Simultaneous** steps (both use the old values): $x \leftarrow x - \eta y$, $y \leftarrow y + \eta x$. Start at $(1, 1)$:
+
+| step | $x$ | $y$ | distance from 0 |
+|---|---|---|---|
+| 0 | 1 | 1 | 1.414 |
+| 1 | 1 − 0.5 × 1 = 0.5 | 1 + 0.5 × 1 = 1.5 | 1.581 |
+| 2 | 0.5 − 0.75 = −0.25 | 1.5 + 0.25 = 1.75 | 1.768 |
+| 3 | −1.125 | 1.625 | 1.976 |
+| 4 | −1.9375 | 1.0625 | 2.210 |
+| 5 | −2.4688 | 0.0938 | 2.471 |
+
+The distance grows by a factor of $\sqrt{1 + \eta^2} = 1.118$ every step: an outward spiral. Each player does the locally sensible thing, and together they fly apart.
+
+**Alternating** steps ($y$ uses the new $x$): $x \leftarrow x - \eta y$, then $y \leftarrow y + \eta x$.
+
+| step | $x$ | $y$ | distance |
+|---|---|---|---|
+| 0 | 1 | 1 | 1.414 |
+| 1 | 0.5 | 1 + 0.5 × 0.5 = 1.25 | 1.346 |
+| 2 | −0.125 | 1.1875 | 1.194 |
+| 3 | −0.7188 | 0.8281 | 1.097 |
+| 4 | −1.1328 | 0.2617 | 1.163 |
+| 5 | −1.2637 | −0.3701 | 1.317 |
+
+It no longer escapes, but it does not settle either: it orbits the answer. Mescheder, Geiger and Nowozin (2018) studied a GAN version of this (a one-parameter forger against a linear detective, which they call the Dirac-GAN) and showed that unregularised GAN training need not converge, while adding a gradient penalty on the detective makes it converge.
+
+<figure class="blog-figure blog-figure--wide">
+  <BilinearSpiralStepper alt="A plane with axes x and y and the target at the origin. Each step draws one update as an arrow; simultaneous updates spiral outward, alternating updates trace a closed loop. A toggle switches modes and a readout shows the arithmetic." />
+  <figcaption><strong>Figure 7. Two players, no hill.</strong> From (1, 1) with step 0.5: simultaneous updates spiral out (distance 1.414, 1.581, 1.768, ...); alternating ones loop around without arriving.</figcaption>
+</figure>
+
+### Vanishing detective gradients
+
+The opposite of a slow detective is one that wins too completely. If real and fake samples do not overlap, a detective can score every real sample near 1 and every fake near 0. With the saturating loss the forger's push is then about $D(G(z))$, close to zero. With any loss, the detective's curve is flat in the region where the fakes live, because it is confidently 0 everywhere there. The forger is told it is losing and given no direction. Arjovsky and colleagues argued that this is common for images, where real data occupies a thin sliver of all possible pixel arrays.
+
+## Fixes in brief
+
+- **Non-saturating loss.** The fix [above](#the-forgers-loss-saturating-and-non-saturating); the default since 2014.
+- **Wasserstein GAN** (Arjovsky, Chintala and Bottou, 2017). Replace the probability-judge with a **critic** that outputs any real number, and score the forger by how far it must move its samples, on average, to land on the data (the Wasserstein or "earth mover's" distance). Unlike JSD, that distance keeps shrinking smoothly as two non-overlapping piles get closer, so the 8-to-7 move in our table would still count. The theory needs the critic's slope to be at most 1 everywhere; the original paper enforced it crudely by clipping weights.
+- **Gradient penalty** (Gulrajani et al., 2017). Instead of clipping, add a loss term that pushes the critic's gradient size toward 1 at points between real and fake samples. More stable than clipping.
+- **Hinge loss** (Lim and Ye, 2017). The detective outputs a raw score and is asked to put real samples at +1 or above and fakes at −1 or below; beyond those lines it stops caring. The forger is asked to raise the detective's score on its fakes. This is the loss SoundStream uses, worked by hand with a figure in [my SoundStream review](/paper-reviews/soundstream/#the-hinge-loss).
+- **Spectral normalisation** (Miyato et al., 2018). Divide each of the detective's weight matrices by its largest stretching factor, so no layer can amplify its input more than 1×. That caps the detective's slope cheaply, in the same spirit as the Wasserstein constraint.
+
+## GANs in speech
+
+Speech is where I meet GANs most. A **vocoder** turns a spectrogram into a waveform, and squared error on waveforms gives muffled, buzzy audio for the same blurring reason as at the top of this post. A detective that has heard real speech catches that buzz.
+
+- **MelGAN** (Kumar et al., 2019) made a GAN vocoder work without any audio-quality loss beyond the adversarial one plus feature matching. Its **multi-scale** discriminator is three identical detectives, looking at the waveform at full, half and quarter resolution.
+- **HiFi-GAN** (Kong, Kim and Bae, 2020) kept the multi-scale detectives and added **multi-period** ones, each folding the waveform by a period (2, 3, 5, 7 or 11 samples) so it can spot errors in repeating patterns like the pitch of a voice.
+- **Neural codecs** use the same recipe. SoundStream's decoder is the forger, judged by MelGAN's three wave detectives plus one that looks at the short-time Fourier transform, all trained with the hinge loss and feature matching ([SoundStream review](/paper-reviews/soundstream/#teaching-the-decoder-to-sound-real)). Mimi, the codec under Moshi and Pocket TTS, also trains with an adversarial loss and feature matching from discriminators, alongside its reconstruction and KL terms ([Mimi post](/blog/mimi-codec-explained/#the-kl-term)). In every case the detectives exist only during training and are thrown away afterwards.
+
+## Why diffusion took over
+
+Around 2021, diffusion models overtook GANs for image generation, and diffusion and flow-matching models now do much of what GANs did in speech too. The reasons follow from this post: their training is one ordinary loss rolling downhill, not a two-player chase, so it does not spiral or collapse, and they cover every mode of the data. The price is speed, since they generate in many small steps rather than one. GANs survive where one fast step matters and a strong reference signal exists to anchor them, which is exactly the codec decoder. The next post, [diffusion and flow models](/blog/foundations-diffusion-flow/), picks up from there.
+
+## Counting the parameters
+
+A GAN is two networks, and you count each one's layers the usual way ([dense layers](/blog/foundations-neurons-backprop/#counting-the-parameters), [convolutions](/blog/foundations-convolutions/#channels-many-inputs-many-outputs)). The one-number GAN of this post is as small as it gets: the generator $x = a z + b$ has **2** parameters, and the detective $\sigma(w_1 x^2 + w_2 x + c)$ has **3**.
+
+```python
+import torch.nn as nn
+
+count = lambda m: sum(p.numel() for p in m.parameters())
+generator = nn.Linear(1, 1)  # x = a z + b
+detective = nn.Linear(2, 1)  # scores the features (x², x)
+print("generator", count(generator), "detective", count(detective))
+```
+
+It prints:
+
+```text
+generator 2 detective 3
+```
+
+Only the generator is kept after training. The detective's parameters exist only to train it, so a GAN's training cost includes a whole second network that is thrown away.
+
+## What to remember
+
+- A GAN trains a generator that maps noise to samples and a discriminator that scores how real a sample looks. The generator learns only through the discriminator's gradient.
+- The discriminator's loss is plain binary cross-entropy with real = 1 and fake = 0.
+- Use the non-saturating generator loss, $-\log D(G(z))$: when the forger is hopeless ($D = 0.01$) it pushes with 0.99 instead of 0.01.
+- The best detective is $p_{\text{data}} / (p_{\text{data}} + p_g)$; against it the forger minimises the Jensen-Shannon divergence, which goes flat when the two distributions stop overlapping.
+- Two players descending their own losses can spiral or orbit instead of settling. Mode collapse, oscillation and vanishing gradients are the usual failures.
+- Hinge loss, Wasserstein critics with gradient penalties and spectral normalisation all tame the detective. Speech codecs still use GAN losses for their decoders.
+
+## Try it yourself
+
+- **Detective's scorecard**: with the defaults (real 0.9, 0.8, 0.6; fake 0.3, 0.2, 0.5) the detective loss is 0.352, the saturating forger loss −0.4243 and the non-saturating one 1.1689. Set the third fake to 0.1: the detective loss becomes 0.254.
+- **Two ways to tell the forger**: set D(G(z)) to 0.01 and read pushes 0.01 and 0.99; set it to 0.5 and both read 0.5.
+- **Best detective**: forger centred at 2 reads D* = 0.881 at x = 0 and 0.5 at x = 1, JSD 0.337. Centre 0 gives 0.5 everywhere and JSD 0.
+- **Live GAN**: defaults reach mean 3.031 and spread 0.522 at step 3000. Detective rate 0.05 shows the spread falling to 0.001.
+- **Two peaks**: narrow start reaches spread 0.0002 by step 200 with 100 percent of samples positive.
+- **Bilinear game**: simultaneous, five steps from (1, 1), ends at (−2.4688, 0.0938), distance 2.471. Alternating ends at (−1.2637, −0.3701).
+
+## Sources
+
+- Goodfellow, Pouget-Abadie, Mirza, Xu, Warde-Farley, Ozair, Courville and Bengio (2014). Generative Adversarial Nets. NeurIPS 2014. arXiv:1406.2661.
+- Arjovsky, Chintala and Bottou (2017). Wasserstein GAN. arXiv:1701.07875.
+- Arjovsky and Bottou (2017). Towards Principled Methods for Training Generative Adversarial Networks. ICLR 2017. arXiv:1701.04862. The vanishing-gradient argument.
+- Gulrajani, Ahmed, Arjovsky, Dumoulin and Courville (2017). Improved Training of Wasserstein GANs. arXiv:1704.00028.
+- Lim and Ye (2017). Geometric GAN. arXiv:1705.02894.
+- Miyato, Kataoka, Koyama and Yoshida (2018). Spectral Normalization for Generative Adversarial Networks. ICLR 2018. arXiv:1802.05957.
+- Mescheder, Geiger and Nowozin (2018). Which Training Methods for GANs do actually Converge? ICML 2018. arXiv:1801.04406.
+- Radford, Metz and Chintala (2016). Unsupervised Representation Learning with Deep Convolutional Generative Adversarial Networks. ICLR 2016. arXiv:1511.06434.
+- Kumar, Kumar, de Boissiere, Gestin, Teoh, Sotelo, de Brébisson, Bengio and Courville (2019). MelGAN: Generative Adversarial Networks for Conditional Waveform Synthesis. NeurIPS 2019. arXiv:1910.06711.
+- Kong, Kim and Bae (2020). HiFi-GAN: Generative Adversarial Networks for Efficient and High Fidelity Speech Synthesis. NeurIPS 2020. arXiv:2010.05646.
+

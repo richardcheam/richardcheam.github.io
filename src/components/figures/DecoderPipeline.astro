@@ -1,0 +1,51 @@
+---
+// Foundations, language models post: the stages of a neural language model
+// on "the cat sat" over a six-word vocabulary. Illustrative numbers: the
+// last position's logits (−1, 0, 0.5, 0.5, 1, 2) score the token after
+// "sat", so EOS leads.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-pipeline>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 270" role="img" aria-labelledby="dp-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="dp-title">Text passing through token ids, embeddings, a causal Transformer, logits and softmax</title>
+    <g data-draw></g>
+  </svg>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt } from "../../lib/tiny-net";
+  import { INK, MUTED, GOLD, TINT, JADE } from "../../lib/net-diagram";
+  import { txt } from "../../lib/plot";
+  import { softmax } from "../../lib/attention";
+  const VOCAB = ["BOS", "the", "cat", "dog", "sat", "EOS"], TOK = ["BOS", "the", "cat", "sat"], IDS = [0, 1, 2, 4];
+  const EMB = [[0.1, 0.4, -0.2, 0.3], [0.5, -0.1, 0.2, 0.0], [-0.3, 0.6, 0.1, 0.2], [0.4, 0.1, -0.5, 0.2], [0.2, -0.4, 0.3, 0.5], [-0.1, -0.2, 0.4, -0.3]];
+  const LOGITS = [-1, 0, 0.5, 0.5, 1, 2], PROBS = softmax(LOGITS);
+  document.querySelectorAll<HTMLElement>("[data-pipeline]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const steps = () => [
+      { say: "Tokenize: each piece of text becomes its number in the vocabulary.", math: TOK.map((t, i) => `${t} → ${IDS[i]}`).join(",  ") },
+      { say: "Look up each id's row of the embedding table: a short vector per token.", math: TOK.map((t, i) => `${t}: (${EMB[IDS[i]].map((v) => fmt(v)).join(", ")})`).join("\n") },
+      { say: "A stack of causal Transformer blocks: each position may attend only to itself and earlier positions.", math: TOK.map((t, i) => `${t} sees ${TOK.slice(0, i + 1).join(", ")}`).join(";  ") },
+      { say: "The last position's vector becomes one score per vocabulary word: the logits for what comes after \"sat\".", math: VOCAB.map((v, i) => `${v} ${fmt(LOGITS[i])}`).join(",  ") },
+      { say: "Softmax turns the logits into next-token probabilities that add up to 1.", math: VOCAB.map((v, i) => `${v} ${fmt(PROBS[i], 3)}`).join(",  ") },
+    ];
+    function draw(k: number) {
+      const cx = [70, 190, 330, 500, 650];
+      let s = "";
+      ["text", "ids", "embeddings", "causal blocks", "logits → softmax"].forEach((h, i) => (s += txt(cx[i], 20, h, `font-size="11.5" font-weight="700" text-anchor="middle" fill="${k === i || (i === 4 && k >= 3) ? JADE : MUTED}"`)));
+      TOK.forEach((t, r) => {
+        const y = 46 + r * 42;
+        s += txt(cx[0], y + 18, t, `font-size="13" font-weight="700" text-anchor="middle" fill="${INK}"`);
+        if (k >= 0) s += `<rect x="${cx[1] - 18}" y="${y}" width="36" height="26" rx="4" fill="${k === 0 ? TINT : "#fff"}" stroke="#cfd5d4"/>` + txt(cx[1], y + 18, String(IDS[r]), `font-size="12.5" font-weight="700" text-anchor="middle" fill="${INK}"`);
+        if (k >= 1) EMB[IDS[r]].forEach((v, j) => (s += `<rect x="${cx[2] - 44 + j * 22}" y="${y + 4}" width="20" height="18" fill="${v >= 0 ? JADE : "#B5533C"}" fill-opacity="${Math.abs(v) * 1.4}"/>`));
+      });
+      if (k >= 2) { for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) s += `<rect x="${cx[3] - 46 + c * 23}" y="${50 + r * 42}" width="21" height="21" fill="${c <= r ? GOLD : "#eef0f0"}" fill-opacity="${c <= r ? 0.6 : 1}"/>`; s += txt(cx[3], 230, "gold: allowed to attend", `font-size="10" text-anchor="middle" fill="${MUTED}"`); }
+      if (k >= 3) VOCAB.forEach((v, i) => { const y = 40 + i * 32, w = k >= 4 ? PROBS[i] * 140 : (LOGITS[i] + 1) * 25; s += txt(cx[4] - 60, y + 14, v, `font-size="11" text-anchor="end" fill="${INK}"`) + `<rect x="${cx[4] - 54}" y="${y + 2}" width="${w}" height="16" fill="${k >= 4 ? GOLD : JADE}" fill-opacity="0.8"/>` + txt(cx[4] - 50 + w, y + 14, k >= 4 ? fmt(PROBS[i], 3) : fmt(LOGITS[i]), `font-size="10.5" fill="${INK}"`); });
+      s += txt(30, 260, "Illustrative numbers with a six-word vocabulary; the shapes are those of a real decoder.", `font-size="10.5" fill="${MUTED}"`);
+      $("[data-draw]").innerHTML = s;
+    }
+    stepper(root, steps, draw, { delay: 2 });
+  });
+</script>

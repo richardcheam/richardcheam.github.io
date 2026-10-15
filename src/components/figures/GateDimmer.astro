@@ -1,0 +1,43 @@
+---
+// Foundations, LSTM and GRU post: a gate is σ(z) multiplying a value.
+// z = 2, v = 0.8: gate 0.8808, output 0.7046. z = 0: 0.4. z = −2: 0.0954.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-dimmer>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 240" role="img" aria-labelledby="gd-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="gd-title">A sigmoid gate value multiplying a signal, like a dimmer on a lamp</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Gate score z <strong data-v="z"></strong></span><input class="scrub" data-k="z" type="range" min="-6" max="6" step="0.1" value="2" /></label>
+    <label><span class="fig-panel__name">Value v <strong data-v="v"></strong></span><input class="scrub" data-k="v" type="range" min="-1" max="1" step="0.1" value="0.8" /></label>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt, par } from "../../lib/tiny-net";
+  import { INK, MUTED, GOLD, JADE } from "../../lib/net-diagram";
+  import { frame, txt } from "../../lib/plot";
+  import { sig } from "../../lib/lstm";
+  document.querySelectorAll<HTMLElement>("[data-dimmer]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const p: Record<string, number> = { z: 2, v: 0.8 };
+    const setZ = (z: number) => { p.z = z; $<HTMLInputElement>('[data-k="z"]').value = String(z); };
+    const steps = () => [-2, 0, 2, 4].map((z) => ({ say: z < 0 ? "A negative score: the gate is almost shut." : z === 0 ? "Score 0: the gate is exactly half open." : z === 2 ? "A positive score: the gate is mostly open." : "A big score: nearly fully open, but never exactly 1.", math: `σ(${fmt(z)}) = 1 / (1 + e^${z <= 0 ? fmt(-z) : `(−${fmt(z)})`}) = ${fmt(sig(z), 4)};  output = ${fmt(sig(z), 4)} × ${par(p.v)} = ${fmt(sig(z) * p.v, 4)}`, enter: () => setZ(z) }));
+    function draw() {
+      const F = frame({ l: 50, t: 30, w: 320, h: 160, x0: -6, x1: 6, y0: 0, y1: 1 }), gz = sig(p.z), out = gz * p.v;
+      let s = F.grid([-6, -3, 0, 3, 6], [0, 0.5, 1], 1) + F.curve(sig, `stroke="${JADE}" stroke-width="2.5"`) + `<circle cx="${F.X(p.z)}" cy="${F.Y(gz)}" r="6" fill="${GOLD}" stroke="#fff" stroke-width="2"/>` + txt(50, 18, "Gate value σ(z) against the score z", `font-size="12" font-weight="700" fill="${INK}"`);
+      // Value bar, door, output bar.
+      const bar = (x: number, val: number, label: string, col: string) => { const H = Math.abs(val) * 120; return `<rect x="${x}" y="${val >= 0 ? 170 - H : 170}" width="50" height="${Math.max(1, H)}" fill="${col}"/>` + txt(x + 25, 196, label, `font-size="11" text-anchor="middle" fill="${MUTED}"`) + txt(x + 25, 214, fmt(val, 4), `font-size="13" font-weight="700" text-anchor="middle" fill="${INK}"`); };
+      s += `<line x1="420" x2="740" y1="170" y2="170" stroke="#cfd5d4"/>` + bar(430, p.v, "value v", "#9aa3a1");
+      s += `<rect x="540" y="${170 - 120}" width="14" height="120" fill="#eef0f0"/><rect x="540" y="${170 - 120 * gz}" width="14" height="${120 * gz}" fill="${GOLD}"/>` + txt(547, 196, "gate", `font-size="11" text-anchor="middle" fill="${MUTED}"`) + txt(547, 214, fmt(gz, 4), `font-size="13" font-weight="700" text-anchor="middle" fill="${GOLD}"`);
+      s += bar(640, out, "output", JADE) + txt(420, 30, "output = gate × value", `font-size="12" font-weight="700" fill="${INK}"`);
+      $("[data-draw]").innerHTML = s;
+      root.querySelectorAll<HTMLElement>("[data-v]").forEach((el) => (el.textContent = fmt(p[el.dataset.v!], 1)));
+    }
+    const redraw = stepper(root, steps, draw, { delay: 1.8 });
+    root.querySelectorAll<HTMLInputElement>("[data-k]").forEach((inp) => inp.addEventListener("input", () => { p[inp.dataset.k!] = +inp.value; redraw(); }));
+  });
+</script>

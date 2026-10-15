@@ -1,0 +1,209 @@
+---
+// One request through a cascade, stage by stage: what each model does and what
+// it hands to the next. Timings are the default budget of the latency figure
+// (silence 500, ASR 200, LLM first token 500, TTS first chunk 200 ms).
+// Markup is the final state; the script replays the request.
+const { alt } = Astro.props;
+const said = ["what", "time", "does", "the", "train", "leave?"];
+const reply = ["It", "leaves", "at", "nine."];
+const stations = [
+  { key: "vad", x: 104, w: 132, name: "VAD", role: "ends your turn", detail: "after 500 ms of silence" },
+  { key: "asr", x: 250, w: 132, name: "ASR", role: "speech → text", detail: "commits the transcript" },
+  { key: "llm", x: 396, w: 212, name: "LLM", role: "text → text", detail: "" },
+  { key: "tts", x: 622, w: 132, name: "TTS", role: "text → speech", detail: "phrase by phrase" },
+];
+const MS = 1500, CX0 = 20, CW = 740;
+const cx = (ms: number) => CX0 + (ms / MS) * CW;
+const clock = [
+  { t0: 0, t1: 500, label: "silence wait", color: "#c9c9d1" },
+  { t0: 500, t1: 700, label: "ASR", color: "#9d92b3" },
+  { t0: 700, t1: 1200, label: "LLM first token", color: "#594578" },
+  { t0: 1200, t1: 1400, label: "TTS", color: "#4F5D3A" },
+];
+const wave = (x0: number, x1: number, y: number, a: number) => {
+  let d = "";
+  const n = Math.round((x1 - x0) / 4);
+  for (let i = 0; i <= n; i++) d += `${i ? "L" : "M"}${(x0 + (i * (x1 - x0)) / n).toFixed(1)} ${(y + (i % 2 ? 1 : -1) * a * (0.4 + 0.6 * Math.sin((Math.PI * i) / n))).toFixed(1)} `;
+  return d.trim();
+};
+---
+<div class="blog-diagram" tabindex="0" role="region" aria-label={alt} data-cp>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 318" role="img" aria-labelledby="cp-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="cp-title">A cascaded voice assistant handling one request</title>
+    <defs><marker id="cp-a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M2 1L8 5L2 9" fill="none" stroke="#5f5f66" stroke-width="1.6" /></marker></defs>
+
+    <text data-caption x="20" y="22" font-size="13" font-weight="600" fill="#594578">first audio 1.4 s after you stop speaking</text>
+
+    <!-- you -->
+    <text x="20" y="62" font-size="12" fill="#2b2b30">you</text>
+    <path data-user d={wave(20, 92, 92, 11)} fill="none" stroke="#5f5f66" stroke-width="1.5" />
+
+    <!-- the four stations -->
+    {stations.map((s) => (
+      <g data-station={s.key}>
+        <rect x={s.x} y="44" width={s.w} height="104" rx="10" fill="#fff" stroke="#d5d5dc" />
+        <rect data-glow x={s.x} y="44" width={s.w} height="104" rx="10" fill="#594578" fill-opacity="0.07" stroke="#594578" stroke-width="1.6" opacity="0" />
+        <text x={s.x + 12} y="64" font-size="13" font-weight="700" fill="#2b2b30">{s.name}</text>
+        <text x={s.x + 12} y="80" font-size="11" fill="#594578">{s.role}</text>
+        {s.detail && <text x={s.x + 12} y="138" font-size="10.5" fill="#5f5f66">{s.detail}</text>}
+      </g>
+    ))}
+    <g stroke="#5f5f66" stroke-width="1.2" marker-end="url(#cp-a)">
+      <line x1="94" y1="96" x2="102" y2="96" /><line x1="236" y1="96" x2="248" y2="96" /><line x1="382" y1="96" x2="394" y2="96" /><line x1="608" y1="96" x2="620" y2="96" /><line x1="754" y1="96" x2="766" y2="96" />
+    </g>
+
+    <!-- VAD: silence meter -->
+    <rect x="116" y="96" width="108" height="6" rx="3" fill="#ececf1" />
+    <rect data-silence x="116" y="96" width="108" height="6" rx="3" fill="#c9c9d1" />
+    <text x="116" y="118" font-size="10" fill="#5f5f66" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">silence ≥ 500 ms</text>
+
+    <!-- ASR: words appear -->
+    <g data-asr-words font-size="11" fill="#2b2b30">
+      {said.map((w, i) => <text x={262 + (i % 3) * 38} y={100 + Math.floor(i / 3) * 16}>{w}</text>)}
+    </g>
+
+    <!-- LLM: the prompt it builds, then the reply it writes -->
+    <g font-size="10" fill="#5f5f66">
+      <text data-prompt="0" x="408" y="98">system prompt</text>
+      <text data-prompt="1" x="408" y="111">conversation history</text>
+      <text data-prompt="2" x="408" y="124" fill="#2b2b30">user: "what time does the train leave?"</text>
+    </g>
+    <line x1="408" y1="130" x2="596" y2="130" stroke="#ececf1" />
+    <g data-reply font-size="11" font-weight="600" fill="#594578">
+      {reply.map((w, i) => <text x={408 + [0, 16, 58, 76][i]} y="143">{w}</text>)}
+    </g>
+
+    <!-- TTS -> speaker -->
+    <path data-tts-wave d={wave(634, 742, 108, 9)} fill="none" stroke="#4F5D3A" stroke-width="1.5" />
+
+    <!-- what crosses each handoff -->
+    <g font-size="10" fill="#5f5f66" letter-spacing="0.6">
+      <text x="104" y="172">HANDS OVER</text>
+    </g>
+    <g data-handoff="0"><rect x="104" y="180" width="132" height="30" rx="6" fill="#ececf1" /><path d={wave(114, 226, 195, 6)} fill="none" stroke="#5f5f66" stroke-width="1.2" /></g>
+    <g data-handoff="1"><rect x="250" y="180" width="132" height="30" rx="6" fill="#fff" stroke="#9d92b3" /><text x="258" y="199" font-size="10" fill="#2b2b30" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">"what time does…"</text></g>
+    <g data-handoff="2"><rect x="396" y="180" width="212" height="30" rx="6" fill="#fff" stroke="#594578" /><text x="404" y="199" font-size="10" fill="#2b2b30" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">"It leaves at nine." (streamed)</text></g>
+    <g data-handoff="3"><rect x="622" y="180" width="132" height="30" rx="6" fill="#4F5D3A" fill-opacity="0.12" /><path d={wave(632, 744, 195, 6)} fill="none" stroke="#4F5D3A" stroke-width="1.2" /></g>
+    <g font-size="10" fill="#5f5f66">
+      <text x="104" y="224">audio of a closed turn</text>
+      <text x="250" y="224">text string</text>
+      <text x="396" y="224">text tokens</text>
+      <text x="622" y="224">audio chunks</text>
+    </g>
+
+    <!-- the clock -->
+    <g data-clock>
+      {clock.map((c, i) => (
+        <g data-tick={i}>
+          <rect x={cx(c.t0)} y="252" width={cx(c.t1) - cx(c.t0) - 1} height="14" fill={c.color} fill-opacity={i === 0 ? 1 : 0.85} />
+          <text x={cx(c.t0) + 4} y="284" font-size="10" fill="#5f5f66">{c.label}</text>
+        </g>
+      ))}
+    </g>
+    <g font-size="9.5" fill="#5f5f66" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">
+      {[0, 500, 1000, 1500].map((ms) => <text x={cx(ms)} y="300" text-anchor={ms === 0 ? "start" : ms === 1500 ? "end" : "middle"}>{ms} ms</text>)}
+    </g>
+    <line x1={cx(1400)} y1="244" x2={cx(1400)} y2="270" stroke="#2b2b30" />
+    <text data-first x={cx(1400) - 4} y="240" font-size="10.5" font-weight="600" fill="#2b2b30" text-anchor="end">first audio</text>
+    <line data-hand x1={cx(0)} y1="246" x2={cx(0)} y2="272" stroke="#a33b3b" stroke-width="2" opacity="0" />
+  </svg>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { animate, drawStroke, dur, hideStroke, setupFigure, wait } from "../../lib/figure-motion";
+
+  // Plays one request at 2x slow motion: each stage lights up for as long as it
+  // takes in the budget, shows its work, and hands a concrete artifact onwards.
+  const SLOW = 2;
+  const CX0 = 20, CW = 740, MS = 1500;
+  document.querySelectorAll<HTMLElement>("[data-cp]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const $$ = <T extends Element>(s: string) => Array.from(root.querySelectorAll<T>(s));
+    const glow = (k: string) => $<SVGRectElement>(`[data-station="${k}"] [data-glow]`);
+    const caption = $("[data-caption]");
+    const silence = $<SVGRectElement>("[data-silence]");
+    const words = $$<SVGTextElement>("[data-asr-words] text");
+    const prompt = $$<SVGTextElement>("[data-prompt]");
+    const reply = $$<SVGTextElement>("[data-reply] text");
+    const handoffs = [0, 1, 2, 3].map((i) => $<SVGGElement>(`[data-handoff="${i}"]`));
+    const ticks = $$<SVGGElement>("[data-tick]");
+    const hand = $<SVGLineElement>("[data-hand]");
+    const user = $<SVGPathElement>("[data-user]");
+    const ttsWave = $<SVGPathElement>("[data-tts-wave]");
+    const first = $<SVGTextElement>("[data-first]");
+    const ms = (m: number) => (m / 1000) * SLOW;
+    const moveHand = (to: number, m: number) =>
+      animate(hand, { transform: [hand.style.transform || "translateX(0px)", `translateX(${(to / MS) * CW}px)`] }, { duration: dur(ms(m)), ease: "linear" });
+    const light = (k: string, on: boolean) => animate(glow(k), { opacity: on ? 1 : 0 }, { duration: dur(0.2) });
+
+    setupFigure(
+      root,
+      () => {
+        ["vad", "asr", "llm", "tts"].forEach((k) => (glow(k).style.opacity = "0"));
+        silence.style.transformBox = "fill-box"; silence.style.transformOrigin = "0% 50%"; silence.style.transform = "scaleX(0)";
+        [...words, ...prompt, ...reply, ...handoffs, ...ticks, first].forEach((e) => (e.style.opacity = "0"));
+        ticks.forEach((t) => { const r = t.querySelector("rect")!; r.style.transformBox = "fill-box"; r.style.transformOrigin = "0% 50%"; });
+        hideStroke(user); hideStroke(ttsWave);
+        hand.style.opacity = "0"; hand.style.transform = "translateX(0px)";
+        caption.textContent = "you ask a question";
+      },
+      async (alive) => {
+        await drawStroke(user, 1.2, "linear");
+        if (!alive()) return;
+        hand.style.opacity = "1";
+
+        // VAD: the turn only ends after a full silence window.
+        caption.textContent = "1 · VAD waits to be sure you have finished";
+        light("vad", true);
+        ticks[0].style.opacity = "1";
+        await Promise.all([
+          animate(silence, { transform: ["scaleX(0)", "scaleX(1)"] }, { duration: dur(ms(500)), ease: "linear" }),
+          animate(ticks[0].querySelector("rect")!, { transform: ["scaleX(0)", "scaleX(1)"] }, { duration: dur(ms(500)), ease: "linear" }),
+          moveHand(500, 500),
+        ]);
+        if (!alive()) return;
+        light("vad", false);
+        animate(handoffs[0], { opacity: [0, 1] }, { duration: dur(0.25) });
+
+        // ASR: transcribe and commit.
+        caption.textContent = "2 · ASR turns the audio into a text string";
+        light("asr", true);
+        ticks[1].style.opacity = "1";
+        animate(ticks[1].querySelector("rect")!, { transform: ["scaleX(0)", "scaleX(1)"] }, { duration: dur(ms(200)), ease: "linear" });
+        moveHand(700, 200);
+        for (const w of words) { animate(w, { opacity: [0, 1] }, { duration: dur(0.12) }); await wait(ms(200) / words.length); }
+        if (!alive()) return;
+        light("asr", false);
+        animate(handoffs[1], { opacity: [0, 1] }, { duration: dur(0.25) });
+
+        // LLM: assemble the prompt, then wait for the first token.
+        caption.textContent = "3 · the LLM reads the prompt, then writes a reply token by token";
+        light("llm", true);
+        ticks[2].style.opacity = "1";
+        animate(ticks[2].querySelector("rect")!, { transform: ["scaleX(0)", "scaleX(1)"] }, { duration: dur(ms(500)), ease: "linear" });
+        moveHand(1200, 500);
+        for (const p of prompt) { animate(p, { opacity: [0, 1] }, { duration: dur(0.15) }); await wait(ms(500) / 4); }
+        await wait(ms(500) / 4);
+        if (!alive()) return;
+        for (const r of reply) { animate(r, { opacity: [0, 1], transform: ["translateY(3px)", "translateY(0px)"] }, { duration: dur(0.18) }); await wait(0.22); }
+        if (!alive()) return;
+        light("llm", false);
+        animate(handoffs[2], { opacity: [0, 1] }, { duration: dur(0.25) });
+
+        // TTS: first phrase to first audio.
+        caption.textContent = "4 · TTS synthesises the first phrase into audio";
+        light("tts", true);
+        ticks[3].style.opacity = "1";
+        animate(ticks[3].querySelector("rect")!, { transform: ["scaleX(0)", "scaleX(1)"] }, { duration: dur(ms(200)), ease: "linear" });
+        await moveHand(1400, 200);
+        if (!alive()) return;
+        animate(first, { opacity: [0, 1] }, { duration: dur(0.25) });
+        animate(handoffs[3], { opacity: [0, 1] }, { duration: dur(0.25) });
+        await drawStroke(ttsWave, 1.0, "linear");
+        light("tts", false);
+        caption.textContent = "first audio 1.4 s after you stop speaking";
+      },
+    );
+  });
+</script>

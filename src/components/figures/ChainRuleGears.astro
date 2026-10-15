@@ -1,0 +1,72 @@
+---
+// Foundations, neurons post: the chain rule as a gear train. A turns B at
+// ratio r₁, B turns C at ratio r₂, so C turns r₁ × r₂ times per turn of A.
+// Defaults 3 and 2 give 6; a jammed gear (ratio 0) stops everything after it.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-gears>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 290" role="img" aria-labelledby="cg-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="cg-title">Three linked gears: the turns multiply along the chain</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">B turns per turn of A <strong data-v="r1"></strong></span><input class="scrub" data-k="r1" type="range" min="0" max="4" step="0.5" value="3" /></label>
+    <label><span class="fig-panel__name">C turns per turn of B <strong data-v="r2"></strong></span><input class="scrub" data-k="r2" type="range" min="0" max="4" step="0.5" value="2" /></label>
+    <div><span class="fig-panel__name">Turn by hand</span><div class="fig-chips"><button type="button" class="fig-chip" data-spin>Turn A once</button></div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { tween } from "../../lib/figure-motion";
+  import { fmt } from "../../lib/tiny-net";
+  import { INK, MUTED, JADE, NEG, GOLD } from "../../lib/net-diagram";
+  const C = [[150, 140], [380, 140], [610, 140]] as const;
+  // A gear outline with 12 teeth around radius r.
+  const gear = (r: number) => {
+    let d = "";
+    for (let i = 0; i < 48; i++) { const a = (i / 48) * Math.PI * 2, rr = i % 4 < 2 ? r + 9 : r; d += `${i ? "L" : "M"}${(Math.cos(a) * rr).toFixed(1)} ${(Math.sin(a) * rr).toFixed(1)} `; }
+    return d + "Z";
+  };
+  const G = gear(58);
+  document.querySelectorAll<HTMLElement>("[data-gears]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const p: Record<string, number> = { r1: 3, r2: 2 };
+    let turnsA = 0, base = 0, spinToken = 0, watch = 0; // watch: which gear's own turn is being counted (0 = A, 1 = B)
+    const set = (k: string, v: number) => { p[k] = v; $<HTMLInputElement>(`[data-k="${k}"]`).value = String(v); };
+    async function spin(aTurns: number, w = 0) {
+      const my = ++spinToken; base = turnsA; watch = w; const from = turnsA;
+      await tween(2.4, (e) => { if (my === spinToken) { turnsA = from + aTurns * e; draw(); } });
+    }
+    const steps = () => [
+      { say: "Turn gear A exactly once and count how often gear B turns. That count is how fast B changes when A changes.", math: `∂B/∂A = ${fmt(p.r1)}`, enter: () => spin(1) },
+      { say: "Now count gear C while gear B makes one turn.", math: `∂C/∂B = ${fmt(p.r2)}`, enter: () => spin(p.r1 ? 1 / p.r1 : 0, 1) },
+      { say: "Turn A once again and count C. The ratios multiply along the chain: that is the whole chain rule.", math: `∂C/∂A = ∂C/∂B × ∂B/∂A = ${fmt(p.r2)} × ${fmt(p.r1)} = ${fmt(p.r1 * p.r2)}`, enter: () => spin(1) },
+      { say: "Jam the middle link: ratio 0. Now C does not move at all, however much A turns. A ReLU with a negative input is exactly this jammed gear.", math: `∂C/∂A = 0 × ${fmt(p.r1)} = 0`, enter: () => { set("r2", 0); spin(1); } },
+    ];
+    function draw() {
+      const tB = turnsA * p.r1, tC = tB * p.r2, ang = [turnsA, tB, tC].map((t) => t * 360);
+      const since = turnsA - base, cnt = watch === 1 ? [since, since * p.r1, since * p.r1 * p.r2] : [since, since * p.r1, since * p.r1 * p.r2];
+      let s = "";
+      [["×", p.r1, 0], ["×", p.r2, 1]].forEach(([, r, i]) => {
+        const x1 = C[i as number][0] + 72, x2 = C[(i as number) + 1][0] - 72, jam = r === 0;
+        s += `<line x1="${x1}" y1="140" x2="${x2}" y2="140" stroke="${jam ? NEG : GOLD}" stroke-width="3" stroke-dasharray="${jam ? "6 5" : ""}"/><path d="M${x2} 140 l-9 -6 v12 z" fill="${jam ? NEG : GOLD}"/>`;
+        s += `<text x="${(x1 + x2) / 2}" y="128" font-size="15" font-weight="700" text-anchor="middle" fill="${jam ? NEG : GOLD}">× ${fmt(r as number)}${jam ? " jammed" : ""}</text>`;
+      });
+      ["A", "B", "C"].forEach((nm, i) => {
+        const [x, y] = C[i], still = i === 2 && p.r1 * p.r2 === 0 || i === 1 && p.r1 === 0;
+        s += `<g transform="translate(${x} ${y}) rotate(${ang[i].toFixed(2)})"><path d="${G}" fill="${still ? "#F4E6E2" : "#E3EFE9"}" stroke="${still ? NEG : JADE}" stroke-width="2"/><circle r="12" fill="#fff" stroke="${INK}"/><line x1="0" y1="0" x2="0" y2="-48" stroke="${INK}" stroke-width="3" stroke-linecap="round"/></g>`;
+        s += `<text x="${x}" y="40" font-size="14" font-weight="700" text-anchor="middle" fill="${INK}">Gear ${nm}</text>`;
+        const watched = watch === 1 ? i >= 1 : true;
+        s += `<text x="${x}" y="246" font-size="13" text-anchor="middle" fill="${watched ? INK : "#B9C0BF"}">turned <tspan font-weight="700">${fmt(cnt[i], 2)}</tspan> ${fmt(cnt[i], 2) === "1" ? "time" : "times"}</text>`;
+      });
+      s += `<text x="380" y="276" font-size="11.5" text-anchor="middle" fill="${MUTED}">Counts reset each time you start a turn. The black hand on each gear shows its rotation.</text>`;
+      $("[data-draw]").innerHTML = s;
+      root.querySelectorAll<HTMLElement>("[data-v]").forEach((el) => (el.textContent = fmt(p[el.dataset.v!])));
+    }
+    const redraw = stepper(root, steps, draw, { delay: 3.4 });
+    root.querySelectorAll<HTMLInputElement>("[data-k]").forEach((inp) => inp.addEventListener("input", () => { p[inp.dataset.k!] = +inp.value; redraw(); }));
+    $("[data-spin]").addEventListener("click", () => spin(1));
+  });
+</script>

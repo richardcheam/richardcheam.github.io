@@ -1,0 +1,69 @@
+---
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" tabindex="0" role="region" aria-label={alt} data-sens>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 52 780 348" role="img" aria-labelledby="diagnostic-sensitivity-title diagnostic-sensitivity-desc" class="blog-diagram-svg" font-family="Inter, sans-serif">
+  <title id="diagnostic-sensitivity-title">What each measurement is sensitive to, by definition</title><desc id="diagnostic-sensitivity-desc">A property table. Total variance and mean feature std are scale-sensitive. Mean pairwise cosine and retrieval precision are direction-sensitive. Participation ratio and RankMe are sensitive to neither, because both are ratios of spectra. The probe and retrieval rows need labels. These are definitional properties of each quantity, not experimental results.</desc>
+  <g fill="#5f5f66" font-size="14">
+    <text x="30" y="92">MEASUREMENT</text>
+    <text x="420" y="92" text-anchor="middle">SCALE</text>
+    <text x="558" y="92" text-anchor="middle">DIRECTION</text>
+    <text x="690" y="92" text-anchor="middle">LABELS</text>
+  </g>
+  <line x1="30" y1="104" x2="750" y2="104" stroke="#5f5f66" />
+
+  <g font-size="15" fill="#111111">
+    <text x="30" y="132">Total variance</text>
+    <text x="30" y="166">Mean feature std</text>
+    <text x="30" y="200">Mean pairwise cosine</text>
+    <text x="30" y="234">Participation ratio</text>
+    <text x="30" y="268">RankMe</text>
+    <text x="30" y="302">Linear probe, standardized</text>
+    <text x="30" y="336">Linear probe, unstandardized</text>
+    <text x="30" y="370">Retrieval P@10</text>
+  </g>
+
+  <g data-marks font-size="15" fill="#5f5f66" text-anchor="middle">
+    <text x="420" y="132" fill="#4F5D3A">●</text><text x="558" y="132">No</text><text x="690" y="132">No</text>
+    <text x="420" y="166" fill="#4F5D3A">●</text><text x="558" y="166">No</text><text x="690" y="166">No</text>
+    <text x="420" y="200">No</text><text x="558" y="200" fill="#4F5D3A">●</text><text x="690" y="200">No</text>
+    <text x="420" y="234">No</text><text x="558" y="234">No</text><text x="690" y="234">No</text>
+    <text x="420" y="268">No</text><text x="558" y="268">No</text><text x="690" y="268">No</text>
+    <text x="420" y="302">No</text><text x="558" y="302">No</text><text x="690" y="302" fill="#4F5D3A">●</text>
+    <text x="420" y="336" fill="#4F5D3A">●</text><text x="558" y="336">No</text><text x="690" y="336" fill="#4F5D3A">●</text>
+    <text x="420" y="370">No</text><text x="558" y="370" fill="#4F5D3A">●</text><text x="690" y="370" fill="#4F5D3A">●</text>
+  </g>
+
+  <g stroke="#d5d5dc"><rect data-box x="360" y="214" width="390" height="68" fill="none" stroke="#A8503A" stroke-dasharray="4 4" /></g>
+
+  </svg>
+<button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+<p class="blog-figure-reading">Both rank measures are blind to scale and to direction because they are ratios of a spectrum</p>
+<p class="blog-figure-reading">That is the reason neither can serve as a collapse detector on its own, and why each is read beside total variance.</p>
+
+<script>
+  import { animate, dur, setupFigure, wait } from "../../lib/figure-motion";
+
+  // Read one property at a time: each column fills top to bottom, so the
+  // sensitive measures (dots) stand out against the blind ones. Then the two
+  // rank measures, blind in every column, are boxed.
+  document.querySelectorAll<HTMLElement>("[data-sens]").forEach((root) => {
+    const marks = Array.from(root.querySelectorAll<SVGTextElement>("[data-marks] text"));
+    const box = root.querySelector<SVGRectElement>("[data-box]")!;
+    const cols = [420, 558, 690].map((x) => marks.filter((m) => +m.getAttribute("x")! === x).sort((a, b) => +a.getAttribute("y")! - +b.getAttribute("y")!));
+    setupFigure(
+      root,
+      () => { marks.forEach((m) => (m.style.opacity = "0")); box.style.opacity = "0"; },
+      async (alive) => {
+        for (const col of cols) {
+          if (!alive()) return;
+          col.forEach((m, i) => animate(m, { opacity: [0, 1] }, { duration: dur(0.25), delay: dur(i * 0.07) }));
+          await wait(0.8);
+        }
+        if (!alive()) return;
+        await animate(box, { opacity: [0, 1] }, { duration: dur(0.5) });
+      },
+    );
+  });
+</script>

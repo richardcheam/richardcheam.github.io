@@ -1,0 +1,68 @@
+---
+// F5-TTS review, Figure 3: classifier-free guidance (Eq 4, p. 4) in a toy 2-D
+// flow. Two targets: A at (-2.5, 0) and B at (2.5, 0). "Told" (the text says
+// B) is the exact OT velocity towards a mixture weighted 3 to 1 in favour of
+// B; "untold" weights them equally. Guided velocity = told + alpha (told -
+// untold). 300 noise points, 16 Euler steps.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram ga" role="region" aria-label={alt} data-ga>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 360" role="img" aria-labelledby="ga-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="ga-title">Guidance pushing samples further in the direction the condition points</title>
+    <text x="20" y="20" font-size="11.5" font-weight="700" fill="#2b2b30">Where 300 noise points end up</text>
+    <rect x="20" y="30" width="360" height="260" fill="none" stroke="#ececf1" />
+    <g data-pts></g>
+    <text x="410" y="20" font-size="11.5" font-weight="700" fill="#2b2b30">One point, one step: the three arrows</text>
+    <rect x="410" y="30" width="350" height="180" fill="none" stroke="#ececf1" />
+    <g data-arr></g>
+    <text data-r1 x="410" y="236" font-size="12" fill="#2b2b30"></text>
+    <text data-r2 x="410" y="258" font-size="12" fill="#2b2b30"></text>
+    <text data-r3 x="410" y="280" font-size="12.5" font-weight="700" fill="#2b2b30"></text>
+    <text data-r4 x="20" y="316" font-size="12.5" font-weight="700" fill="#2b2b30"></text>
+    <text data-r5 x="20" y="338" font-size="11.5" fill="#5f5f66"></text>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Guidance strength α<strong data-va></strong></span><input class="scrub" data-a type="range" min="0" max="4" step="0.5" value="2" /></label>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { setupFigure, tween } from "../../lib/figure-motion";
+  import { marginal, noiseCloud, type Vec } from "../../lib/flow-math";
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-ga]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const aIn = $<HTMLInputElement>("[data-a]");
+    const mk = (g: Element, tag: string, a: Record<string, string | number>, txt?: string) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, String(a[k])); if (txt !== undefined) e.textContent = txt; g.append(e); return e; };
+    const A: Vec = [-2.5, 0], B: Vec = [2.5, 0], TOLD = [A, B, B, B], UNTOLD = [A, B];
+    const v = (t: number, x: Vec, alpha: number): Vec => { const c = marginal("ot", t, x, TOLD, 0.05).u, u = marginal("ot", t, x, UNTOLD, 0.05).u; return [c[0] + alpha * (c[0] - u[0]), c[1] + alpha * (c[1] - u[1])]; };
+    const x0s = noiseCloud(300, 3);
+    const runAll = (alpha: number) => x0s.map((x) => { let p: Vec = [x[0], x[1]]; const traj = [p]; for (let k = 0; k < 16; k++) { const d = v(k / 16, p, alpha); p = [p[0] + d[0] / 16, p[1] + d[1] / 16]; traj.push(p); } return traj; });
+    let trajs = runAll(2), prog = 16;
+    const X = (u: number) => 200 + u * 40, Y = (u: number) => 160 - u * 40;
+    function draw() {
+      const alpha = +aIn.value, gp = $("[data-pts]"); gp.replaceChildren();
+      [A, B].forEach((c, i) => { mk(gp, "circle", { cx: X(c[0]), cy: Y(c[1]), r: 18, fill: i ? "#4F5D3A" : "#b8722c", "fill-opacity": 0.12 }); mk(gp, "text", { x: X(c[0]), y: Y(c[1]) - 24, "font-size": 11, "font-weight": 700, "text-anchor": "middle", fill: i ? "#4F5D3A" : "#b8722c" }, i ? "B: what the text says" : "A"); });
+      trajs.forEach((tr) => { const p = tr[Math.min(prog, 16)]; mk(gp, "circle", { cx: X(p[0]).toFixed(1), cy: Y(p[1]).toFixed(1), r: 2.2, fill: p[0] > 0 ? "#4F5D3A" : "#b8722c", "fill-opacity": 0.75 }); });
+      // Arrow panel: one probe point at t = 0.25.
+      const ga = $("[data-arr]"); ga.replaceChildren();
+      const probe: Vec = [-0.3, 0.4], t = 0.25, c = marginal("ot", t, probe, TOLD, 0.05).u, u = marginal("ot", t, probe, UNTOLD, 0.05).u, g: Vec = [c[0] + alpha * (c[0] - u[0]), c[1] + alpha * (c[1] - u[1])];
+      const PX = 585, PY = 120, S = 26;
+      const arrow = (d: Vec, col: string, w: number) => { const x2 = PX + d[0] * S, y2 = PY - d[1] * S, ang = Math.atan2(y2 - PY, x2 - PX); mk(ga, "line", { x1: PX, y1: PY, x2, y2, stroke: col, "stroke-width": w }); mk(ga, "path", { d: `M${x2} ${y2} l${-9 * Math.cos(ang - 0.4)} ${-9 * Math.sin(ang - 0.4)} M${x2} ${y2} l${-9 * Math.cos(ang + 0.4)} ${-9 * Math.sin(ang + 0.4)}`, stroke: col, "stroke-width": w, fill: "none" }); };
+      arrow(u, "#8a8a94", 2); arrow(c, "#35588a", 2.5); arrow(g, "#a33b3b", 3);
+      mk(ga, "circle", { cx: PX, cy: PY, r: 4, fill: "#2b2b30" });
+      const f = (p: Vec) => `(${p[0].toFixed(2)}, ${p[1].toFixed(2)})`;
+      $("[data-r1]").textContent = `untold (grey) ${f(u)}   told (blue) ${f(c)}`;
+      $("[data-r2]").textContent = `told − untold = ${f([c[0] - u[0], c[1] - u[1]])}`;
+      $("[data-r3]").textContent = `guided (red) = told + ${alpha} × that = ${f(g)}`;
+      const fin = trajs.map((tr) => tr[16]), inB = fin.filter((p) => Math.hypot(p[0] - B[0], p[1] - B[1]) < 0.6).length;
+      $("[data-r4]").textContent = `α = ${alpha}: ${Math.round((100 * inB) / 300)}% of points land on B; ${Math.round((100 * fin.filter((p) => p[0] > 0).length) / 300)}% end on B's side.`;
+      $("[data-r5]").textContent = "Each guided step asks the network twice (told and untold), so it costs double (footnote 2, p. 4). F5-TTS uses α = 2.";
+      $("[data-va]").textContent = String(alpha); aIn.style.setProperty("--p", `${(alpha / 4) * 100}%`);
+    }
+    aIn.addEventListener("input", () => { trajs = runAll(+aIn.value); prog = 16; draw(); });
+    draw();
+    setupFigure(root, () => { prog = 0; draw(); }, async (alive) => { await tween(2.4, (e) => { if (alive()) { prog = Math.round(e * 16); draw(); } }); });
+  });
+</script>

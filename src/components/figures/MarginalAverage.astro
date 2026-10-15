@@ -1,0 +1,84 @@
+---
+// Figure 3: the crossroads. Two data points, -2 and +2, equally likely; OT
+// conditional paths with sigma_min = 0: p_t(x | x1) = N(t x1, (1 - t)^2),
+// u_t(x | x1) = (x1 - x) / (1 - t). The marginal velocity at x is the
+// weighted average of Eq 8, weights proportional to each blob's density at x.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram ma" role="region" aria-label={alt} data-ma>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 400" role="img" aria-labelledby="ma-title" class="blog-diagram-svg" font-family="Inter, sans-serif" style="touch-action: none">
+    <title id="ma-title">Two conditional velocities and their weighted average at one position</title>
+    <text x="40" y="22" font-size="11.5" font-weight="700" fill="#2b2b30">Where the sand is at time t: one blob per data point</text>
+    <path data-dn d="" fill="#594578" fill-opacity="0.12" stroke="#594578" stroke-width="1.5" />
+    <path data-dp d="" fill="#4F5D3A" fill-opacity="0.12" stroke="#4F5D3A" stroke-width="1.5" />
+    <line x1="40" x2="740" y1="170" y2="170" stroke="#2b2b30" />
+    <g data-ticks></g>
+    <line data-mark x1="0" x2="0" y1="30" y2="380" stroke="#a33b3b" stroke-width="1.5" stroke-dasharray="4 3" />
+    <circle data-knob cy="170" r="7" fill="#a33b3b" style="cursor: ew-resize" />
+    <text x="40" y="214" font-size="11.5" font-weight="700" fill="#2b2b30">Velocities at the red line</text>
+    <g data-arrows></g>
+    <text data-l0 x="40" y="248" font-size="12" fill="#4F5D3A"></text>
+    <text data-l1 x="40" y="288" font-size="12" fill="#594578"></text>
+    <text data-l2 x="40" y="336" font-size="12.5" font-weight="700" fill="#2b2b30"></text>
+    <text data-l3 x="40" y="356" font-size="11.5" fill="#5f5f66"></text>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Position x<strong data-vx></strong></span><input class="scrub" data-x type="range" min="-3" max="3" step="0.05" value="0.5" /></label>
+    <label><span class="fig-panel__name">Time t<strong data-vt></strong></span><input class="scrub" data-t type="range" min="0" max="0.95" step="0.01" value="0.5" /></label>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { setupFigure, tween, wait } from "../../lib/figure-motion";
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-ma]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const xs = $<HTMLInputElement>("[data-x]"), ts = $<HTMLInputElement>("[data-t]");
+    const X = (x: number) => 390 + x * 110, invX = (px: number) => (px - 390) / 110;
+    const tk = $("[data-ticks]");
+    for (let x = -3; x <= 3; x++) {
+      const l = document.createElementNS(NS, "text"); l.setAttribute("x", String(X(x))); l.setAttribute("y", "186"); l.setAttribute("font-size", "10.5"); l.setAttribute("text-anchor", "middle"); l.setAttribute("fill", "#2b2b30"); l.textContent = String(x); tk.append(l);
+    }
+    const fill = (el: HTMLInputElement) => el.style.setProperty("--p", `${((+el.value - +el.min) / (+el.max - +el.min)) * 100}%`);
+    const N = (x: number, m: number, s: number) => Math.exp(-((x - m) ** 2) / (2 * s * s)) / (s * Math.sqrt(2 * Math.PI));
+    const arrow = (y: number, v: number, col: string, w: number) => {
+      const g = document.createElementNS(NS, "g"), x0 = X(+xs.value), len = Math.max(-330, Math.min(330, v * 40)), x1 = x0 + len;
+      const l = document.createElementNS(NS, "line"); l.setAttribute("x1", String(x0)); l.setAttribute("x2", String(x1)); l.setAttribute("y1", String(y)); l.setAttribute("y2", String(y)); l.setAttribute("stroke", col); l.setAttribute("stroke-width", String(w));
+      g.append(l);
+      if (Math.abs(len) > 4) { const d = Math.sign(len), h = document.createElementNS(NS, "path"); h.setAttribute("d", `M${x1 + d * 2} ${y} l${-d * 9} -6 v12 z`); h.setAttribute("fill", col); g.append(h); }
+      $("[data-arrows]").append(g);
+    };
+    function draw(x: number, t: number) {
+      const s = 1 - t, H = 140 * 0.5 / (0.5 * N(0, 0, s) * 1.05 + 1e-9);
+      const curve = (c: number) => { let d = `M${X(-3.4)} 170`; for (let i = 0; i <= 240; i++) { const xx = -3.4 + (6.8 * i) / 240; d += `L${X(xx).toFixed(1)} ${(170 - Math.min(140, H * 0.5 * N(xx, t * c, s))).toFixed(1)}`; } return d + `L${X(3.4)} 170Z`; };
+      $("[data-dp]").setAttribute("d", curve(2)); $("[data-dn]").setAttribute("d", curve(-2));
+      const m = $("[data-mark]"); m.setAttribute("x1", String(X(x))); m.setAttribute("x2", String(X(x)));
+      $("[data-knob]").setAttribute("cx", String(X(x)));
+      const dp = N(x, 2 * t, s), dn = N(x, -2 * t, s), wp = dp / (dp + dn), wn = 1 - wp;
+      const up = (2 - x) / s, un = (-2 - x) / s, u = wp * up + wn * un;
+      $("[data-arrows]").replaceChildren();
+      arrow(262, up, "#4F5D3A", 2 + 5 * wp); arrow(302, un, "#594578", 2 + 5 * wn); arrow(372, u, "#a33b3b", 3);
+      $("[data-l0]").textContent = `Heading to +2: velocity ${up.toFixed(2)}, share of the sand here ${wp.toFixed(3)}`;
+      $("[data-l1]").textContent = `Heading to −2: velocity ${un.toFixed(2)}, share of the sand here ${wn.toFixed(3)}`;
+      $("[data-l2]").textContent = `Blend: ${wp.toFixed(3)} × ${up.toFixed(2)} + ${wn.toFixed(3)} × (${un.toFixed(2)}) = ${u.toFixed(2)}`;
+      $("[data-l3]").textContent = Math.abs(u) < 0.05 ? "Exactly in the middle the two pulls cancel: this grain stands still for a moment." : "The blend is neither destination's velocity. Drag the red line or the sliders.";
+      $("[data-vx]").textContent = x.toFixed(2); $("[data-vt]").textContent = t.toFixed(2);
+      xs.value = String(x); ts.value = String(t); fill(xs); fill(ts);
+    }
+    const now = () => draw(+xs.value, +ts.value);
+    xs.addEventListener("input", now); ts.addEventListener("input", now);
+    const svg = root.querySelector("svg")!;
+    let drag = false;
+    const pick = (e: PointerEvent) => { const r = svg.getBoundingClientRect(), px = ((e.clientX - r.left) / r.width) * 780; draw(Math.max(-3, Math.min(3, Math.round(invX(px) * 20) / 20)), +ts.value); };
+    svg.addEventListener("pointerdown", (e) => { drag = true; svg.setPointerCapture(e.pointerId); pick(e); });
+    svg.addEventListener("pointermove", (e) => { if (drag) pick(e); });
+    svg.addEventListener("pointerup", () => { drag = false; });
+    draw(0.5, 0.5);
+    setupFigure(root, () => draw(-2.5, 0.5), async (alive) => {
+      await tween(2.4, (e) => { if (alive()) draw(-2.5 + 5 * e, 0.5); });
+      await wait(0.4); if (!alive()) return;
+      await tween(1.2, (e) => { if (alive()) draw(2.5 - 2 * e, 0.5); });
+    });
+  });
+</script>

@@ -1,0 +1,49 @@
+---
+// Foundations, autoencoders post: decode nine points on the straight line
+// between the codes of two training glyphs, for the plain autoencoder (top)
+// and the VAE (bottom). Baked models in src/lib/glyphs.ts.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-interp>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 250" role="img" aria-labelledby="li-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="li-title">Two rows of decoded glyphs along a straight line between two codes, plain autoencoder and VAE</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">From</span><div class="fig-chips" data-from></div></div>
+    <div><span class="fig-panel__name">To</span><div class="fig-chips" data-to></div></div>
+    <label><span class="fig-panel__name">Position along the line t <strong data-vt></strong></span><input class="scrub" data-t type="range" min="0" max="1" step="0.01" value="0.5" /></label>
+  </div>
+</div>
+
+<script>
+  import { fmt } from "../../lib/tiny-net";
+  import { INK, MUTED, GOLD, NEG, JADE } from "../../lib/net-diagram";
+  import { txt } from "../../lib/plot";
+  import { codes, decode, nearest, glyphSvg, NAMES, type Model } from "../../lib/glyphs";
+  const SHAPES = [0, 3, 6, 9];
+  document.querySelectorAll<HTMLElement>("[data-interp]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    let A = 0, B = 6, t = 0.5;
+    const chips = (attr: string, cur: number) => SHAPES.map((i) => `<button type="button" class="fig-chip" data-${attr}="${i}" aria-pressed="${i === cur}">${NAMES[i]}</button>`).join("");
+    const lerp = (m: Model, tt: number) => { const a = codes(m)[A], b = codes(m)[B]; return [0, 1].map((j) => (1 - tt) * a[j] + tt * b[j]); };
+    function draw() {
+      let s = "";
+      (["plain", "vae"] as Model[]).forEach((m, row) => {
+        const y = 30 + row * 100;
+        s += txt(30, y + 34, m === "plain" ? "plain AE" : "VAE", `font-size="12" font-weight="700" fill="${INK}"`);
+        for (let i = 0; i <= 8; i++) { const img = decode(m, lerp(m, i / 8)), d = nearest(img).d; s += glyphSvg(img, 110 + i * 70, y, 11) + txt(110 + i * 70 + 27, y + 70, fmt(d, 1), `font-size="10" text-anchor="middle" fill="${d > 1.5 ? NEG : MUTED}"`); }
+        const tx = 110 + t * 8 * 70 + 27; s += `<line x1="${tx}" x2="${tx}" y1="${y - 6}" y2="${y + 60}" stroke="${GOLD}" stroke-width="2"/>`;
+        const z = lerp(m, t), a = codes(m)[A], b = codes(m)[B];
+        if (row === 1 || row === 0) s += txt(110, y + 88, `z(${fmt(t, 2)}) = ${fmt(1 - t, 2)} × (${fmt(a[0], 2)}, ${fmt(a[1], 2)}) + ${fmt(t, 2)} × (${fmt(b[0], 2)}, ${fmt(b[1], 2)}) = (${fmt(z[0], 2)}, ${fmt(z[1], 2)})`, `font-size="10.5" fill="${MUTED}"`);
+      });
+      s += txt(30, 14, "Numbers under each glyph: squared distance to the nearest real glyph (red above 1.5).", `font-size="10.5" fill="${MUTED}"`);
+      $("[data-draw]").innerHTML = s;
+      $("[data-from]").innerHTML = chips("a", A); $("[data-to]").innerHTML = chips("b", B);
+      $("[data-vt]").textContent = fmt(t, 2);
+    }
+    root.addEventListener("click", (e) => { const el = e.target as HTMLElement; if (el.dataset.a) { A = +el.dataset.a; draw(); } if (el.dataset.b) { B = +el.dataset.b; draw(); } });
+    $<HTMLInputElement>("[data-t]").addEventListener("input", (e) => { t = +(e.target as HTMLInputElement).value; draw(); });
+    draw();
+  });
+</script>

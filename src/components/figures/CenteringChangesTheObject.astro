@@ -1,0 +1,75 @@
+---
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" tabindex="0" role="region" aria-label={alt} data-center>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 52 780 243" role="img" aria-labelledby="centering-changes-the-object-title centering-changes-the-object-desc" class="blog-diagram-svg" font-family="Inter, sans-serif">
+  <title id="centering-changes-the-object-title">Centering changes which object a rank diagnostic measures</title><desc id="centering-changes-the-object-desc">The same cloud read two ways. Participation ratio subtracts the mean first, so it sees only the spread and is blind to where the cloud sits. RankMe works on the raw embeddings, so the mean contributes a rank-one term to the spectrum it measures. Schematic.</desc>
+  <g stroke="#d5d5dc"><line x1="60" y1="200" x2="330" y2="200" /><line x1="90" y1="86" x2="90" y2="212" /></g>
+  <circle cx="90" cy="200" r="3" fill="#5f5f66" />
+  <text x="60" y="222" fill="#5f5f66" font-size="14">origin</text>
+  <g fill="#4F5D3A">
+    <circle cx="232" cy="120" r="4" /><circle cx="252" cy="132" r="4" /><circle cx="214" cy="134" r="4" />
+    <circle cx="238" cy="146" r="4" /><circle cx="262" cy="118" r="4" /><circle cx="220" cy="112" r="4" />
+    <circle cx="246" cy="104" r="4" />
+  </g>
+  <line data-mu x1="90" y1="200" x2="237.7" y2="123.7" stroke="#A8503A" stroke-width="2" stroke-dasharray="5 4" />
+  <text data-mul x="124" y="176" fill="#A8503A" font-size="14">mean μ</text>
+  <text x="60" y="258" fill="#111111" font-size="17">RankMe · raw embeddings</text>
+  <text x="60" y="280" fill="#5f5f66" font-size="14">μ contributes to the spectrum</text>
+
+  <line x1="390" y1="78" x2="390" y2="290" stroke="#d5d5dc" />
+
+  <g stroke="#d5d5dc"><line x1="450" y1="200" x2="720" y2="200" /><line x1="585" y1="86" x2="585" y2="212" /></g>
+  <circle cx="585" cy="200" r="3" fill="#5f5f66" />
+  <g data-right fill="#4F5D3A">
+    <circle cx="579.3" cy="196.3" r="4" /><circle cx="599.3" cy="208.3" r="4" /><circle cx="561.3" cy="210.3" r="4" /><circle cx="585.3" cy="222.3" r="4" /><circle cx="609.3" cy="194.3" r="4" /><circle cx="567.3" cy="188.3" r="4" /><circle cx="593.3" cy="180.3" r="4" />
+  </g>
+  <text x="450" y="258" fill="#111111" font-size="17">Participation ratio · centered</text>
+  <text x="450" y="280" fill="#5f5f66" font-size="14">μ subtracted, then measured</text>
+  <line data-mu2 x1="585" y1="200" x2="732.7" y2="123.7" stroke="#A8503A" stroke-width="2" stroke-dasharray="5 4" opacity="0" />
+  <text data-mul2 x="619" y="176" fill="#A8503A" font-size="14" opacity="0">− μ</text>
+
+  </svg>
+<button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+<p class="blog-figure-reading">Same cloud, same shape, different reading. Translation is invisible to one and not the other.</p>
+
+<script>
+  import { animate, drawStroke, dur, hideStroke, setupFigure, wait } from "../../lib/figure-motion";
+
+  // Centering, performed: the right panel starts with the raw cloud (same place
+  // relative to its origin as on the left), draws its mean μ, then slides the
+  // whole cloud by −μ onto the origin. Shape is unchanged; only position moves.
+  document.querySelectorAll<HTMLElement>("[data-center]").forEach((root) => {
+    const $ = <T extends Element>(q: string) => root.querySelector<T>(q)!;
+    const right = $<SVGGElement>("[data-right]");
+    const mu = $<SVGLineElement>("[data-mu]"), mul = $<SVGTextElement>("[data-mul]");
+    const mu2 = $<SVGLineElement>("[data-mu2]"), mul2 = $<SVGTextElement>("[data-mul2]");
+    const shift = "translate(147.7px, -76.3px)"; // μ in the panel's coordinates
+    setupFigure(
+      root,
+      () => {
+        hideStroke(mu); mul.style.opacity = "0";
+        right.style.transform = shift;
+        mu2.style.opacity = "0"; mul2.style.opacity = "0";
+      },
+      async (alive) => {
+        await wait(0.4);
+        await drawStroke(mu, 0.8);
+        animate(mul, { opacity: [0, 1] }, { duration: dur(0.3) });
+        await wait(0.4);
+        if (!alive()) return;
+        mu2.style.opacity = "1"; hideStroke(mu2);
+        await drawStroke(mu2, 0.6);
+        animate(mul2, { opacity: [0, 1] }, { duration: dur(0.3) });
+        await wait(0.35);
+        if (!alive()) return;
+        // Subtract μ: the cloud slides to the origin while the μ line retracts.
+        animate(mu2, { strokeDashoffset: [0, 1] }, { duration: dur(1.1), ease: [0.65, 0, 0.35, 1] });
+        await animate(right, { transform: [shift, "translate(0px, 0px)"] }, { duration: dur(1.1), ease: [0.65, 0, 0.35, 1] });
+        animate(mul2, { opacity: [1, 0] }, { duration: dur(0.3) });
+        mu.removeAttribute("pathLength"); mu.style.strokeDasharray = ""; mu.style.strokeDashoffset = "";
+      },
+    );
+  });
+</script>

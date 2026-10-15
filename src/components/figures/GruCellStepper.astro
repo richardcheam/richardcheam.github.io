@@ -1,0 +1,60 @@
+---
+// Foundations, LSTM and GRU post: a scalar GRU in Chung's form
+// h = (1 − z) h_prev + z h̃ over inputs 1, 0, 0, 0 with w_z = 4, b_z = −2,
+// reset weights 0, w_h = 2, u_h = 1: h = 0.8491, 0.7957, 0.7459, 0.6995.
+// Reset bias −4 gives h2 = 0.7497.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-grucell>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 270" role="img" aria-labelledby="gr-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="gr-title">A GRU blending its old memory with a new candidate, one operation at a time</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Update bias b_z <strong data-v="bz"></strong></span><input class="scrub" data-k="bz" type="range" min="-4" max="4" step="0.5" value="-2" /></label>
+    <label><span class="fig-panel__name">Reset bias b_r <strong data-v="br"></strong></span><input class="scrub" data-k="br" type="range" min="-4" max="4" step="0.5" value="0" /></label>
+    <div><span class="fig-panel__name">Naming</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-nm="chung" aria-pressed="true">Chung: z = share written</button>
+      <button type="button" class="fig-chip" data-nm="cho" aria-pressed="false">Cho, PyTorch: z = share kept</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt, par } from "../../lib/tiny-net";
+  import { INK, MUTED, GOLD, TINT, JADE } from "../../lib/net-diagram";
+  import { txt } from "../../lib/plot";
+  import { gruForward } from "../../lib/lstm";
+  document.querySelectorAll<HTMLElement>("[data-grucell]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const p: Record<string, number> = { bz: -2, br: 0 };
+    let cho = false;
+    const run = () => gruForward({ wz: 4, uz: 0, bz: p.bz, wr: 0, ur: 0, br: p.br, wh: 2, uh: 1, bh: 0 }, [1, 0, 0, 0]);
+    const f4 = (v: number) => fmt(v, 4);
+    const zl = (z: number) => (cho ? `z' = 1 − z = ${f4(1 - z)} (share kept)` : `z = ${f4(z)} (share written)`);
+    const steps = () => run().flatMap((r, t) => [
+      { say: `Step ${t + 1}, update gate: how much new content replaces the old memory.`, math: `z = σ(4 × ${par(r.x)} + ${par(p.bz)}) = ${f4(r.z)}   → ${zl(r.z)}` },
+      { say: "Reset gate: how much of the old memory the candidate may look at.", math: `r = σ(${par(p.br)}) = ${f4(r.r)},   r × h_prev = ${f4(r.r)} × ${f4(r.hPrev)} = ${f4(r.rh)}` },
+      { say: "Draft the candidate from the input and the reset memory.", math: `h̃ = tanh(2 × ${par(r.x)} + 1 × ${f4(r.rh)}) = ${f4(r.cand)}` },
+      { say: "Blend: keep part of the old memory, write part of the candidate. The two shares always add up to 1.", math: `h = (1 − ${f4(r.z)}) × ${f4(r.hPrev)} + ${f4(r.z)} × ${f4(r.cand)} = ${f4(r.kept)} + ${f4(r.written)} = ${f4(r.h)}` },
+    ]);
+    function draw(k: number) {
+      const rs = run(), t0 = k < 0 ? 0 : Math.floor(k / 4), sub = k < 0 ? -1 : k % 4, r = rs[t0];
+      const box = (x: number, y: number, label: string, val: string, on: boolean, done: boolean) => `<rect x="${x}" y="${y}" width="120" height="46" rx="7" fill="${on ? TINT : "#fff"}" stroke="${on ? JADE : INK}" stroke-width="${on ? 2.5 : 1.2}"/>` + txt(x + 60, y + 18, label, `font-size="11" text-anchor="middle" fill="${MUTED}"`) + txt(x + 60, y + 37, done ? val : "?", `font-size="13" font-weight="700" text-anchor="middle" fill="${done ? INK : "#B9C0BF"}"`);
+      let s = txt(30, 22, `The GRU at step ${t0 + 1} (input ${fmt(r.x)}, memory coming in ${f4(r.hPrev)})`, `font-size="12" font-weight="700" fill="${INK}"`);
+      s += box(30, 40, cho ? "update z' (kept)" : "update z (written)", f4(cho ? 1 - r.z : r.z), sub === 0, sub >= 0) + box(170, 40, "reset r × h_prev", f4(r.rh), sub === 1, sub >= 1) + box(310, 40, "candidate h̃", f4(r.cand), sub === 2, sub >= 2);
+      // Blend shown as two stacked shares.
+      if (sub >= 3) { s += `<rect x="470" y="40" width="${r.kept * 200}" height="24" fill="${GOLD}" fill-opacity="0.8"/><rect x="${470 + r.kept * 200}" y="40" width="${Math.max(0, r.written * 200)}" height="24" fill="${JADE}"/>` + txt(470, 84, `kept ${f4(r.kept)} + written ${f4(r.written)} = ${f4(r.h)}`, `font-size="12" font-weight="700" fill="${INK}"`); }
+      else s += txt(470, 58, "blend: (1 − z) × old + z × new", `font-size="11.5" fill="${MUTED}"`);
+      s += txt(30, 140, "memory h over the four steps", `font-size="11.5" font-weight="700" fill="${INK}"`);
+      rs.forEach((q, t) => { const done = t < t0 || (t === t0 && sub === 3), x = 60 + t * 170; s += `<rect x="${x}" y="${240 - q.h * 80}" width="60" height="${q.h * 80}" fill="${JADE}" fill-opacity="${done ? 0.85 : 0.15}"/>` + txt(x + 30, 258, done ? f4(q.h) : `step ${t + 1}`, `font-size="11" text-anchor="middle" fill="${done ? INK : MUTED}"`); });
+      $("[data-draw]").innerHTML = s;
+      root.querySelectorAll<HTMLElement>("[data-v]").forEach((el) => (el.textContent = fmt(p[el.dataset.v!], 1)));
+    }
+    const redraw = stepper(root, steps, draw, { delay: 1.4 });
+    root.querySelectorAll<HTMLInputElement>("[data-k]").forEach((inp) => inp.addEventListener("input", () => { p[inp.dataset.k!] = +inp.value; redraw(); }));
+    root.querySelectorAll<HTMLButtonElement>("[data-nm]").forEach((b) => b.addEventListener("click", () => { cho = b.dataset.nm === "cho"; root.querySelectorAll("[data-nm]").forEach((o) => o.setAttribute("aria-pressed", String(o === b))); redraw(); }));
+  });
+</script>

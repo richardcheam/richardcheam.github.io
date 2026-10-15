@@ -1,0 +1,50 @@
+---
+// Foundations, GANs post: the bilinear game f(x, y) = x y, x minimising and
+// y maximising, step 0.5 from (1, 1). Simultaneous updates spiral out
+// (distance × 1.118 per step, 2.471 after five); alternating updates orbit.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-spiral>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 300" role="img" aria-labelledby="bs-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="bs-title">Two players updating at once spiral away from the answer; taking turns, they circle it</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Updates</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-m="s" aria-pressed="true">Simultaneous</button>
+      <button type="button" class="fig-chip" data-m="a" aria-pressed="false">Alternating</button>
+    </div></div>
+    <label><span class="fig-panel__name">Step size η <strong data-ve></strong></span><input class="scrub" data-e type="range" min="0.1" max="1" step="0.05" value="0.5" /></label>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt, par } from "../../lib/tiny-net";
+  import { INK, MUTED, GOLD, NEG, JADE } from "../../lib/net-diagram";
+  import { frame, txt, arrow } from "../../lib/plot";
+  const N = 12;
+  document.querySelectorAll<HTMLElement>("[data-spiral]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    let sim = true, eta = 0.5;
+    const path = () => { const ps = [[1, 1]]; for (let i = 0; i < N; i++) { const [x, y] = ps[i], nx = x - eta * y, ny = y + eta * (sim ? x : nx); ps.push([nx, ny]); } return ps; };
+    const f4 = (v: number) => fmt(v, 4);
+    const steps = () => { const ps = path(); return ps.slice(1).map(([nx, ny], i) => { const [x, y] = ps[i]; return { say: i === 0 ? (sim ? "Both players move at once, each using the other's old value. x steps against its gradient y; y steps along its gradient x." : "Taking turns: x moves first, then y uses x's new value.") : `Step ${i + 1}.`, math: `x = ${f4(x)} − ${fmt(eta)} × ${par(y, 4)} = ${f4(nx)};  y = ${f4(y)} + ${fmt(eta)} × ${par(sim ? x : nx, 4)} = ${f4(ny)}\ndistance from the answer (0, 0): ${f4(Math.hypot(nx, ny))}` }; }); };
+    function draw(k: number) {
+      const ps = path().slice(0, k + 2), lim = Math.max(2, ...ps.flat().map(Math.abs)) * 1.1, F = frame({ l: 40, t: 20, w: 260, h: 260, x0: -lim, x1: lim, y0: -lim, y1: lim });
+      let s = F.grid([0], [0], 0) + `<circle cx="${F.X(0)}" cy="${F.Y(0)}" r="5" fill="${JADE}"/>` + txt(F.X(0) + 8, F.Y(0) + 14, "answer", `font-size="10.5" fill="${JADE}"`);
+      ps.forEach((p, i) => { if (i) s += arrow(F.X(ps[i - 1][0]), F.Y(ps[i - 1][1]), F.X(p[0]), F.Y(p[1]), i === ps.length - 1 ? GOLD : MUTED, i === ps.length - 1 ? 2.5 : 1.2); });
+      s += `<circle cx="${F.X(1)}" cy="${F.Y(1)}" r="4" fill="${INK}"/>`;
+      const d = ps.map((p) => Math.hypot(...p));
+      s += txt(340, 40, sim ? "simultaneous updates" : "alternating updates", `font-size="13" font-weight="700" fill="${INK}"`);
+      d.forEach((v, i) => (s += txt(340 + Math.floor(i / 7) * 200, 70 + (i % 7) * 26, `step ${i}: (${fmt(ps[i][0], 3)}, ${fmt(ps[i][1], 3)}), distance ${fmt(v, 3)}`, `font-size="11.5" fill="${i === d.length - 1 ? INK : MUTED}" font-weight="${i === d.length - 1 ? 700 : 400}"`)));
+      s += txt(340, 270, sim ? `each step multiplies the distance by √(1 + η²) = ${fmt(Math.sqrt(1 + eta * eta), 3)}: an outward spiral` : "bounded: it circles the answer without arriving", `font-size="11.5" fill="${sim ? NEG : MUTED}"`);
+      $("[data-draw]").innerHTML = s;
+      $("[data-ve]").textContent = fmt(eta, 2);
+    }
+    const redraw = stepper(root, steps, draw, { delay: 1.1 });
+    $<HTMLInputElement>("[data-e]").addEventListener("input", (e) => { eta = +(e.target as HTMLInputElement).value; redraw(); });
+    root.querySelectorAll<HTMLButtonElement>("[data-m]").forEach((b) => b.addEventListener("click", () => { sim = b.dataset.m === "s"; root.querySelectorAll("[data-m]").forEach((o) => o.setAttribute("aria-pressed", String(o === b))); redraw(); }));
+  });
+</script>

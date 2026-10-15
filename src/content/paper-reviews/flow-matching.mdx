@@ -1,0 +1,487 @@
+---
+title: "Flow Matching: Teaching Noise Where to Go"
+published: true
+date: 2026-10-14
+question: "Can we train a continuous normalizing flow without simulating it, and does the path we pick from noise to data matter?"
+excerpt: "Flow matching trains a network to output a velocity by plain regression, one random time and one data point at a time. With straight-line optimal transport paths it beats diffusion losses on the same U-Net in likelihood, FID and solver steps on ImageNet."
+type: paper
+topic: [generative, training]
+tags: [Flow matching, CNF, Optimal transport, Diffusion, Meta AI]
+org: "Meta AI (FAIR) · Weizmann Institute of Science"
+authors: "Yaron Lipman, Ricky T. Q. Chen, Heli Ben-Hamu, Maximilian Nickel, Matt Le"
+source_url: https://arxiv.org/abs/2210.02747
+source_label: "Read the paper (ICLR 2023)"
+source_date: 2022-10-06
+math: true
+tldr:
+  - "**Authors' claim:** Flow Matching is a simulation-free way to train continuous normalizing flows by regressing a vector field, and it works with any Gaussian path, including diffusion paths and straight optimal transport paths (Abstract, p. 1)."
+  - "**The trick:** the true target velocity is intractable, but a per-example target built from one data point has the same gradient (Theorem 2, p. 4)."
+  - "**Evidence:** on the same U-Net, FM with OT paths gets the best NLL, FID and solver cost in every column of Table 1, e.g. ImageNet 64×64 FID **14.45** at **138** function evaluations against **19.74** at **441** for score matching (Table 1, p. 8)."
+  - "**My reading:** the lasting idea is not the images but the recipe, a two-line loss (Eq 23, p. 6) that speech models such as Voicebox, F5-TTS and the flow head in Pocket TTS later adopted. The theory guarantees straight paths per example, not straight paths overall."
+---
+import SandPush from "../../components/figures/SandPush.astro";
+import EulerTrip from "../../components/figures/EulerTrip.astro";
+import MarginalAverage from "../../components/figures/MarginalAverage.astro";
+import CfmGradient from "../../components/figures/CfmGradient.astro";
+import GaussianPathLab from "../../components/figures/GaussianPathLab.astro";
+import DiffusionVsOt from "../../components/figures/DiffusionVsOt.astro";
+import TrainingLoop2D from "../../components/figures/TrainingLoop2D.astro";
+import StepBudget from "../../components/figures/StepBudget.astro";
+import ResultsBoard from "../../components/figures/ResultsBoard.astro";
+
+## The question and why it matters
+
+Picture a sandbox. On the left is a smooth, round mound of sand: that is **noise**, easy to make, every grain placed at random from a bell curve. On the right is a sandcastle: that is **data**, the shape we actually want (a photo, a spoken word, a mel spectrogram). A generative model is a set of instructions for pushing every grain of the mound, a little at a time, until the mound has become the castle. If the instructions are good, you can make a brand-new castle any time you like: pour a fresh random mound and follow the instructions.
+
+The paper's question is how to *learn* those instructions cheaply. The family of models it works with is called **continuous normalizing flows (CNFs)**: models that describe the pushing as a smooth velocity at every place and every moment (Sec 2, p. 2). The authors say CNFs can model any path from noise to data, but that, apart from diffusion, "no scalable CNF training algorithms are known" (Sec 1, p. 1). Training them by maximum likelihood needs "expensive numerical ODE simulations" (Sec 1, p. 1), and earlier simulation-free methods had "intractable integrals" or "biased gradients" (Sec 1, p. 1). We come back to what an ODE is in [Continuous normalizing flows in plain words](#continuous-normalizing-flows-in-plain-words).
+
+Their answer, **Flow Matching (FM)**, is a regression: show the network a point and a time, tell it the velocity it should have there, and penalise the squared error (Sec 3, p. 3). The hard part is that nobody knows that velocity. The paper's central result is that you can use a much simpler per-example velocity instead and get the same gradient (Theorem 2, p. 4). We come back to it in [Conditional flow matching](#conditional-flow-matching).
+
+Why I read it: the [Pocket TTS post](/blog/pocket-tts-calm-explained/) already used flow matching in Part 4 as a tool: straight line from noise to target, regress the velocity, take a few Euler steps. That post stated the recipe. This review opens the box: why the regression target is allowed, which theorem makes it legal, what "optimal transport" buys over diffusion, and what the evidence in the paper actually measures. Voicebox and F5-TTS, two of the speech models I care about, are built on this paper's loss (outside the paper; see [My interpretation](#my-interpretation)).
+
+<figure class="blog-figure blog-figure--wide">
+  <SandPush alt="400 dots drawn from a bell curve flow, under a velocity field, into eight clusters on a circle. A time slider scrubs from t = 0 to 1; dots are coloured by the cluster they reach once they arrive." />
+  <figcaption><strong>Figure 1. Noise into data.</strong> Each grain follows the exact velocity field for straight optimal transport paths (Eq 8 with Eq 21, σ<sub>min</sub> = 0.01), solved with 200 RK4 steps. The eight-point ring is a toy dataset, not the paper's.</figcaption>
+</figure>
+
+
+## Continuous normalizing flows in plain words
+
+### A velocity at every place and moment
+
+Think of a car trip from 0 to 1 hour. At every moment the dashboard shows a velocity. If you know the velocity at every moment, and where you started, you know where you end up. A **vector field** is the same idea for every grain of sand at once: at time $t$ and position $x$ it gives a velocity $v_t(x)$ (Sec 2, p. 2). Following those velocities is a **flow** $\phi_t$, defined by an **ordinary differential equation (ODE)**, an equation that says how fast something changes (Eq 1 and 2, p. 2):
+
+$$
+\frac{d}{dt}\phi_t(x) = v_t(\phi_t(x)), \qquad \phi_0(x) = x
+$$
+
+- $t$ is time, running from $0$ (noise) to $1$ (data).
+- $x$ is a starting point, one grain of sand. In $d$ dimensions it is a list of $d$ numbers; for a 64×64 colour image $d$ is 12,288 (toy arithmetic: 64 × 64 × 3).
+- $\phi_t(x)$ is where that grain is at time $t$. The flow is the whole family of these positions.
+- $v_t(\cdot)$ is the vector field, the velocity at time $t$ at any position.
+- $\frac{d}{dt}\phi_t(x)$ is the grain's velocity right now.
+- $\phi_0(x) = x$ says every grain starts where it was poured.
+
+Intuition: "your speed right now is whatever the map says at the spot you are standing on, at this moment". It is a car trip where the speed limit sign changes with place and time and you always drive exactly at it.
+
+Toy example (1-D): let $v_t(x) = 3$ everywhere and start at $x = -1$. The grain moves at constant speed 3, so $\phi_t(-1) = -1 + 3t$. At $t = 0.5$ it is at $0.5$; at $t = 1$ it is at $2$. Check: $\frac{d}{dt}(-1+3t) = 3 = v_t$. ✓
+
+A **CNF** is this flow with the vector field given by a neural network $v_t(x;\theta)$, where $\theta$ are its learnable weights (Chen et al. 2018, cited in Sec 2, p. 2).
+
+### Sampling means solving the ODE
+
+To make a sample you draw noise $x_0$ and integrate the ODE from $t=0$ to $t=1$ (Sec 6.2, p. 8). Computers do this in steps. The simplest scheme, **Euler's method**, says: look at the velocity, move a little in that direction, repeat. With $N$ steps of size $h = 1/N$:
+
+$$
+x_{k+1} = x_k + h\, v_{t_k}(x_k), \qquad t_k = k h
+$$
+
+- $x_k$ is the position after $k$ steps.
+- $h$ is the step size in time.
+- $v_{t_k}(x_k)$ is the network's velocity at the current spot and time; each evaluation is one **function evaluation**.
+- The **number of function evaluations (NFE)** is how many times we call the network. It is the paper's measure of sampling cost (Sec 6.1, p. 8).
+
+Toy example: $v = 3$, $x_0 = -1$, $N = 2$, so $h = 0.5$. Step 1: $-1 + 0.5 \times 3 = 0.5$. Step 2: $0.5 + 0.5 \times 3 = 2$. Exact, because the velocity never changed. If the velocity bends along the way, a few big steps miss the turn. That single fact is why straight paths matter, and we come back to it in [Optimal transport: straight lines, constant speed](#optimal-transport-straight-lines-constant-speed).
+
+The paper's own numbers do not use Euler for the headline: they use **dopri5**, an adaptive solver that picks its own step sizes, at tolerances 1e-5 (Sec 6, p. 7). NFE in Table 1 is "the averaged number of function evaluations required for the adaptive solver to reach its prespecified numerical tolerance, averaged over 50k samples" (Sec 6.1, p. 8). Fixed-step solvers (Euler, midpoint, RK4) appear in Figure 7 (p. 9).
+
+<figure class="blog-figure blog-figure--wide">
+  <EulerTrip alt="Position on a road across, time down. A green curve is the exact trip; a purple zigzag is Euler's method with N steps. Readouts show network calls, the exact end, the Euler end and the miss, for three velocity fields." />
+  <figcaption><strong>Figure 2. Euler on three roads.</strong> Constant speed is exact at any N. The two-point field (OT, data at −2 and +2) bends near the middle. The diffusion (VP) path for one data point uses the paper's schedule (App E.1, p. 20) and saves its motion for the end, so few steps miss badly. All three are toys.</figcaption>
+</figure>
+
+### How a flow reshapes the sand
+
+As grains move, the density of the sand changes: where grains bunch up, density rises. The paper writes this as a **push-forward** (Eq 3 and 4, p. 2):
+
+$$
+p_t = [\phi_t]_* p_0, \qquad [\phi_t]_* p_0(x) = p_0(\phi_t^{-1}(x)) \left| \det \frac{\partial \phi_t^{-1}}{\partial x}(x) \right|
+$$
+
+- $p_0$ is the starting density (noise), $p_t$ the density at time $t$.
+- $[\phi_t]_*$ reads "push forward by $\phi_t$": move every grain with the flow and see what density you get.
+- $\phi_t^{-1}(x)$ asks "which starting grain ends up at $x$?"
+- $\det \frac{\partial \phi_t^{-1}}{\partial x}$ is the stretch factor: how much a tiny patch of space got squeezed or stretched. Squeeze sand into half the room and its density doubles.
+
+Toy example (1-D): $p_0$ is the standard normal and the map is $\phi(x) = 2x + 1$. Which grain lands at $y = 1$? $\phi^{-1}(1) = 0$. The stretch factor of $\phi^{-1}(y) = (y-1)/2$ is $1/2$. So $p(1) = p_0(0) \times \tfrac12 = 0.3989 \times 0.5 \approx 0.199$. The bell got twice as wide and half as tall. ✓
+
+A vector field **generates** a probability path $p_t$ if its flow produces exactly that path (Sec 2, p. 2).
+
+### Why maximum likelihood is slow
+
+To score how likely a real image is under a CNF, you run the ODE and also integrate the **divergence** of the vector field (how much it spreads sand out) along the whole trajectory (App C, Eq 27, p. 15):
+
+$$
+\log p_1(\phi_1(x)) - \log p_0(\phi_0(x)) = -\int_0^1 \operatorname{div}\big(v_t(\phi_t(x))\big)\, dt
+$$
+
+- $\log p_1(\phi_1(x))$ is the log-density of the endpoint under the model; $\log p_0(x)$ that of the starting noise.
+- $\operatorname{div}$ adds up, over every coordinate, how fast the velocity grows in that coordinate's direction. Positive means "spreading out", which lowers density.
+- The integral sums that spreading along the whole trip.
+
+Toy example (1-D): $v_t(x) = x$ (each grain moves away from 0 at a speed equal to its position). Divergence is $\frac{d}{dx}x = 1$ at every point, so the right-hand side is $-\int_0^1 1\,dt = -1$. Log-density drops by 1: the sand spreads to $e \approx 2.72$ times its width. Check: the flow is $\phi_t(x) = x e^t$, which stretches by $e$ at $t=1$. ✓
+
+Training by maximum likelihood means doing this whole simulation, forward and backward, for every training example, every step. The related-work section names it: "expensive ODE simulations for the forward and backward propagation, resulting in high time complexity due to the sequential nature of ODE simulations" (Sec 5, p. 6). Flow matching never runs the ODE during training. It only runs it to sample, and to compute NLL at evaluation time.
+
+
+## Probability paths and the flow matching loss
+
+### A movie of densities
+
+Instead of a single endpoint, flow matching thinks about the whole movie: a **probability path** $p_t(x)$, one density per time $t$, with $p_0$ the standard normal and $p_1$ close to the data distribution $q$ (Sec 3, p. 2). If we knew a vector field $u_t$ that generates this movie, we could just teach the network to copy it. That is the **Flow Matching (FM) objective** (Eq 5, p. 3):
+
+$$
+\mathcal{L}_{\text{FM}}(\theta) = \mathbb{E}_{t,\, p_t(x)} \big\| v_t(x) - u_t(x) \big\|^2
+$$
+
+- $\theta$ are the network weights; $v_t(x)$ is the network's velocity.
+- $u_t(x)$ is the target velocity that generates the chosen path.
+- $t \sim \mathcal{U}[0,1]$: pick a time uniformly at random.
+- $x \sim p_t(x)$: pick a point from the density at that time.
+- $\mathbb{E}$ means "average over many such picks", and $\|\cdot\|^2$ is squared distance.
+
+Intuition: a driving instructor stands at random spots at random moments and says "here, now, you should be going this fast in this direction"; the student is graded on the squared miss. "Upon reaching zero loss, the learned CNF model will generate $p_t(x)$" (Sec 3, p. 3).
+
+Toy example: at some $(t, x)$ the target is $u = 3$ and the network says $v = 1$. Loss contribution is $(1-3)^2 = 4$. If $v$ moves to $2.5$, it drops to $0.25$.
+
+The catch, in the authors' words: FM "is intractable to use in practice since we have no prior knowledge for what an appropriate $p_t$ and $u_t$ are" (Sec 3, p. 3). We know data only through samples, so we cannot write down $u_t$ for the whole sandcastle.
+
+### Build the big path out of tiny ones
+
+The way out is to build the path one data point at a time (Sec 3.1, p. 3). For a single data point $x_1$, design a **conditional probability path** $p_t(x \mid x_1)$ that starts as noise and ends as a tiny blob around $x_1$. Then mix all those tiny paths together, weighting each by how common its $x_1$ is (Eq 6, p. 3):
+
+$$
+p_t(x) = \int p_t(x \mid x_1)\, q(x_1)\, dx_1
+$$
+
+- $x_1$ is one real data example (one sandcastle, or one grain's destination).
+- $q(x_1)$ is the data distribution, known only through samples.
+- $p_t(x \mid x_1)$ is "where the sand is at time $t$, if we were only building towards $x_1$".
+- The integral is a weighted average over all data points; with a finite dataset it is a plain average.
+
+At $t = 1$ each tiny path is a blob $\mathcal{N}(x \mid x_1, \sigma^2 I)$ with small $\sigma$, so the mixture is close to the data (Eq 7, p. 3).
+
+The matching velocity is an average too, but a *weighted* one (Eq 8, p. 3):
+
+$$
+u_t(x) = \int u_t(x \mid x_1)\, \frac{p_t(x \mid x_1)\, q(x_1)}{p_t(x)}\, dx_1
+$$
+
+- $u_t(x \mid x_1)$ is the **conditional vector field**: the velocity that would build only towards $x_1$.
+- The fraction is "how much of the sand at $x$, at time $t$, is on its way to $x_1$". These weights sum to 1.
+- $u_t(x)$ is the **marginal vector field**: the velocity of the real mixed crowd.
+
+Intuition: at a crossroads, cars heading to different towns pass the same spot. The traffic's average velocity there is each destination's velocity weighted by how many of the cars at that spot are heading there.
+
+**Theorem 1** says this weighted average really does generate the mixed path (Theorem 1, p. 3; proof via the continuity equation, App A and B, pp. 14 to 15).
+
+Toy example (mine, 1-D): the data is two points, $x_1 = -2$ and $x_1 = +2$, equally likely. Use the straight path from [Gaussian conditional paths](#gaussian-conditional-paths) with $\sigma_{\min} = 0$, so $p_t(x \mid x_1) = \mathcal{N}(x \mid t x_1, (1-t)^2)$ and $u_t(x \mid x_1) = (x_1 - x)/(1-t)$. Take $t = 0.5$:
+
+- At $x = 0$: both blobs (centred at $-1$ and $+1$, std $0.5$) are equally dense there, weights $0.5$ and $0.5$. Conditional velocities are $(2-0)/0.5 = 4$ and $(-2-0)/0.5 = -4$. Marginal velocity: $0.5 \times 4 + 0.5 \times (-4) = 0$. A grain exactly in the middle stands still at this moment.
+- At $x = 0.5$: the densities are proportional to $e^{-(0.5-1)^2/(2 \times 0.25)} = e^{-0.5} = 0.607$ and $e^{-(0.5+1)^2/0.5} = e^{-4.5} = 0.011$. Normalised weights $0.982$ and $0.018$. Conditional velocities $3$ and $-5$. Marginal: $0.982 \times 3 + 0.018 \times (-5) \approx 2.86$.
+
+The marginal field is not 3 and not -5: it is a blend, and the blend changes with position. That blending is why the overall paths bend even when every tiny path is straight.
+
+<figure class="blog-figure blog-figure--wide">
+  <MarginalAverage alt="Two bell curves, one per data point at −2 and +2, at time t. A red line marks a position x. Below, an arrow for each data point's velocity, thick in proportion to its share of the sand there, and a red arrow for their weighted average." />
+  <figcaption><strong>Figure 3. The crossroads.</strong> Eq 8 computed live with σ<sub>min</sub> = 0. At t = 0.5, x = 0 the blend is 0; at x = 0.5 it is 2.86. Drag the red line, or use the sliders.</figcaption>
+</figure>
+
+The continuity equation, used in the proofs (App B, Eq 26, p. 15), is the bookkeeping rule "sand is never created or destroyed":
+
+$$
+\frac{d}{dt} p_t(x) + \operatorname{div}\big(p_t(x)\, v_t(x)\big) = 0
+$$
+
+- $\frac{d}{dt}p_t(x)$ is how fast density at $x$ changes.
+- $p_t(x)\, v_t(x)$ is the **flux**, how much sand flows past $x$ per unit time.
+- $\operatorname{div}$ of the flux is net outflow. Density goes down exactly as fast as sand leaves.
+
+Toy example: a bell curve sliding right at speed $c$: $p_t(x) = \mathcal{N}(x \mid ct, 1)$, $v = c$. Then $\frac{d}{dt}p = p\,(x-ct)\,c$ and $\frac{d}{dx}(p\,c) = -c\,(x-ct)\,p$. They sum to 0. ✓
+
+
+## Conditional flow matching
+
+Equation 8 still has an integral over the whole dataset in it, so $u_t(x)$ is still out of reach, and so is an unbiased estimate of the FM loss (Sec 3.2, p. 4). The fix is to drop the averaging altogether and regress onto the *conditional* velocity of one randomly chosen data point. That is the **Conditional Flow Matching (CFM)** objective (Eq 9, p. 4):
+
+$$
+\mathcal{L}_{\text{CFM}}(\theta) = \mathbb{E}_{t,\, q(x_1),\, p_t(x \mid x_1)} \big\| v_t(x) - u_t(x \mid x_1) \big\|^2
+$$
+
+- $t \sim \mathcal{U}[0,1]$, $x_1 \sim q$ (one training example), $x \sim p_t(x \mid x_1)$ (a point on that example's tiny path).
+- $u_t(x \mid x_1)$ is the per-example velocity, which we can write down in closed form.
+- Everything else as in the FM loss.
+
+**Theorem 2** (p. 4): assuming $p_t(x) > 0$ everywhere, "up to a constant independent of $\theta$, $\mathcal{L}_{\text{CFM}}$ and $\mathcal{L}_{\text{FM}}$ are equal. Hence $\nabla_\theta \mathcal{L}_{\text{FM}}(\theta) = \nabla_\theta \mathcal{L}_{\text{CFM}}(\theta)$."
+
+- $\nabla_\theta$ is the gradient, the direction to nudge the weights. Equal gradients mean gradient descent takes the same steps on average.
+
+Intuition: the instructor does not know the crowd's average velocity at the crossroads. So each lesson she picks one car, knows exactly where *that* car is going, and grades the student against that car's velocity. Any single lesson is "wrong" for the crowd, but the student who minimises the average squared miss ends up predicting the crowd average, because the average is what minimises squared error. The leftover spread of the cars' velocities is the constant: it inflates the loss but never changes which way to step. The paper credits the idea to denoising score matching (Sec 1, p. 2; Sec 5, p. 7).
+
+Toy example (mine, continuing the two-point data at $t = 0.5$, $x = 0$): the conditional targets are $+4$ and $-4$, each half the time, and the marginal target is $0$. Suppose the network outputs $v = 1$.
+
+- FM loss at this spot: $(1 - 0)^2 = 1$.
+- CFM loss at this spot: $\tfrac12 (1-4)^2 + \tfrac12 (1+4)^2 = \tfrac12 (9 + 25) = 17$.
+- Difference: $16$, which is the variance of the targets $\{4, -4\}$ and does not depend on $v$.
+- Gradient in $v$: FM gives $2(1-0) = 2$; CFM gives $\tfrac12 \cdot 2(1-4) + \tfrac12 \cdot 2(1+4) = -3 + 5 = 2$. Same. ✓
+
+Practical consequence, which I find the real news: the CFM loss never reaches zero. Its floor is the average target variance. A loss curve that flattens at a positive value is normal for this method, not a bug. (My reading of Theorem 2, not a claim the paper states.)
+
+<figure class="blog-figure blog-figure--wide">
+  <CfmGradient alt="A number line of gradients. Each lesson drops a dot at the gradient for one randomly chosen data point. A red marker shows their running average, which settles on a green tick, the true flow matching gradient. Bars compare the FM loss and the CFM loss for the chosen network output." />
+  <figcaption><strong>Figure 4. Theorem 2 as a dice game.</strong> Two-point toy at t = 0.5, x = 0. Each lesson is graded against one data point's target (+4 or −4); on average the gradient equals the one for the unknown true target (0). The two losses differ by 16 whatever v is.</figcaption>
+</figure>
+
+
+## Gaussian conditional paths
+
+### One recipe for a whole family
+
+CFM works for any per-example path. The paper picks Gaussians whose centre and width move over time (Eq 10, p. 4):
+
+$$
+p_t(x \mid x_1) = \mathcal{N}\big(x \mid \mu_t(x_1),\, \sigma_t(x_1)^2 I\big)
+$$
+
+- $\mu_t(x_1)$ is where the blob's centre is at time $t$.
+- $\sigma_t(x_1)$ is its width (a standard deviation), one number for all directions; $I$ is the identity, meaning "same width in every direction".
+- Boundary conditions: $\mu_0 = 0$, $\sigma_0 = 1$ (start as standard noise) and $\mu_1 = x_1$, $\sigma_1 = \sigma_{\min}$ (end as a tight blob on the data point) (Sec 4, p. 4).
+
+The paper does not state the value of $\sigma_{\min}$ used in the experiments in the main text or App E. The toys below use $\sigma_{\min} = 0$ for clean arithmetic.
+
+The simplest flow that produces this path is "scale the noise, then shift it" (Eq 11, p. 4):
+
+$$
+\psi_t(x_0) = \sigma_t(x_1)\, x_0 + \mu_t(x_1)
+$$
+
+- $x_0$ is a noise sample from $\mathcal{N}(0, I)$.
+- $\psi_t$ is the conditional flow: where that noise grain is at time $t$ on its way to $x_1$.
+
+Toy example: $x_0 = -1$, $\sigma_t = 0.5$, $\mu_t = 1$. Then $\psi_t(-1) = 0.5 \times (-1) + 1 = 0.5$.
+
+Writing the CFM loss in terms of $x_0$ gives the trainable form (Eq 14, p. 4): sample $t$, $x_1$, $x_0$, compute $\psi_t(x_0)$, and regress $v_t(\psi_t(x_0))$ onto $\frac{d}{dt}\psi_t(x_0)$, the grain's actual velocity. **Theorem 3** gives that velocity as a field (Eq 15, p. 5):
+
+$$
+u_t(x \mid x_1) = \frac{\sigma_t'(x_1)}{\sigma_t(x_1)} \big(x - \mu_t(x_1)\big) + \mu_t'(x_1)
+$$
+
+- The prime means "rate of change in time": $\sigma_t'$ is how fast the blob shrinks, $\mu_t'$ how fast its centre moves.
+- $x - \mu_t$ is your offset from the centre. The first term pulls you inwards in proportion to that offset as the blob shrinks (negative $\sigma_t'$). The second term carries you along with the moving centre.
+
+Intuition: you are one grain in a moving, shrinking crowd. You move with the crowd's centre, and you also slide towards the centre as fast as the crowd tightens.
+
+Toy example (OT path below, $\sigma_{\min} = 0$): $\mu_t = t x_1$, $\sigma_t = 1 - t$, so $\mu_t' = x_1$ and $\sigma_t' = -1$. With $x_1 = 2$, $t = 0.5$, $x = 0.5$: $u = \frac{-1}{0.5}(0.5 - 1) + 2 = 1 + 2 = 3$. ✓ (It matches the grain from the car-trip example, which moved from $-1$ to $2$ at speed $3$.)
+
+<figure class="blog-figure blog-figure--wide">
+  <GaussianPathLab alt="A bell-shaped blob moves and shrinks towards the data point x1 = 2. Five grains ride inside it with velocity arrows; the red one starts at −1. An inset plots the blob's centre and width over time. Buttons switch between optimal transport, VP diffusion and VE diffusion paths." />
+  <figcaption><strong>Figure 5. Theorem 3 at work.</strong> Every arrow is Eq 15. OT: Eq 20 with σ<sub>min</sub> = 0. VP: Eq 18 with β<sub>min</sub> = 0.1, β<sub>max</sub> = 20 (App E.1, p. 20). VE: Eq 16 with a toy schedule σ<sub>s</sub> = 3s.</figcaption>
+</figure>
+
+### Diffusion paths as one special case
+
+Diffusion models fit this family with particular choices of $\mu_t$ and $\sigma_t$ (Sec 4.1, p. 5). Two are worked out.
+
+**Variance Exploding (VE)**, reversed to run noise to data (Eq 16 and 17, p. 5):
+
+$$
+p_t(x) = \mathcal{N}\big(x \mid x_1,\, \sigma_{1-t}^2 I\big), \qquad u_t(x \mid x_1) = -\frac{\sigma_{1-t}'}{\sigma_{1-t}}(x - x_1)
+$$
+
+- The centre sits on the data point the whole time; only the width changes.
+- $\sigma_s$ is an increasing noise schedule with $\sigma_0 = 0$ and $\sigma_1 \gg 1$ (Sec 4.1, p. 5). So at $t=0$ the "noise" is a very wide blob around $x_1$, not a standard normal.
+
+Toy example (toy schedule $\sigma_s = 3s$, my choice): at $t = 0.5$, $\sigma_{0.5} = 1.5$, derivative $3$. At $x = 0.5$, $x_1 = 2$: $u = -\frac{3}{1.5}(0.5 - 2) = 3$.
+
+**Variance Preserving (VP)**, reversed (Eq 18, p. 5):
+
+$$
+\mu_t(x_1) = \alpha_{1-t}\, x_1, \quad \sigma_t(x_1) = \sqrt{1 - \alpha_{1-t}^2}, \quad \alpha_t = e^{-\frac12 T(t)}, \quad T(t) = \int_0^t \beta(s)\, ds
+$$
+
+- $\beta(s)$ is the noise-scale schedule. In the experiments $\beta(s) = \beta_{\min} + s(\beta_{\max} - \beta_{\min})$ with $\beta_{\min} = 0.1$, $\beta_{\max} = 20$, so $T(s) = s\beta_{\min} + \tfrac12 s^2(\beta_{\max} - \beta_{\min})$ (App E.1, p. 20).
+- $\alpha$ says how much of the data point is visible; $\sigma$ how much noise. $\alpha^2 + \sigma^2 = 1$, hence "variance preserving".
+
+Toy example with the paper's schedule (my arithmetic):
+
+| $t$ | $1-t$ | $T(1-t)$ | $\alpha_{1-t}$ (share of data in the mean) | $\sigma_t$ |
+|---|---|---|---|---|
+| 0 | 1 | 10.05 | 0.0066 | 1.000 |
+| 0.5 | 0.5 | 2.5375 | 0.2812 | 0.960 |
+| 0.9 | 0.1 | 0.1095 | 0.9467 | 0.322 |
+
+Two things fall out. At $t = 0.5$ the blob's centre is only **28%** of the way to the data and the noise is still **96%** of its width: diffusion leaves most of the work for the end. And at $t = 0$ the mean is $0.0066\,x_1$, not $0$: "these probability paths... do not actually reach a true noise distribution in finite time" (Sec 4.1, p. 5).
+
+Its velocity (Eq 19, p. 5), at the grain $x_0 = -1$, $x_1 = 2$, $t = 0.5$ (so $x = 0.2812 \times 2 - 0.960 = -0.397$), works out to about **3.24**, faster than the straight-line grain's 3 at the same moment, because it is catching up. (Check by differentiating $\alpha_{1-t} x_1 + \sigma_t x_0$ directly: $1.413 \times 2 + 0.414 = 3.24$.)
+
+The paper notes that this diffusion velocity "coincides" with the deterministic probability-flow ODE of Song et al. (Sec 4.1, p. 5; App D), and that training it with the FM loss "we find to be more stable and robust" than score matching (Sec 4.1, p. 5).
+
+### Optimal transport: straight lines, constant speed
+
+Now the paper's favourite. Let the centre and width both change *linearly* in time (Eq 20 and 21, p. 5):
+
+$$
+\mu_t(x_1) = t\, x_1, \qquad \sigma_t = 1 - (1 - \sigma_{\min})\, t, \qquad u_t(x \mid x_1) = \frac{x_1 - (1 - \sigma_{\min})\, x}{1 - (1 - \sigma_{\min})\, t}
+$$
+
+The flow (Eq 22, p. 6) and the loss (Eq 23, p. 6):
+
+$$
+\psi_t(x_0) = \big(1 - (1-\sigma_{\min})\, t\big)\, x_0 + t\, x_1
+$$
+
+$$
+\mathcal{L}_{\text{CFM}}(\theta) = \mathbb{E}_{t,\, q(x_1),\, p(x_0)} \Big\| v_t(\psi_t(x_0)) - \big(x_1 - (1-\sigma_{\min})\, x_0\big) \Big\|^2
+$$
+
+- $\psi_t(x_0)$ slides from the noise grain $x_0$ to (almost) the data point $x_1$ along a straight line.
+- The target $x_1 - (1-\sigma_{\min})x_0$ does not depend on $t$: the grain's velocity is constant.
+- With $\sigma_{\min} = 0$ it is just "destination minus start".
+
+Toy example ($\sigma_{\min}=0$, $x_0 = -1$, $x_1 = 2$, $t = 0.5$): $\psi = 0.5 \times (-1) + 0.5 \times 2 = 0.5$, target $= 2 - (-1) = 3$. At $t = 0.1$: $\psi = -0.7$, target still $3$. Same velocity everywhere along the line.
+
+Why "optimal transport (OT)": optimal transport is the cheapest way to move one pile of sand into another when cost is squared distance. The flow in Eq 22 is the OT displacement map between the two Gaussians $p_0(x \mid x_1)$ and $p_1(x \mid x_1)$ (Eq 24, p. 6, citing McCann 1997). "Particles under the OT displacement map always move in straight line trajectories and with constant speed" (Sec 4.1, p. 6). Diffusion trajectories "can 'overshoot' the final sample, resulting in unnecessary backtracking" (Sec 4.1, p. 6; Fig 3). The OT conditional field also has "constant direction in time", which the authors argue is "a simpler regression task" (Sec 4.1, p. 6; Fig 2).
+
+The honest caveat is in the paper itself: "although the conditional flow is optimal, this by no means imply that the marginal VF is an optimal transport solution" (Sec 4.1, p. 6). Straight per example, curved in aggregate. That is the crossroads blend from [Build the big path out of tiny ones](#build-the-big-path-out-of-tiny-ones), and it is exactly what Figure 6 lets you see.
+
+<figure class="blog-figure blog-figure--wide">
+  <DiffusionVsOt alt="Two square panels with the same 200 noise grains. Left, grains follow the VP diffusion path; right, the optimal transport path. Trails show each trip so far. Readouts give the share of the trip travelled by the current time and a median straightness score." />
+  <figcaption><strong>Figure 6. Same grains, two paths.</strong> “One data point each” draws the per-example paths of Eq 18 and Eq 22; “True field” solves the marginal ODE (RK4, 200 steps for OT, 4000 for VP). Compare with the paper's Fig 3 (p. 6).</figcaption>
+</figure>
+
+### The whole training loop
+
+Putting Eq 23 into a recipe (my restatement of Sec 4.1, p. 6):
+
+1. Take a batch of real examples $x_1$.
+2. Draw noise $x_0 \sim \mathcal{N}(0, I)$ of the same shape and a time $t \sim \mathcal{U}[0,1]$ per example.
+3. Mix: $x_t = (1-(1-\sigma_{\min})t)\, x_0 + t\, x_1$.
+4. Ask the network for $v_t(x_t)$.
+5. Loss: squared distance to $x_1 - (1-\sigma_{\min})x_0$. Backpropagate. No ODE solver anywhere.
+
+<figure class="blog-figure blog-figure--wide">
+  <TrainingLoop2D alt="Left, 16 training examples: a noise point joined to a data point, the mixed point on the line, a green target arrow and a purple network guess. Right, the loss curve with a dashed red floor. Buttons train the network, walk through one step slowly, and generate new samples with it." />
+  <figcaption><strong>Figure 7. The recipe, training for real.</strong> A 64-unit, two-layer network trained with Eq 23 (σ<sub>min</sub> = 0.01), Adam, batch 256, in your browser. The floor is the average squared gap between the per-example target and the true velocity, from 10,000 samples. “Generate with it” runs 20 Euler steps with the trained network.</figcaption>
+</figure>
+
+
+## What the evidence shows
+
+### Setup
+
+Same U-Net (from Dhariwal and Nichol 2021) for every method, same hyperparameters and training iterations, "where baselines are allowed more iterations for better convergence" (Sec 6.1, p. 8). Datasets: CIFAR-10 and ImageNet at 32×32, 64×64 and 128×128 (Sec 6, p. 7). All models are **unconditional** (Sec 6.1, p. 8). Hyperparameters per dataset are in Table 3 (p. 20), e.g. ImageNet-64: batch **2048**, **16** GPUs, **157k** iterations.
+
+Metrics, spelled out:
+
+- **Negative log-likelihood (NLL)** in **bits per dimension (BPD)**: how surprised the model is by real test images, per pixel channel. Lower is better.
+- **Fréchet Inception Distance (FID)**: compares statistics of generated and real images inside an image classifier. Lower is better.
+- **NFE**: network calls the adaptive solver needed. Lower is cheaper.
+
+Baselines: **DDPM** (denoising diffusion probabilistic models, noise-prediction loss), **Score Matching (SM)** and **ScoreFlow (SF)** (Sec 6.1, p. 8; losses in App E.1, Eq 42 to 45, p. 19). "FM w/ Diffusion" is FM on the VP path; "FM w/ OT" is FM on the OT path.
+
+### Table 1, every column
+
+(Table 1, p. 8; NLL in BPD, FID, NFE.)
+
+| Model | CIFAR-10 NLL | FID | NFE | IN-32 NLL | FID | NFE | IN-64 NLL | FID | NFE |
+|---|---|---|---|---|---|---|---|---|---|
+| DDPM | 3.12 | 7.48 | 274 | 3.54 | 6.99 | 262 | 3.32 | 17.36 | 264 |
+| Score Matching | 3.16 | 19.94 | 242 | 3.56 | 5.68 | 178 | 3.40 | 19.74 | 441 |
+| ScoreFlow | 3.09 | 20.78 | 428 | 3.55 | 14.14 | 195 | 3.36 | 24.95 | 601 |
+| FM w/ Diffusion | 3.10 | 8.06 | 183 | 3.54 | 6.37 | 193 | 3.33 | 16.88 | 187 |
+| FM w/ OT | **2.99** | **6.35** | **142** | **3.53** | **5.02** | **122** | **3.31** | **14.45** | **138** |
+
+What I take from it:
+
+- FM w/ OT wins every column. "FM-OT consistently obtains best results across all our quantitative measures" (Sec 6.1, p. 8).
+- The NLL gaps are small (ImageNet-32: **3.53** vs **3.54** for DDPM). The FID and NFE gaps are large: on ImageNet-64, NFE **138** vs **264** (DDPM) and **441** (SM).
+- Switching only the loss, on the same diffusion path, already helps: SM to FM w/ Diffusion on ImageNet-64 takes FID **19.74 → 16.88** and NFE **441 → 187**. Switching the path to OT adds **16.88 → 14.45** and **187 → 138**. Both halves of the paper contribute.
+- The authors flag their own CIFAR-10 FIDs as higher than previous works, possibly because the architecture "was not optimized for CIFAR-10" (Sec 6.1, p. 8).
+
+ImageNet 128×128 (Table 1 right, p. 8): FM w/ OT reaches NLL **2.90** and FID **20.9**, against GAN baselines from **58.9** (MGAN) down to **21.7** (PGMGAN). IC-GAN is excluded because it conditions on a self-supervised ResNet-50 (Sec 6.1, p. 8). So "state of the art" here means among unconditional models in this table.
+
+### Training speed
+
+FM-OT lowers FID "faster and to a greater extent" during ImageNet-64 training (Fig 5, p. 8). For ImageNet-128, Dhariwal and Nichol train **4.36m** iterations at batch **256**; FM (with a 25% larger model) uses **500k** iterations at batch **1.5k**, which the paper calls "33% less image throughput" (Sec 6.1, p. 8). The sampling cost of a score-matching model "can drastically change during training", while FM's stays constant (Sec 6.1, p. 8; Fig 10, App E).
+
+Toy check of the throughput claim: 4.36m × 256 ≈ 1.116 billion images; 500k × 1536 = 768 million (using Table 3's effective batch 1536, p. 20). 768 / 1116 ≈ 0.69, i.e. about **31%** less. Close to the stated 33%, so the paper probably rounded or used 1.5k exactly (500k × 1500 = 750m, 0.67, i.e. 33% less). ✓
+
+### Sampling with few steps
+
+With fixed-step solvers on the ImageNet-32 models, FM w/ OT reaches a given numerical error with "roughly only **60%** of the NFEs" diffusion models need (Sec 6.2, p. 9; Fig 7 left, error is per-pixel mean squared error against a 1000-NFE solution, 256 noise seeds). It also keeps "decent FID even at very low NFE values" (Fig 7 right, p. 9). The 2-D checkerboard shows the same at NFE 4, 8, 10, 20 with the midpoint scheme (Fig 4 right, p. 7). Image trajectories (Fig 6, p. 8): "the OT path model starts generating images sooner", while for diffusion "noise dominates the image until the very last time point". That matches the 28%-at-halfway number in the VP table above.
+
+
+
+### Super-resolution
+
+Conditional upsampling from 64×64 to 256×256 on ImageNet validation (Table 2, p. 9):
+
+| Model | FID ↓ | IS ↑ | PSNR ↑ | SSIM ↑ |
+|---|---|---|---|---|
+| Reference | 1.9 | 240.8 | – | – |
+| Regression | 15.2 | 121.1 | 27.9 | 0.801 |
+| SR3 | 5.2 | 180.1 | 26.4 | 0.762 |
+| FM w/ OT | **3.4** | **200.8** | 24.7 | 0.747 |
+
+IS is the **Inception Score**; PSNR is **peak signal-to-noise ratio**; SSIM is **structural similarity**. FM-OT wins on FID and IS and loses slightly on PSNR and SSIM, which the authors describe as "similar" (Sec 6.3, p. 9). This is the only conditional experiment, and it matters for speech, where generation is always conditioned on text.
+
+<figure class="blog-figure blog-figure--wide">
+  <ResultsBoard alt="Nine dot plots: three datasets across, three metrics down. Five methods per plot; FM with OT is the large green dot. A black ring walks from Score Matching to FM with diffusion (change of loss) and then to FM with OT (change of path), with values written above." />
+  <figcaption><strong>Figure 9. Table 1, one change at a time.</strong> All values are from Table 1 (p. 8): single runs, no error bars. Red text marks a step that made a number worse.</figcaption>
+</figure>
+
+### What the evidence does not show
+
+- Every comparison is one run per setting; no error bars or seeds are reported in Table 1 (p. 8).
+- No guidance, no text conditioning, no audio. Speech results come from later papers.
+- "Better generalization" in the abstract (p. 1) is supported by FID and NLL on held-out data, not by a separate generalization study.
+- The straightness of OT is shown for the conditional paths (Fig 2, Fig 3, p. 6) and visually for samples (Fig 4, Fig 6); the paper does not measure how curved the learned marginal trajectories are.
+
+
+## Toy experiments
+
+Everything below runs in the page with no downloads. Shared settings:
+
+- **Data**: eight points on a circle of radius **4**, at angles $k \times 45°$ for $k = 0, \dots, 7$, equally likely. With point data the true velocity of Eq 8 has a closed form, so these toys need no training (Figure 7 is the exception).
+- **Noise**: $x_0 \sim \mathcal{N}(0, I)$ in two dimensions, **200** grains from a seeded generator (mulberry32, seed **7**), so the numbers below come out the same every time.
+- **Paths**: OT (Eq 20) with $\sigma_{\min} = 0.01$, which keeps the velocity finite at $t = 1$, and VP (Eq 18) with the paper's schedule, $\beta_{\min} = 0.1$, $\beta_{\max} = 20$ (App E.1, p. 20). Both run to $t = 1 - 10^{-5}$, as in App E.1.
+- **Reference endpoints**: RK4 with **200** steps for OT and **4000** for VP. The VP field gets very steep near $t = 1$: with 200 steps its reference was off by **0.38** on average, so it needs 20 times more.
+
+**Toy A: are the paths straight?** I measured straightness as distance from start to end divided by length travelled, so 1 is a ruler line. Per example (Figure 6, "one data point each") OT is exactly **1**. With the true field the medians are **0.945** (OT) and **0.938** (VP). Look at the left panel and you can see VP grains overshoot their data point and loop back, the backtracking the paper describes (Sec 4.1, p. 6). The medians are still close because the loops are short compared with the whole trip. The bigger difference is *timing*: by $t = 0.5$ the OT grains have covered about half their trip, and the VP grains far less. Drag the slider in Figure 6 to see the shares.
+
+**Toy B: how many steps?** For $N \in \{1, 2, 4, 8, 16, 32\}$ fixed steps I counted how many grains land within **0.3** of a data point.
+
+| Steps | 1 | 2 | 4 | 8 | 16 | 32 |
+|---|---|---|---|---|---|---|
+| OT, Euler | 0% | 6.5% | **96.5%** | 100% | 100% | 100% |
+| VP, Euler | 0% | 2% | 6.5% | 69.5% | **100%** | 100% |
+| OT, midpoint | 0% | 54.5% | **100%** | 100% | 100% | 100% |
+| VP, midpoint | 1.5% | 0.5% | 44.5% | **99.5%** | 100% | 100% |
+
+With Euler, OT needs **4** network calls and VP **16**: four times as many. With midpoint (2 calls per step) it is **8** against **16**. The paper's own figure on ImageNet-32 says roughly **60%** of the calls (Sec 6.2, p. 9); my toy is easier for OT than real images are, so read the factor as a direction, not a size. I left RK4 out: it evaluates the field at the very end of each step, where the width $\sigma_t$ is almost zero, and with few steps it blew up on both paths (an average miss of **39** for OT with one step).
+
+<figure class="blog-figure blog-figure--wide">
+  <StepBudget alt="Two rows of six small panels, VP on top and OT below, showing where 200 grains land after 1, 2, 4, 8, 16 and 32 steps, with the share that landed on a data point. Below, a chart of average miss against network calls on log scales for both paths. A toggle switches between Euler and midpoint." />
+  <figcaption><strong>Figure 8. The step budget.</strong> A 2-D cousin of the paper's Fig 7 (p. 9), not a reproduction. Miss is the mean distance to the reference endpoint; “landed” means within 0.3 of a data point. Hover a dot on the chart for its exact value.</figcaption>
+</figure>
+
+**Toy C: the dice game.** Figure 4 is Theorem 2 with two data points. After 100 lessons the running average sits within a few tenths of the true gradient, and the gap between the two losses stays exactly **16** for every network output.
+
+**Toy D: a real network.** Figure 7 trains a small network (inputs $x$, $y$, $t$; two hidden layers of **64** units with the SiLU activation; Adam, learning rate **0.001**, batch **256**, up to **3000** steps) with Eq 23. The paper used a 5-layer, 512-unit network for its 2-D checkerboard (App E, p. 19); mine is smaller on purpose. Watch the loss: it flattens on the red floor, not at zero, exactly as Theorem 2 predicts.
+
+## My interpretation
+
+The paper sells itself as a way to train CNFs at scale. In hindsight its bigger effect was to give everyone a loss that is two lines long. Equation 23 is the whole method in practice: mix noise and data on a straight line, regress the difference. No noise schedule, no score, no stochastic differential equation. Diffusion becomes one setting of $\mu_t$ and $\sigma_t$ rather than the frame you must think in (Sec 7, p. 9).
+
+For speech, outside this paper: Voicebox (Meta, 2023) and F5-TTS (2024) train mel-spectrogram generators with this conditional OT flow matching loss, conditioned on text and masked audio ([Voicebox](https://arxiv.org/abs/2306.15687), Le et al. 2023; [F5-TTS](https://arxiv.org/abs/2410.06885), Chen et al. 2024). Pocket TTS / CALM uses a flow-style head on continuous latents and then goes further to one-step generation, as covered in the [Pocket TTS post](/blog/pocket-tts-calm-explained/) Part 6. The reason this lineage likes flow matching is the evidence in [Sampling with few steps](#sampling-with-few-steps): fewer network calls per frame is latency, and latency is what speech products are judged on.
+
+Two cautions I would carry into speech work. First, Theorem 2 makes the loss correct, not small: the CFM loss floor is the spread of the per-example targets, so a flat loss curve does not mean training stalled. Second, straight per example does not mean straight overall. The marginal field blends destinations (my two-point toy gives 2.86 where each example says 3 or -5), so a few Euler steps still bend off course. That gap is what later work on minibatch OT couplings, rectified flows and flow maps tries to close.
+
+
+## Open questions
+
+- How curved are learned marginal trajectories in practice, measured, on images or mel spectrograms? The paper shows pictures, not a number.
+- What value of $\sigma_{\min}$ did the experiments use, and how sensitive are the results to it?
+- Uniform $t \sim \mathcal{U}[0,1]$ treats every moment as equally important. Speech systems often reweight time; does that change the Table 1 ranking?
+- Table 1 is single-run. How much of the CIFAR-10 FID gap (6.35 vs 7.48) survives multiple seeds?
+- The conclusion suggests "non-isotropic Gaussians or more general kernels" (Sec 7, p. 9). For audio, would a path that removes noise per frequency band at different rates beat the isotropic OT path?

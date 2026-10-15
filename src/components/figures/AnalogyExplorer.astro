@@ -1,0 +1,69 @@
+---
+// Foundations, embeddings post: A − B + C on six hand-made 2-D word vectors.
+// king − man + woman = (3, −1) = queen. With a messy queen (2.6, −0.4):
+// queen 0.721, princess 1.118, king and woman 2.0 away.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-analogy>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 300" role="img" aria-labelledby="an-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="an-title">Word points with the analogy arrow copied from one pair to another and the nearest word found</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">A</span><select data-s="0"></select></label>
+    <label><span class="fig-panel__name">minus B</span><select data-s="1"></select></label>
+    <label><span class="fig-panel__name">plus C</span><select data-s="2"></select></label>
+    <div><span class="fig-panel__name">Options</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-messy aria-pressed="false">Messy vectors</button>
+      <button type="button" class="fig-chip" data-excl aria-pressed="true">Exclude the input words</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt, par } from "../../lib/tiny-net";
+  import { INK, MUTED, JADE, GOLD, NEG } from "../../lib/net-diagram";
+  import { frame, txt, arrow } from "../../lib/plot";
+  const NAMES = ["king", "queen", "man", "woman", "prince", "princess"];
+  const NEAT = [[3, 1], [3, -1], [1, 1], [1, -1], [2, 1.5], [2, -1.5]];
+  document.querySelectorAll<HTMLElement>("[data-analogy]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    let sel = [0, 2, 3], messy = false, excl = true;
+    root.querySelectorAll<HTMLSelectElement>("[data-s]").forEach((s, i) => { s.innerHTML = NAMES.map((n, j) => `<option value="${j}"${j === sel[i] ? " selected" : ""}>${n}</option>`).join(""); });
+    const P = () => NEAT.map((p, i) => (messy && i === 1 ? [2.6, -0.4] : p));
+    const calc = () => {
+      const p = P(), [a, b, c] = sel.map((i) => p[i]), rel = [a[0] - b[0], a[1] - b[1]], r = [c[0] + rel[0], c[1] + rel[1]];
+      const ranked = p.map((q, i) => ({ i, d: Math.hypot(q[0] - r[0], q[1] - r[1]) })).sort((x, y) => x.d - y.d);
+      const best = ranked.find((x) => !excl || !sel.includes(x.i))!;
+      return { p, a, b, c, rel, r, ranked, best };
+    };
+    const pt = (q: number[]) => `(${fmt(q[0], 2)}, ${fmt(q[1], 2)})`;
+    const steps = () => {
+      const k = calc(), [A, B, C] = sel.map((i) => NAMES[i]);
+      return [
+        { say: `Subtract: the arrow from ${B} to ${A} isolates the relation between them.`, math: `${A} − ${B} = ${pt(k.a)} − ${pt(k.b)} = ${pt(k.rel)}` },
+        { say: `Add the same arrow to ${C}.`, math: `${C} + ${pt(k.rel)} = ${pt(k.c)} + ${pt(k.rel)} = ${pt(k.r)}` },
+        { say: "Measure how far every word is from the result.", math: k.ranked.map((x) => `${NAMES[x.i]} ${fmt(x.d, 3)}`).join(",  ") },
+        { say: excl ? "Pick the nearest word, skipping the three input words as standard evaluation does." : "Pick the nearest word, inputs included: an input word can win.", math: `nearest: ${NAMES[k.best.i]} at distance ${fmt(k.best.d, 3)}` },
+      ];
+    };
+    function draw(kk: number) {
+      const k = calc(), F = frame({ l: 40, t: 30, w: 360, h: 240, x0: -0.5, x1: 4.5, y0: -2.2, y1: 2.2 });
+      let s = F.grid([0, 1, 2, 3, 4], [-2, -1, 0, 1, 2], 0) + txt(40, 18, "Toy axes: royalty to the right, male up, female down", `font-size="12" font-weight="700" fill="${INK}"`);
+      if (kk >= 2) k.ranked.forEach((x) => (s += `<circle cx="${F.X(k.r[0])}" cy="${F.Y(k.r[1])}" r="${Math.abs(F.X(x.d) - F.X(0))}" fill="none" stroke="${x.i === k.best.i && kk >= 3 ? GOLD : "#e3e7e6"}" stroke-width="${x.i === k.best.i && kk >= 3 ? 2 : 1}"/>`));
+      if (kk >= 0) s += arrow(F.X(k.b[0]), F.Y(k.b[1]), F.X(k.a[0]), F.Y(k.a[1]), NEG, 2.5);
+      if (kk >= 1) s += arrow(F.X(k.c[0]), F.Y(k.c[1]), F.X(k.r[0]), F.Y(k.r[1]), NEG, 2.5) + `<path d="M${F.X(k.r[0])} ${F.Y(k.r[1]) - 9} l2.6 6 6.4 .5 -4.9 4.1 1.6 6.3 -5.7 -3.4 -5.7 3.4 1.6 -6.3 -4.9 -4.1 6.4 -.5z" fill="${GOLD}"/>`;
+      k.p.forEach((q, i) => (s += `<circle cx="${F.X(q[0])}" cy="${F.Y(q[1])}" r="6" fill="${sel.includes(i) ? INK : JADE}"/>` + txt(F.X(q[0]) + 9, F.Y(q[1]) + 4, NAMES[i], `font-size="12" font-weight="${kk >= 3 && i === k.best.i ? 700 : 400}" fill="${kk >= 3 && i === k.best.i ? GOLD : INK}"`)));
+      s += txt(440, 48, `${NAMES[sel[0]]} − ${NAMES[sel[1]]} + ${NAMES[sel[2]]}`, `font-size="14" font-weight="700" fill="${INK}"`);
+      s += txt(440, 72, kk >= 1 ? `= ${pt(k.r)}` : "", `font-size="13" fill="${INK}"`);
+      if (kk >= 2) k.ranked.forEach((x, j) => (s += txt(440, 104 + j * 22, `${NAMES[x.i]}${sel.includes(x.i) ? " (input)" : ""}`, `font-size="12" fill="${excl && sel.includes(x.i) ? "#B9C0BF" : INK}" font-weight="${kk >= 3 && x.i === k.best.i ? 700 : 400}"`) + txt(600, 104 + j * 22, fmt(x.d, 3), `font-size="12" fill="${INK}" font-weight="${kk >= 3 && x.i === k.best.i ? 700 : 400}"`)));
+      $("[data-draw]").innerHTML = s;
+    }
+    const redraw = stepper(root, steps, draw, { delay: 1.8 });
+    root.querySelectorAll<HTMLSelectElement>("[data-s]").forEach((s) => s.addEventListener("change", () => { sel[+s.dataset.s!] = +s.value; redraw(); }));
+    $<HTMLButtonElement>("[data-messy]").addEventListener("click", (e) => { messy = !messy; (e.currentTarget as HTMLElement).setAttribute("aria-pressed", String(messy)); redraw(); });
+    $<HTMLButtonElement>("[data-excl]").addEventListener("click", (e) => { excl = !excl; (e.currentTarget as HTMLElement).setAttribute("aria-pressed", String(excl)); redraw(); });
+  });
+</script>

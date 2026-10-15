@@ -1,0 +1,49 @@
+---
+// Foundations, diffusion post: the toy straight-path field in 2-D with data
+// at the corners (±1, ±1). From (0.5, −0.3) with N = 4: (0.375, −0.225),
+// (0.305, −0.183), (0.425, −0.267), then (1.000, −0.997).
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-arrows2d>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 300" role="img" aria-labelledby="va-title" class="blog-diagram-svg" font-family="Inter, sans-serif" style="cursor: crosshair">
+    <title id="va-title">A grid of velocity arrows and a particle following them to a corner</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Euler steps N (click the square to move the start)</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-n="2" aria-pressed="false">2</button><button type="button" class="fig-chip" data-n="4" aria-pressed="true">4</button><button type="button" class="fig-chip" data-n="8" aria-pressed="false">8</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt, par } from "../../lib/tiny-net";
+  import { INK, MUTED, NEG, JADE, GOLD } from "../../lib/net-diagram";
+  import { frame, txt, arrow } from "../../lib/plot";
+  import { vStraight } from "../../lib/diffusion";
+  document.querySelectorAll<HTMLElement>("[data-arrows2d]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    let N = 4, start = [0.5, -0.3];
+    const v2 = (p: number[], t: number) => p.map((c) => vStraight(c, t).v);
+    const path = () => { const h = 1 / N, out = [{ t: 0, p: start, v: v2(start, 0) }]; let p = start; for (let k = 0; k < N; k++) { const v = v2(p, k * h); out[k].v = v; p = p.map((c, i) => c + h * v[i]); out.push({ t: (k + 1) * h, p, v: [0, 0] }); } return out; };
+    const pt = (p: number[]) => `(${p.map((c) => fmt(c, 3)).join(", ")})`;
+    const steps = () => { const P = path(); return P.slice(0, N).map((q, k) => ({ say: k === 0 ? "Each coordinate follows the 1-D toy field. At t = 0 the arrows point to the middle: the field cannot yet tell the corners apart." : k === N - 1 ? "The last step lands on the nearest corner." : `Step ${k + 1}: look up the arrow here and move along it.`, math: `t = ${fmt(q.t, 3)}: position ${pt(q.p)}, velocity ${pt(q.v)} → ${pt(P[k + 1].p)}` })); };
+    const F = frame({ l: 30, t: 20, w: 260, h: 260, x0: -2, x1: 2, y0: -2, y1: 2 });
+    function draw(k: number) {
+      const P = path(), tNow = k >= 0 ? P[Math.min(k, N - 1)].t : 0;
+      let s = F.grid([-2, -1, 0, 1, 2], [-2, -1, 0, 1, 2], 0);
+      for (let i = -4; i <= 4; i++) for (let j = -4; j <= 4; j++) { const p = [i * 0.45, j * 0.45], v = v2(p, tNow), L = Math.hypot(...v) || 1, sc = Math.min(0.3, L * 0.12) / L; s += arrow(F.X(p[0]), F.Y(p[1]), F.X(p[0] + v[0] * sc), F.Y(p[1] + v[1] * sc), MUTED, 1); }
+      [[1, 1], [1, -1], [-1, 1], [-1, -1]].forEach((c) => (s += `<circle cx="${F.X(c[0])}" cy="${F.Y(c[1])}" r="6" fill="${JADE}"/>`));
+      const shown = Math.max(0, Math.min(N, k + 1));
+      s += `<polyline fill="none" stroke="${NEG}" stroke-width="2.5" points="${P.slice(0, shown + 1).map((q) => `${F.X(q.p[0])},${F.Y(q.p[1])}`).join(" ")}"/>` + P.slice(0, shown + 1).map((q) => `<circle cx="${F.X(q.p[0])}" cy="${F.Y(q.p[1])}" r="4.5" fill="${NEG}"/>`).join("");
+      s += txt(330, 40, `arrows shown at t = ${fmt(tNow, 3)}`, `font-size="12" font-weight="700" fill="${INK}"`);
+      P.slice(0, shown + 1).forEach((q, i) => (s += txt(330, 70 + i * 22, `t ${fmt(q.t, 3)}: ${pt(q.p)}`, `font-size="12" fill="${i === shown ? INK : MUTED}" font-weight="${i === shown ? 700 : 400}"`)));
+      $("[data-draw]").innerHTML = s;
+    }
+    const redraw = stepper(root, steps, draw, { delay: 1.6 });
+    root.querySelectorAll<HTMLButtonElement>("[data-n]").forEach((b) => b.addEventListener("click", () => { N = +b.dataset.n!; root.querySelectorAll("[data-n]").forEach((o) => o.setAttribute("aria-pressed", String(o === b))); redraw(); }));
+    root.querySelector("svg")!.addEventListener("click", (e) => { const r = (e.currentTarget as SVGSVGElement).getBoundingClientRect(), px = ((e.clientX - r.left) / r.width) * 760, py = ((e.clientY - r.top) / r.height) * 300; if (px < 30 || px > 290 || py < 20 || py > 280) return; start = [Math.round((-2 + ((px - 30) / 260) * 4) * 10) / 10, Math.round((2 - ((py - 20) / 260) * 4) * 10) / 10]; redraw(); });
+  });
+</script>

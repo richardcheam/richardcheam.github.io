@@ -1,0 +1,77 @@
+---
+// Foundations, loss post: gradient descent on the bowl L = w₁² + 4w₂², seen
+// from above. Defaults (4, 1), η = 0.1: (3.2, 0.2) L 10.4; (2.56, 0.04) L
+// 6.56; (2.048, 0.008) L 4.1946. At η = 0.2 it zigzags: (2.4, −0.6),
+// (1.44, 0.36), (0.864, −0.216). At 0.25 w₂ bounces between 1 and −1.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-contour>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 320" role="img" aria-labelledby="cd-title" class="blog-diagram-svg" font-family="Inter, sans-serif" style="touch-action: manipulation">
+    <title id="cd-title">Contour lines of a stretched bowl with gradient descent steps drawn on it</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Learning rate η <strong data-v="eta"></strong></span><input class="scrub" data-k="eta" type="range" min="0.01" max="0.3" step="0.01" value="0.1" /></label>
+    <div><span class="fig-panel__name">Start</span><div class="fig-chips"><button type="button" class="fig-chip" data-home>Back to (4, 1)</button></div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt, par } from "../../lib/tiny-net";
+  import { INK, MUTED, JADE, NEG, GOLD } from "../../lib/net-diagram";
+  import { frame, txt, arrow } from "../../lib/plot";
+  const N = 6, L = (a: number, b: number) => a * a + 4 * b * b;
+  const B = { l: 30, t: 30, w: 500, h: 250, x0: -5, x1: 5, y0: -2.5, y1: 2.5 };
+  document.querySelectorAll<HTMLElement>("[data-contour]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    let start = [4, 1], eta = 0.1;
+    const path = () => { const ps = [start]; for (let i = 0; i < N; i++) { const [a, b] = ps[i]; ps.push([a - eta * 2 * a, b - eta * 8 * b]); } return ps; };
+    const steps = () => path().slice(0, N).map(([a, b], i) => {
+      const [na, nb] = path()[i + 1];
+      return {
+        say: i === 0 ? "Measure the slope in each direction separately: 2w₁ east-west, 8w₂ north-south. Together they are the gradient arrow (red, uphill). Step the opposite way." : `Step ${i + 1}: same recipe from the new point.${Math.sign(nb) !== Math.sign(b) && b !== 0 ? " w₂ flipped sign: the step overshot across the narrow valley." : ""}`,
+        math: `gradient = (2 × ${par(a, 4)}, 8 × ${par(b, 4)}) = (${fmt(2 * a, 4)}, ${fmt(8 * b, 4)})\nnew = (${fmt(a, 4)} − ${fmt(eta)} × ${par(2 * a, 4)}, ${fmt(b, 4)} − ${fmt(eta)} × ${par(8 * b, 4)}) = (${fmt(na, 4)}, ${fmt(nb, 4)})\nL = ${fmt(na * na, 4)} + 4 × ${fmt(nb * nb, 4)} = ${fmt(L(na, nb), 4)}`,
+      };
+    });
+    function draw(k: number) {
+      const F = frame(B), ps = path(), n = k + 1;
+      let s = `<clipPath id="cd-clip"><rect x="${B.l}" y="${B.t}" width="${B.w}" height="${B.h}"/></clipPath>`;
+      s += F.grid([-4, -2, 0, 2, 4], [-2, -1, 0, 1, 2], 0);
+      s += `<g clip-path="url(#cd-clip)">`;
+      for (const c of [1, 4, 9, 16, 25, 36]) s += `<ellipse cx="${F.X(0)}" cy="${F.Y(0)}" rx="${Math.sqrt(c) * 50}" ry="${(Math.sqrt(c) / 2) * 50}" fill="none" stroke="${JADE}" stroke-opacity="${0.25 + 0.1 * Math.log(c)}"/>`;
+      // The path so far.
+      s += `<polyline fill="none" stroke="${GOLD}" stroke-width="2" points="${ps.slice(0, n + 1).map(([a, b]) => `${F.X(a)},${F.Y(b)}`).join(" ")}"/>`;
+      ps.slice(0, n + 1).forEach(([a, b], i) => (s += `<circle cx="${F.X(a)}" cy="${F.Y(b)}" r="${i === n ? 6 : 3.5}" fill="${i === n ? INK : GOLD}" stroke="#fff" stroke-width="1.5"/>`));
+      if (k >= 0) {
+        const [a, b] = ps[k], g = [2 * a, 8 * b], sc = 0.12;
+        s += arrow(F.X(a), F.Y(b), F.X(a + g[0] * sc), F.Y(b + g[1] * sc), NEG, 2.2);
+      }
+      s += `</g>`;
+      s += txt(B.l, 18, "Bowl L = w₁² + 4w₂² from above (click to choose a start)", `font-size="12" font-weight="700" fill="${INK}"`);
+      s += txt(B.l + B.w - 4, B.t + B.h + 30, "w₁", `font-size="11" text-anchor="end" fill="${MUTED}"`);
+      // Table.
+      const cx = [560, 600, 680];
+      ["step", "(w₁, w₂)", "loss"].forEach((h, i) => (s += txt(cx[i], 40, h, `font-size="11" font-weight="700" fill="${MUTED}"`)));
+      ps.slice(0, n + 1).forEach(([a, b], i) => {
+        const y = 62 + i * 21;
+        [String(i), `(${fmt(a, 3)}, ${fmt(b, 3)})`, fmt(L(a, b), 3)].forEach((t, j) => (s += txt(cx[j] + (j === 1 ? -10 : 0), y, t, `font-size="11.5" font-weight="${i === n ? 700 : 400}" fill="${INK}"`)));
+      });
+      const f1 = 1 - 2 * eta, f2 = 1 - 8 * eta;
+      s += txt(560, 236, `Each step: w₁ × ${fmt(f1)}, w₂ × ${fmt(f2)}`, `font-size="11.5" font-weight="700" fill="${Math.abs(f2) >= 1 ? NEG : GOLD}"`);
+      s += txt(560, 254, Math.abs(f2) > 1 ? "|w₂ factor| > 1: it runs away." : Math.abs(f2) === 1 ? "w₂ factor is −1: it bounces forever." : f2 < 0 ? "w₂ factor negative: zigzag." : "Both below 1: it closes in.", `font-size="11" fill="${MUTED}"`);
+      s += txt(560, 272, "The narrow direction sets the limit: η < 0.25.", `font-size="11" fill="${MUTED}"`);
+      $("[data-draw]").innerHTML = s;
+      $("[data-v]").textContent = fmt(eta, 2);
+    }
+    const redraw = stepper(root, steps, draw, { delay: 1.8 });
+    $<HTMLInputElement>("[data-k]").addEventListener("input", (e) => { eta = +(e.target as HTMLInputElement).value; redraw(); });
+    $("[data-home]").addEventListener("click", () => { start = [4, 1]; redraw(); });
+    root.querySelector("svg")!.addEventListener("click", (e) => {
+      const r = (e.currentTarget as SVGSVGElement).getBoundingClientRect(), px = ((e.clientX - r.left) / r.width) * 760, py = ((e.clientY - r.top) / r.height) * 320;
+      if (px < B.l || px > B.l + B.w || py < B.t || py > B.t + B.h) return;
+      start = [Math.round(((px - B.l) / 50 - 5) * 10) / 10, Math.round((2.5 - (py - B.t) / 50) * 10) / 10]; redraw();
+    });
+  });
+</script>

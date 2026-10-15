@@ -1,0 +1,96 @@
+---
+// RVQ post, Figure 7: the straight-through estimator. Forward, the decoder
+// receives z_q = z + sg(z_hat - z) = z_hat. Backward, the lookup has zero
+// gradient almost everywhere; straight-through copies the decoder's gradient
+// to z. Toy numbers: z = (3, 1.5), z_hat = (4, 0), incoming gradient (0.2, 0),
+// commitment term 2 beta (z - z_hat) with beta = 0.25.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram stt" role="region" aria-label={alt} data-stt>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 360" role="img" aria-labelledby="stt-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="stt-title">A gradient stopping at the quantizer, or jumping over it with the straight-through trick</title>
+    <g data-graph></g>
+    <path data-bypass d="M285 150 C 300 205, 420 205, 435 150" fill="none" stroke="#4F5D3A" stroke-width="2" stroke-dasharray="5 4" />
+    <circle data-dot r="7" fill="#594578" />
+    <path data-grad d="" fill="#a33b3b" />
+    <text data-gl font-size="11" font-weight="700" fill="#a33b3b" text-anchor="middle"></text>
+    <text data-r1 x="20" y="250" font-size="12.5" fill="#2b2b30"></text>
+    <text data-r2 x="20" y="272" font-size="12.5" fill="#2b2b30"></text>
+    <text data-r3 x="20" y="294" font-size="12.5" font-weight="700" fill="#2b2b30"></text>
+    <text data-r4 x="20" y="316" font-size="12" fill="#2b2b30"></text>
+    <text data-r5 x="20" y="338" font-size="11.5" fill="#5f5f66"></text>
+    <rect x="600" y="230" width="160" height="120" fill="none" stroke="#ececf1" />
+    <g data-inset></g>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Straight-through</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-ste="0" aria-pressed="false">Off</button>
+      <button type="button" class="fig-chip" data-ste="1" aria-pressed="true">On</button>
+    </div></div>
+    <div><span class="fig-panel__name">Commitment loss</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-cm="0" aria-pressed="true">Off</button>
+      <button type="button" class="fig-chip" data-cm="1" aria-pressed="false">On, β = 0.25</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Run one step</button>
+</div>
+
+<script>
+  import { setupFigure, tween, wait } from "../../lib/figure-motion";
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-stt]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const mk = (g: Element, tag: string, a: Record<string, string | number>, txt?: string) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, String(a[k])); if (txt !== undefined) e.textContent = txt; g.append(e); return e; };
+    const boxes = [["encoder", 40], ["quantize", 285], ["decoder", 500], ["loss", 680]] as const;
+    const gg = $("[data-graph]");
+    mk(gg, "line", { x1: 40, x2: 740, y1: 70, y2: 70, stroke: "#d5d5dc", "stroke-width": 2 });
+    mk(gg, "line", { x1: 40, x2: 740, y1: 150, y2: 150, stroke: "#d5d5dc", "stroke-width": 2 });
+    mk(gg, "text", { x: 20, y: 40, "font-size": 11, "font-weight": 700, fill: "#594578" }, "forward →");
+    mk(gg, "text", { x: 20, y: 186, "font-size": 11, "font-weight": 700, fill: "#a33b3b" }, "← backward");
+    boxes.forEach(([n, x]) => { mk(gg, "rect", { x, y: 50, width: n === "loss" ? 60 : 150, height: 120, rx: 6, fill: n === "quantize" ? "#f5eef0" : "#f5f5f8", stroke: "#b9b9c2" }); mk(gg, "text", { x: x + (n === "loss" ? 30 : 75), y: 114, "font-size": 12, "font-weight": 700, "text-anchor": "middle", fill: "#2b2b30" }, n); });
+    mk(gg, "text", { x: 230, y: 62, "font-size": 11, "text-anchor": "middle", fill: "#594578" }, "z = (3, 1.5)");
+    mk(gg, "text", { x: 470, y: 62, "font-size": 11, "text-anchor": "middle", fill: "#594578" }, "z_q = (4, 0)");
+    let ste = true, cm = false, phase = 0, gx = 740, label = "";
+    const z = [3, 1.5], zh = [4, 0], gIn = [0.2, 0], gCm = [2 * 0.25 * (z[0] - zh[0]), 2 * 0.25 * (z[1] - zh[1])];
+    function draw(dotX: number) {
+      const d = $("[data-dot]"); d.setAttribute("cx", String(dotX)); d.setAttribute("cy", "70"); d.style.opacity = phase === 1 ? "1" : "0";
+      $<SVGElement>("[data-bypass]").style.opacity = ste ? "1" : "0.15";
+      const onBypass = ste && gx < 435 && gx > 285, gy = onBypass ? 150 + 46 * Math.sin(((435 - gx) / 150) * Math.PI) : 150;
+      $("[data-grad]").setAttribute("d", phase === 2 ? `M${gx - 2} ${gy} l10 -7 v14 z` : "");
+      const gl = $("[data-gl]"); gl.setAttribute("x", String(gx)); gl.setAttribute("y", String(gy - 12)); gl.textContent = phase === 2 ? label : "";
+      const total = cm ? [gIn[0] + gCm[0], gIn[1] + gCm[1]] : gIn;
+      $("[data-r1]").textContent = "Forward: z_q = z + sg(ẑ − z) = (3, 1.5) + (1, −1.5) = (4, 0). The decoder sees the rounded frame.";
+      $("[data-r2]").textContent = "The loss sends back the gradient (0.2, 0) at z_q: “the first number should go down”.";
+      $("[data-r3]").textContent = ste ? `Gradient reaching z: ${cm ? `(0.2, 0) + commitment (${gCm[0]}, ${gCm[1]}) = (${total[0].toFixed(2)}, ${total[1].toFixed(2)})` : "(0.2, 0), copied straight past the lookup"}` : "Gradient reaching z: (0, 0). The lookup is flat almost everywhere, so the encoder learns nothing.";
+      $("[data-r4]").textContent = cm ? `Commitment loss 0.25 × 3.25 = 0.8125 pulls z towards its entry; its gradient is 2β(z − ẑ) = (${gCm[0]}, ${gCm[1]}).` : "";
+      $("[data-r5]").textContent = "Inset: z (red), its entry ẑ (purple), and one gradient step (−0.5 × gradient).";
+      // Inset: where z moves after one step of size 0.5.
+      const gi = $("[data-inset]"); gi.replaceChildren();
+      const IX = (v: number) => 620 + (v - 2) * 50, IY = (v: number) => 330 - (v + 0.5) * 40;
+      const g = ste ? total : [0, 0], nz = [z[0] - 0.5 * g[0], z[1] - 0.5 * g[1]];
+      mk(gi, "path", { d: `M${IX(zh[0])} ${IY(zh[1]) - 7} l7 7 l-7 7 l-7 -7 z`, fill: "#594578" });
+      mk(gi, "circle", { cx: IX(z[0]), cy: IY(z[1]), r: 5, fill: "#a33b3b", "fill-opacity": 0.4 });
+      mk(gi, "line", { x1: IX(z[0]), y1: IY(z[1]), x2: IX(nz[0]), y2: IY(nz[1]), stroke: "#a33b3b", "stroke-width": 2 });
+      mk(gi, "circle", { cx: IX(nz[0]), cy: IY(nz[1]), r: 5, fill: "#a33b3b" });
+      mk(gi, "text", { x: 606, y: 344, "font-size": 10, fill: "#5f5f66" }, ste ? `z moves to (${nz[0].toFixed(2)}, ${nz[1].toFixed(3).replace(/0+$/, "").replace(/\.$/, "")})` : "z does not move");
+    }
+    async function run(alive: () => boolean) {
+      phase = 1;
+      await tween(1.4, (e) => { if (alive()) draw(40 + e * 700); });
+      if (!alive()) return;
+      phase = 2; gx = 740; label = "(0.2, 0)";
+      await tween(1.0, (e) => { if (alive()) { gx = 740 - e * (740 - 435); draw(0); } });
+      if (!ste) { label = "0: stuck"; draw(0); await wait(0.3); return; }
+      await tween(0.8, (e) => { if (alive()) { gx = 435 - e * 150; draw(0); } });
+      if (cm) label = "+ commitment";
+      await tween(0.8, (e) => { if (alive()) { gx = 285 - e * 245; draw(0); } });
+      phase = 0; draw(0);
+    }
+    const chips = (attr: string, set: (v: boolean) => void) => root.querySelectorAll<HTMLButtonElement>(`[data-${attr}]`).forEach((b) => b.addEventListener("click", () => {
+      set(b.getAttribute(`data-${attr}`) === "1"); root.querySelectorAll(`[data-${attr}]`).forEach((o) => o.setAttribute("aria-pressed", String(o === b))); phase = 0; draw(0);
+    }));
+    chips("ste", (v) => (ste = v)); chips("cm", (v) => (cm = v));
+    draw(0);
+    setupFigure(root, () => { phase = 0; draw(0); }, run);
+  });
+</script>

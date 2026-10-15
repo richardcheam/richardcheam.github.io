@@ -1,0 +1,150 @@
+---
+import "../styles/main.scss";
+import { site, projectLinks } from "../data/site";
+import { series as seriesList } from "../data/series";
+import { publishedPosts, publishedReviews, postUrl, reviewUrl } from "../lib/content";
+
+interface Props {
+  title?: string;
+  description?: string;
+  mainClass?: string;
+  /** Render the standard page heading (h1 with the title), as Jekyll did for ordinary pages. */
+  heading?: boolean;
+  /** Link-preview image, a path under the site. */
+  image?: string;
+}
+const { title, description = site.description, mainClass = "site-main", heading = false, image } = Astro.props;
+const pageTitle = title ?? site.title;
+const imageUrl = new URL(image ?? "/og/site.png", Astro.site).href;
+const path = Astro.url.pathname;
+const isHome = path === "/";
+const megaPosts = await publishedPosts();
+const latest = [...megaPosts].sort((a, b) => b.data.date.getTime() - a.data.date.getTime() || b.data.series_order - a.data.series_order)[0];
+// Topics for the Blog menu: one fixed-height card per series, so the menu
+// stays short however many posts a series gains. A course (Foundations)
+// shows its first three posts as a starting point; other series show their
+// three newest. Numbers stay each post's place in reading order.
+const MEGA_SHOWN = 3;
+const topics = seriesList
+  .map((t) => {
+    const posts = megaPosts.filter((p) => p.data.series === t.key).map((p, i) => ({ p, n: i + 1 }));
+    const course = t.key === "foundations";
+    return { ...t, total: posts.length, course, shown: course ? posts.slice(0, MEGA_SHOWN) : posts.slice(-MEGA_SHOWN).reverse() };
+  })
+  .filter((t) => t.total > 0);
+const reviews = await publishedReviews();
+const reports = reviews.filter((r) => r.data.type === "tech-report");
+const papers = reviews.filter((r) => r.data.type !== "tech-report");
+import SignatureMark from "../components/SignatureMark.astro";
+---
+<!doctype html>
+<html lang="en-US">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{isHome || !title ? site.title : `${title} | ${site.title}`}</title>
+    <meta name="description" content={description} />
+    <meta property="og:title" content={pageTitle} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={new URL(path, Astro.site).href} />
+    <meta property="og:type" content={image ? "article" : "website"} />
+    {imageUrl && <meta property="og:image" content={imageUrl} />}
+    {imageUrl && <meta property="og:image:width" content="1200" />}
+    {imageUrl && <meta property="og:image:height" content="630" />}
+    <meta name="twitter:card" content={imageUrl ? "summary_large_image" : "summary"} />
+    {imageUrl && <meta name="twitter:image" content={imageUrl} />}
+    <meta name="theme-color" content="#ffffff" />
+    <link rel="icon" href="/favicon.ico?v=4" sizes="any" />
+    <link rel="icon" href="/favicon.svg?v=4" type="image/svg+xml" />
+    <link rel="icon" href="/favicon-32.png?v=4" type="image/png" sizes="32x32" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=4" />
+    <link rel="alternate" type="application/atom+xml" title={site.title} href="/feed.xml" />
+    <slot name="head" />
+    <script is:inline src="/js/site.js"></script>
+  </head>
+  <body class={isHome ? "intro-pending" : "intro-complete"} data-page={path}>
+    <div class="scroll-progress" aria-hidden="true"><span id="scroll-progress-bar"></span></div>
+    {isHome && (
+      <div id="intro-screen" class="intro-screen" aria-hidden="true">
+        <div class="intro-screen__inner">
+          <p class="intro-screen__name">{site.title}</p>
+          <p class="intro-screen__subtitle">Machine Learning &amp; AI Engineer</p>
+        </div>
+      </div>
+    )}
+    <header class="site-header" data-mega-root>
+      <div class="site-header__inner">
+        <a class="site-title" href="/"><SignatureMark class="site-title__mark" />Home</a>
+        <nav class="site-nav" aria-label="Primary">
+          <a class="site-nav__item" href="/projects/" data-mega-target="projects" aria-haspopup="true" aria-expanded="false">Projects</a>
+          <a class="site-nav__item" href="/blog/" data-mega-target="blog" aria-haspopup="true" aria-expanded="false">Blog</a>
+          <a class="site-nav__item" href="/paper-reviews/" data-mega-target="paper-reviews" aria-haspopup="true" aria-expanded="false">Paper Reviews</a>
+          <a class="site-nav__item" href="/cv/">About Me</a>
+        </nav>
+      </div>
+      <div class="mega-shell" data-mega-shell aria-hidden="true">
+        <section class="mega-panel mega-panel--single" data-mega-panel="projects">
+          <div class="mega-col mega-col--list">
+            <a class="mega-primary-link mega-primary-link--root" href="/projects/">All Projects</a>
+            {projectLinks.map(([name, href]) => <a class="mega-primary-link" href={href}>{name}</a>)}
+          </div>
+        </section>
+        <section class="mega-panel mega-panel--topics" data-mega-panel="blog">
+          <div class="mega-col mega-col--list">
+            <a class="mega-primary-link mega-primary-link--root" href="/blog/">All posts · {megaPosts.length}</a>
+            {latest && (
+              <div class="mega-latest">
+                <p class="mega-latest__label">Latest</p>
+                <a class="mega-latest__title" href={postUrl(latest)}>{latest.data.title}</a>
+              </div>
+            )}
+          </div>
+          <div class="mega-topics">
+            {topics.map((t) => (
+              <div class="mega-col mega-topic">
+                <h3><a href={`/blog/?series=${t.key}#blog-filters`}>{t.topic} <span class="mega-topic__count">· {t.total} {t.total === 1 ? "post" : "posts"}</span></a></h3>
+                {t.total > MEGA_SHOWN && <p class="mega-topic__label">{t.course ? "Start with" : "Newest"}</p>}
+                <ol class="mega-topic__list">
+                  {t.shown.map(({ p, n }) => (
+                    <li><a href={postUrl(p)}><span class="mega-topic__n">{String(n).padStart(2, "0")}</span><span>{p.data.title}</span></a></li>
+                  ))}
+                </ol>
+                {t.total > MEGA_SHOWN && <a class="mega-col__more" href={`/blog/?series=${t.key}#blog-filters`}>All {t.total} posts</a>}
+              </div>
+            ))}
+          </div>
+        </section>
+        <section class="mega-panel mega-panel--reviews" data-mega-panel="paper-reviews">
+          <div class="mega-col mega-col--list">
+            <a class="mega-primary-link mega-primary-link--root" href="/paper-reviews/">All Paper Reviews</a>
+          </div>
+          {reports.length > 0 && (
+            <div class="mega-col">
+              <h3>Technical reports</h3>
+              {reports.slice(0, 4).map((r) => <a href={reviewUrl(r)}>{r.data.title}</a>)}
+              {reports.length > 4 && <a class="mega-col__more" href="/paper-reviews/?type=tech-report#reviews-library">All {reports.length} reports</a>}
+            </div>
+          )}
+          {papers.length > 0 && (
+            <div class="mega-col">
+              <h3>Papers</h3>
+              {papers.slice(0, 4).map((r) => <a href={reviewUrl(r)}>{r.data.title}</a>)}
+              {papers.length > 4 && <a class="mega-col__more" href="/paper-reviews/?type=paper#reviews-library">All {papers.length} papers</a>}
+            </div>
+          )}
+        </section>
+      </div>
+    </header>
+    <main class={mainClass}>
+      {heading && title && (
+        <header class="page-heading" data-reveal>
+          <h1>{title}</h1>
+        </header>
+      )}
+      <slot />
+    </main>
+    <footer class="site-footer">
+      <p>&copy; {new Date().getFullYear()} {site.title}</p>
+    </footer>
+  </body>
+</html>

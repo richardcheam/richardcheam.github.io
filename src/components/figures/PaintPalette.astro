@@ -1,0 +1,89 @@
+---
+// RVQ post, Figure 1: paint by number. A 8 x 6 picture repainted with the
+// nearest of K palette colours (squared RGB distance). The palette for each K
+// comes from k-means on the 48 cell colours, so it fits this picture.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram pp" role="region" aria-label={alt} data-pp>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 390" role="img" aria-labelledby="pp-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="pp-title">A small picture repainted using only the closest colour from a small box of paints</title>
+    <text x="20" y="22" font-size="11.5" font-weight="700" fill="#2b2b30">The real colours</text>
+    <text x="410" y="22" font-size="11.5" font-weight="700" fill="#2b2b30">Painted from the box (number = paint sent)</text>
+    <g data-left></g>
+    <g data-right></g>
+    <g data-box></g>
+    <text data-r1 x="20" y="330" font-size="12.5" font-weight="700" fill="#2b2b30"></text>
+    <text data-r2 x="20" y="352" font-size="12" fill="#2b2b30"></text>
+    <text data-r3 x="20" y="374" font-size="11.5" fill="#5f5f66"></text>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Paints in the box</span><div class="fig-chips">
+      {[2, 4, 8, 16].map((k) => <button type="button" class="fig-chip" data-k={k} aria-pressed={k === 4 ? "true" : "false"}>{k}</button>)}
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { setupFigure, wait } from "../../lib/figure-motion";
+  const NS = "http://www.w3.org/2000/svg";
+  type C = [number, number, number];
+  document.querySelectorAll<HTMLElement>("[data-pp]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const W = 8, H = 6, S = 40;
+    // A small sunset: sky fading from blue to orange, a sun, green hills.
+    const pic: C[] = [];
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const t = y / 3, sun = Math.hypot(x - 5.5, y - 2.2) < 1.3, hill = y >= 4 || (y === 3 && (x < 3 || x > 6));
+      const c: C = hill ? [60 + x * 6, 120 + (y - 3) * 15 - x * 3, 60] : sun ? [245, 200, 90] : [70 + 170 * t, 110 + 40 * t, 190 - 110 * t];
+      pic.push(c.map((v) => Math.round(Math.max(0, Math.min(255, v)))) as C);
+    }
+    const d2 = (a: C, b: C) => (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2;
+    const nearest = (c: C, pal: C[]) => { let k = 0, d = Infinity; pal.forEach((p, j) => { const q = d2(c, p); if (q < d) { d = q; k = j; } }); return { k, d }; };
+    const kmeans = (K: number): C[] => {
+      // Start from evenly spaced cells (deterministic), then 20 rounds.
+      let pal: C[] = Array.from({ length: K }, (_, j) => pic[Math.floor(((j + 0.5) * pic.length) / K)].slice() as C);
+      for (let it = 0; it < 20; it++) {
+        const sum = pal.map(() => [0, 0, 0, 0]);
+        pic.forEach((c) => { const { k } = nearest(c, pal); sum[k][0] += c[0]; sum[k][1] += c[1]; sum[k][2] += c[2]; sum[k][3]++; });
+        pal = pal.map((p, j) => (sum[j][3] ? [sum[j][0] / sum[j][3], sum[j][1] / sum[j][3], sum[j][2] / sum[j][3]].map(Math.round) as C : p));
+      }
+      return pal;
+    };
+    const rgb = (c: C) => `rgb(${c[0]},${c[1]},${c[2]})`;
+    const lum = (c: C) => 0.3 * c[0] + 0.59 * c[1] + 0.11 * c[2];
+    const mk = (g: Element, tag: string, a: Record<string, string | number>, txt?: string) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, String(a[k])); if (txt !== undefined) e.textContent = txt; g.append(e); return e; };
+    const pals: Record<number, C[]> = { 2: kmeans(2), 4: kmeans(4), 8: kmeans(8), 16: kmeans(16) };
+    pic.forEach((c, i) => mk($("[data-left]"), "rect", { x: 20 + (i % W) * S, y: 34 + Math.floor(i / W) * S, width: S - 2, height: S - 2, fill: rgb(c) }));
+    let K = 4, shown = W * H, sel = 21;
+    function draw() {
+      const pal = pals[K], gr = $("[data-right]"), gb = $("[data-box]"); gr.replaceChildren(); gb.replaceChildren();
+      let err = 0;
+      pic.forEach((c, i) => {
+        const { k, d } = nearest(c, pal); err += d;
+        const x = 410 + (i % W) * S, y = 34 + Math.floor(i / W) * S, on = i < shown, col = on ? pal[k] : c;
+        const r = mk(gr, "rect", { x, y, width: S - 2, height: S - 2, fill: rgb(col), stroke: i === sel ? "#2b2b30" : "none", "stroke-width": 2.5, style: "cursor: pointer" });
+        r.addEventListener("click", () => { sel = i; draw(); });
+        if (on) mk(gr, "text", { x: x + S / 2 - 1, y: y + S / 2 + 4, "font-size": 11, "font-weight": 700, "text-anchor": "middle", fill: lum(col) > 140 ? "#2b2b30" : "#fff", "pointer-events": "none" }, String(k + 1));
+      });
+      // The box of paints, with distances from the selected cell.
+      const c = pic[sel], best = nearest(c, pal).k, bw = Math.min(46, 740 / K);
+      mk(gb, "text", { x: 20, y: 290, "font-size": 11, "font-weight": 700, fill: "#2b2b30" }, "The box:");
+      pal.forEach((p, j) => {
+        const x = 80 + j * bw;
+        mk(gb, "rect", { x, y: 276, width: bw - 4, height: 20, fill: rgb(p), stroke: j === best ? "#2b2b30" : "none", "stroke-width": 2.5 });
+        mk(gb, "text", { x: x + (bw - 4) / 2, y: 290, "font-size": 10, "font-weight": 700, "text-anchor": "middle", fill: lum(p) > 140 ? "#2b2b30" : "#fff" }, String(j + 1));
+        if (K <= 8) mk(gb, "text", { x: x + (bw - 4) / 2, y: 310, "font-size": 9.5, "text-anchor": "middle", fill: j === best ? "#2b2b30" : "#8a8a94", "font-weight": j === best ? 700 : 400 }, (d2(c, p) / 1000).toFixed(1) + "k");
+      });
+      const bits = Math.log2(K);
+      $("[data-r1]").textContent = `${K} paints: each cell sends ${bits} bit${bits === 1 ? "" : "s"}, so the picture costs ${48 * bits} bits.`;
+      $("[data-r2]").textContent = `Average colour error: ${Math.round(err / 48).toLocaleString("en")} (squared RGB distance). More paints, smaller error, more bits.`;
+      $("[data-r3]").textContent = K <= 8 ? `Outlined cell: distance to every paint shown under the box (in thousands); the smallest, ${best + 1}, wins. Click any cell.` : "Click any cell to outline its paint in the box.";
+    }
+    root.querySelectorAll<HTMLButtonElement>("[data-k]").forEach((b) => b.addEventListener("click", async () => {
+      K = +b.dataset.k!; root.querySelectorAll("[data-k]").forEach((o) => o.setAttribute("aria-pressed", String(o === b))); draw();
+    }));
+    draw();
+    setupFigure(root, () => { shown = 0; draw(); }, async (alive) => { for (let i = 1; i <= 48; i++) { await wait(0.04); if (!alive()) return; shown = i; draw(); } });
+  });
+</script>

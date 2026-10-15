@@ -1,0 +1,93 @@
+---
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" tabindex="0" role="region" aria-label={alt} data-modes>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 52 780 233" role="img" aria-labelledby="collapse-modes-title collapse-modes-desc" class="blog-diagram-svg" font-family="Inter, sans-serif">
+  <title id="collapse-modes-title">Four states a representation can be in</title><desc id="collapse-modes-desc">Four point clouds. A healthy cloud fills the space. A dimensionally collapsed cloud is flattened onto a line. A cone-anisotropic cloud keeps its spread but points one way from the origin. A completely collapsed cloud is a single point. Shape here is schematic, not measured data.</desc>
+  <g fill="none" stroke="#d5d5dc" stroke-width="1">
+    <rect x="30" y="78" width="165" height="140" /><rect x="215" y="78" width="165" height="140" />
+    <rect x="400" y="78" width="165" height="140" /><rect x="585" y="78" width="165" height="140" />
+  </g>
+
+  <g data-panel="0" fill="#4F5D3A">
+    <circle cx="70" cy="118" r="4" /><circle cx="104" cy="100" r="4" /><circle cx="140" cy="108" r="4" />
+    <circle cx="163" cy="130" r="4" /><circle cx="166" cy="162" r="4" /><circle cx="146" cy="188" r="4" />
+    <circle cx="112" cy="196" r="4" /><circle cx="78" cy="180" r="4" /><circle cx="58" cy="150" r="4" />
+    <circle cx="100" cy="146" r="4" /><circle cx="128" cy="164" r="4" /><circle cx="134" cy="134" r="4" />
+  </g>
+
+  <g data-panel="1" fill="#A8503A">
+    <circle cx="247" cy="182" r="4" /><circle cx="268" cy="172" r="4" /><circle cx="289" cy="166" r="4" />
+    <circle cx="310" cy="154" r="4" /><circle cx="331" cy="148" r="4" /><circle cx="352" cy="136" r="4" />
+    <circle cx="258" cy="178" r="4" /><circle cx="300" cy="158" r="4" /><circle cx="342" cy="140" r="4" />
+  </g>
+
+  <g data-cone-lines stroke="#5f5f66" stroke-width="1" stroke-dasharray="4 4" opacity="0.8">
+    <line x1="408" y1="212" x2="547" y2="132" /><line x1="408" y1="212" x2="521" y2="99" />
+  </g>
+  <circle data-cone-origin cx="408" cy="212" r="3" fill="#5f5f66" />
+  <g data-panel="2" fill="#A8503A">
+    <circle cx="448" cy="182" r="4" /><circle cx="466" cy="173" r="4" /><circle cx="461" cy="166" r="4" />
+    <circle cx="492" cy="158" r="4" /><circle cx="485" cy="148" r="4" /><circle cx="515" cy="137" r="4" />
+    <circle cx="505" cy="125" r="4" /><circle cx="530" cy="117" r="4" />
+  </g>
+
+  <g data-panel="3" fill="#A8503A">
+    <circle cx="665" cy="146" r="4" /><circle cx="668" cy="149" r="4" /><circle cx="662" cy="150" r="4" />
+    <circle cx="667" cy="144" r="4" /><circle cx="664" cy="148" r="4" /><circle cx="670" cy="147" r="4" />
+  </g>
+
+  <g fill="#111111" font-size="17">
+    <text x="30" y="244">Healthy</text><text x="215" y="244">Dimensional</text>
+    <text x="400" y="244">Cone</text><text x="585" y="244">Complete</text>
+  </g>
+  <g fill="#5f5f66" font-size="14">
+    <text x="30" y="266">all directions used</text><text x="215" y="266">spread on one line</text>
+    <text x="400" y="266">spread, one heading</text><text x="585" y="266">one point, no info</text>
+  </g>
+
+  </svg>
+<button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+<p class="blog-figure-reading">Only the fourth is what “collapse” usually brings to mind</p>
+<p class="blog-figure-reading">The middle two keep a healthy-looking spread and still lose the structure retrieval depends on.</p>
+
+<script>
+  import { animate, dur, setupFigure, wait } from "../../lib/figure-motion";
+
+  // Every panel starts as a copy of the healthy cloud and then degenerates:
+  // flattened onto one line, pushed into one heading, shrunk to one point.
+  document.querySelectorAll<HTMLElement>("[data-modes]").forEach((root) => {
+    const panel = (k: number) => Array.from(root.querySelectorAll<SVGCircleElement>(`[data-panel="${k}"] circle`));
+    const healthy = panel(0).map((c) => [+c.getAttribute("cx")!, +c.getAttribute("cy")!]);
+    const offsets = [0, 185, 370, 555];
+    const coneLines = root.querySelector<SVGGElement>("[data-cone-lines]")!;
+    const coneOrigin = root.querySelector<SVGCircleElement>("[data-cone-origin]")!;
+    // Translation from a healthy point (copied into panel k) to each final point.
+    const from = (k: number) => panel(k).map((c, i) => {
+      const [hx, hy] = healthy[(i * 5) % healthy.length];
+      return `translate(${hx + offsets[k] - +c.getAttribute("cx")!}px, ${hy - +c.getAttribute("cy")!}px)`;
+    });
+    setupFigure(
+      root,
+      () => {
+        panel(0).forEach((c) => (c.style.opacity = "0"));
+        for (let k = 1; k < 4; k++) { const f = from(k); panel(k).forEach((c, i) => { c.style.opacity = "0"; c.style.transform = f[i]; }); }
+        coneLines.style.opacity = "0"; coneOrigin.style.opacity = "0";
+      },
+      async (alive) => {
+        panel(0).forEach((c, i) => animate(c, { opacity: [0, 1] }, { duration: dur(0.3), delay: dur(i * 0.03) }));
+        await wait(0.5);
+        for (let k = 1; k < 4; k++) panel(k).forEach((c) => animate(c, { opacity: [0, 1] }, { duration: dur(0.3) }));
+        await wait(0.6);
+        for (let k = 1; k < 4; k++) {
+          if (!alive()) return;
+          const f = from(k);
+          if (k === 2) { animate(coneOrigin, { opacity: [0, 1] }, { duration: dur(0.3) }); animate(coneLines, { opacity: [0, 0.8] }, { duration: dur(0.5), delay: dur(0.6) }); }
+          await Promise.all(panel(k).map((c, i) => animate(c, { transform: [f[i], "translate(0px, 0px)"] }, { duration: dur(1.1), ease: [0.65, 0, 0.35, 1] })));
+          await wait(0.15);
+        }
+      },
+    );
+  });
+</script>

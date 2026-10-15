@@ -1,0 +1,72 @@
+---
+// Foundations, neurons post: backpropagation through the tiny network. Each
+// step multiplies the blame arriving from the right by one local slope.
+// Defaults give gradients v: −0.25, −0.125, c: −0.25; neuron 1: −0.25, −0.5,
+// −0.25; neuron 2: 0.25, 0.5, 0.25. With x₁ = 2, neuron 2's gradients are 0.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-bwd>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 370" role="img" aria-labelledby="bwd-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="bwd-title">Blame flowing backwards from the loss to every weight of the tiny network</title>
+    <g data-net></g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Input x₁ <strong data-vx1></strong></span><input class="scrub" data-x1 type="range" min="-2" max="2" step="0.25" value="1" /></label>
+    <label><span class="fig-panel__name">Input x₂ <strong data-vx2></strong></span><input class="scrub" data-x2 type="range" min="-2" max="2" step="0.25" value="2" /></label>
+    <label><span class="fig-panel__name">Target y <strong data-vy></strong></span><input class="scrub" data-y type="range" min="-2" max="2" step="0.25" value="1" /></label>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { NET0, forward, backward, fmt, par } from "../../lib/tiny-net";
+  import { netSvg } from "../../lib/net-diagram";
+  document.querySelectorAll<HTMLElement>("[data-bwd]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const n = NET0;
+    let x = [1, 2], y = 1;
+    const st = () => { const f = forward(n, x, y); return { f, g: backward(n, f, x) }; };
+    const through = (i: number) => {
+      const { f, g } = st(), z = f.z[i], s = i ? "₂" : "₁";
+      return z > 0
+        ? { say: `z${s} = ${fmt(z)} was positive, so ReLU's slope is 1 and the blame passes through unchanged.`, math: `δz${s} = δh${s} × ReLU′(${fmt(z)}) = ${par(g.dh[i])} × 1 = ${fmt(g.dz[i])}` }
+        : { say: `z${s} = ${fmt(z)} was not positive, so ReLU's slope is 0: a jammed gear. No blame gets through, and neuron ${i + 1} learns nothing from this example.`, math: `δz${s} = δh${s} × ReLU′(${fmt(z)}) = ${par(g.dh[i])} × 0 = 0` };
+    };
+    const steps = () => {
+      const { f, g } = st();
+      return [
+        { say: "Start at the loss. Its slope with respect to the prediction is simply the error: negative means the guess was too low.", math: `δŷ = ŷ − y = ${fmt(f.yh)} − ${par(y)} = ${fmt(g.dyh)}` },
+        { say: "Weight v₁ multiplies h₁, so its slope is h₁. Multiply the blame by it.", math: `∂L/∂v₁ = δŷ × h₁ = ${par(g.dyh)} × ${fmt(f.h[0])} = ${fmt(g.dv[0])}` },
+        { say: "Weight v₂ multiplies h₂, so its slope is h₂.", math: `∂L/∂v₂ = δŷ × h₂ = ${par(g.dyh)} × ${fmt(f.h[1])} = ${fmt(g.dv[1])}` },
+        { say: "The bias c is simply added, so its slope is 1: it gets the blame unchanged.", math: `∂L/∂c = δŷ × 1 = ${fmt(g.dc)}` },
+        { say: "Pass the blame back to h₁. The output multiplied h₁ by v₁, so the slope is v₁.", math: `δh₁ = δŷ × v₁ = ${par(g.dyh)} × ${par(n.v[0])} = ${fmt(g.dh[0])}` },
+        { say: "Pass the blame back to h₂ through v₂. A negative weight flips the sign: raising h₂ would lower ŷ.", math: `δh₂ = δŷ × v₂ = ${par(g.dyh)} × ${par(n.v[1])} = ${fmt(g.dh[1])}` },
+        through(0),
+        through(1),
+        { say: "Into neuron 1's weights: each weight's slope is the input it multiplied, and the bias's slope is 1.", math: `∂L/∂w₁₁ = ${par(g.dz[0])} × ${par(x[0])} = ${fmt(g.dW[0][0])}\n∂L/∂w₁₂ = ${par(g.dz[0])} × ${par(x[1])} = ${fmt(g.dW[0][1])}\n∂L/∂b₁ = ${fmt(g.db[0])}` },
+        { say: "The same for neuron 2. A bigger input means a bigger share of the blame.", math: `∂L/∂w₂₁ = ${par(g.dz[1])} × ${par(x[0])} = ${fmt(g.dW[1][0])}\n∂L/∂w₂₂ = ${par(g.dz[1])} × ${par(x[1])} = ${fmt(g.dW[1][1])}\n∂L/∂b₂ = ${fmt(g.db[1])}` },
+        { say: "All nine gradients, from one walk backwards. Negative means raising that number lowers the loss; positive means lowering it does.", math: `v₁ ${fmt(g.dv[0])}   v₂ ${fmt(g.dv[1])}   c ${fmt(g.dc)}\nw₁₁ ${fmt(g.dW[0][0])}   w₁₂ ${fmt(g.dW[0][1])}   b₁ ${fmt(g.db[0])}\nw₂₁ ${fmt(g.dW[1][0])}   w₂₂ ${fmt(g.dW[1][1])}   b₂ ${fmt(g.db[1])}` },
+      ];
+    };
+    const HL = [["o", "L"], ["v1", "h1", "o"], ["v2", "h2", "o"], ["c", "o"], ["h1", "v1", "o"], ["h2", "v2", "o"], ["h1", "z1"], ["h2", "z2"], ["w11", "w12", "b1", "x1", "x2", "h1"], ["w21", "w22", "b2", "x1", "x2", "h2"], []];
+    function draw(k: number) {
+      const { f, g } = st();
+      const grads = new Map<string, number>(), blame = new Map<string, string>();
+      if (k >= 0) blame.set("o", `δŷ = ${fmt(g.dyh)}`);
+      if (k >= 1) grads.set("v1", g.dv[0]);
+      if (k >= 2) grads.set("v2", g.dv[1]);
+      if (k >= 3) grads.set("c", g.dc);
+      [0, 1].forEach((i) => {
+        const s = i ? "₂" : "₁";
+        if (k >= 4 + i) blame.set(`h${i + 1}`, `δh${s} = ${fmt(g.dh[i])}` + (k >= 6 + i ? `\nδz${s} = ${fmt(g.dz[i])}` : ""));
+        if (k >= 8 + i) { grads.set(`w${i + 1}1`, g.dW[i][0]); grads.set(`w${i + 1}2`, g.dW[i][1]); grads.set(`b${i + 1}`, g.db[i]); }
+      });
+      $("[data-net]").innerHTML = netSvg({ net: n, x, y, f, show: new Set(["x1", "x2", "z1", "h1", "z2", "h2", "o", "err", "L"]), hl: new Set(k >= 0 ? HL[k] : []), grads, blame });
+      $("[data-vx1]").textContent = fmt(x[0]); $("[data-vx2]").textContent = fmt(x[1]); $("[data-vy]").textContent = fmt(y);
+    }
+    const redraw = stepper(root, steps, draw, { delay: 1.9 });
+    const bind = (sel: string, set: (v: number) => void) => $<HTMLInputElement>(sel).addEventListener("input", (e) => { set(+(e.target as HTMLInputElement).value); redraw(); });
+    bind("[data-x1]", (v) => (x = [v, x[1]])); bind("[data-x2]", (v) => (x = [x[0], v])); bind("[data-y]", (v) => (y = v));
+  });
+</script>

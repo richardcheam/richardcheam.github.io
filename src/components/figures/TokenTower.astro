@@ -1,0 +1,93 @@
+---
+// Moshi review, Figure 3: one column of Moshi's joint sequence (Eq 6, p. 17;
+// Fig 4, p. 15). Floor 1 text, 2 Moshi semantic, 3 to 9 Moshi acoustic,
+// 10 user semantic, 11 to 17 user acoustic. At inference Moshi samples
+// floors 1 to 9 and the user's floors come from the microphone (Sec 3.4.4, p. 17).
+const { alt } = Astro.props;
+const floors = Array.from({ length: 17 }, (_, i) => {
+  const k = i + 1;
+  if (k === 1) return { k, name: "Moshi's text", kind: "text", who: "moshi" };
+  if (k === 2) return { k, name: "Moshi semantic", kind: "sem", who: "moshi" };
+  if (k <= 9) return { k, name: `Moshi acoustic ${k - 2}`, kind: "ac", who: "moshi" };
+  if (k === 10) return { k, name: "User semantic", kind: "sem", who: "user" };
+  return { k, name: `User acoustic ${k - 10}`, kind: "ac", who: "user" };
+});
+---
+<div class="blog-diagram tow" role="region" aria-label={alt} data-tow>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 420" role="img" aria-labelledby="tow-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="tow-title">The 17 tokens of one 80 ms step, and which ones Moshi chooses</title>
+    {floors.map((f) => (
+      <g data-floor={f.k} style="cursor: pointer">
+        <rect x="60" y={392 - f.k * 22} width="170" height="19" rx="2" fill="#ececf1" data-cell />
+        <text x="52" y={406 - f.k * 22} font-size="10" text-anchor="end" fill="#5f5f66">{f.k}</text>
+        <text x="68" y={406 - f.k * 22} font-size="10.5" fill="#2b2b30" data-lab>{f.name}</text>
+      </g>
+    ))}
+    <text x="60" y="404" font-size="10.5" fill="#5f5f66">filled bottom to top by the Depth Transformer</text>
+    <path data-arrow d="" fill="#594578" />
+    <text x="290" y="40" font-size="11.5" font-weight="700" fill="#2b2b30">Click a floor</text>
+    <text data-i1 x="290" y="64" font-size="12.5" font-weight="700" fill="#2b2b30"></text>
+    <text data-i2 x="290" y="86" font-size="12" fill="#2b2b30"></text>
+    <text data-i3 x="290" y="106" font-size="12" fill="#2b2b30"></text>
+    <text x="290" y="160" font-size="11.5" font-weight="700" fill="#2b2b30">Per 80 ms step</text>
+    <text data-n1 x="290" y="184" font-size="12" fill="#2b2b30"></text>
+    <text data-n2 x="290" y="204" font-size="12" fill="#2b2b30"></text>
+    <text data-n3 x="290" y="224" font-size="12" fill="#2b2b30"></text>
+    <rect x="290" y="270" width="14" height="14" fill="#4F5D3A" /><text x="312" y="282" font-size="11" fill="#2b2b30">sampled by Moshi</text>
+    <rect x="290" y="294" width="14" height="14" fill="#35588a" /><text x="312" y="306" font-size="11" fill="#2b2b30">written in from the microphone</text>
+    <rect x="290" y="318" width="14" height="14" fill="#b8722c" /><text x="312" y="330" font-size="11" fill="#2b2b30">predicted, and scored in training</text>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Mode</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-mode="inf" aria-pressed="true">Talking to you</button>
+      <button type="button" class="fig-chip" data-mode="train" aria-pressed="false">Training</button>
+      <button type="button" class="fig-chip" data-mode="noim" aria-pressed="false">Without Inner Monologue</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { setupFigure, wait } from "../../lib/figure-motion";
+  document.querySelectorAll<HTMLElement>("[data-tow]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const gs = [...root.querySelectorAll<SVGGElement>("[data-floor]")];
+    let mode = "inf", sel = 1, filled = 17;
+    const info = (k: number) => {
+      if (k === 1) return ["Floor 1: Moshi's own words, as text.", "A word piece, or PAD (nothing new) / EPAD (a word starts next).", "The Inner Monologue: written just before the sound."];
+      if (k === 2) return ["Floor 2: Moshi's semantic token.", "Mimi's first codebook: which speech sound, distilled from WavLM.", "Chosen after the text floor, so the words steer the sound."];
+      if (k <= 9) return [`Floor ${k}: Moshi's acoustic token ${k - 2} of 7.`, "Mimi codebooks 2 to 8: voice, timbre, room.", "Delayed one step behind the semantic token (Sec 3.4.2)."];
+      if (k === 10) return ["Floor 10: your semantic token.", "In a live call Moshi does not guess it: Mimi encodes your microphone.", "In training the model predicts it too, which lets it play both sides."];
+      return [`Floor ${k}: your acoustic token ${k - 10} of 7.`, "From your microphone at inference.", "No text floor for you: that would need a live ASR (Sec 3.4.4, p. 16)."];
+    };
+    function colour(k: number) {
+      if (mode === "noim" && k === 1) return "#ececf1";
+      if (k <= 9) return "#4F5D3A";
+      return mode === "train" ? "#b8722c" : "#35588a";
+    }
+    function draw() {
+      gs.forEach((g) => {
+        const k = +g.dataset.floor!, r = g.querySelector("[data-cell]")!, on = k <= filled && !(mode === "noim" && k === 1);
+        r.setAttribute("fill", on ? colour(k) : "#ececf1");
+        r.setAttribute("stroke", k === sel ? "#a33b3b" : "none"); r.setAttribute("stroke-width", "2");
+        g.querySelector("[data-lab]")!.setAttribute("fill", on ? "#fff" : mode === "noim" && k === 1 ? "#b9b9c2" : "#2b2b30");
+      });
+      $("[data-arrow]").setAttribute("d", filled < 17 ? `M240 ${392 - (filled + 1) * 22 + 10} l9 -6 v12 z` : "");
+      const [a, b, c] = mode === "noim" && sel === 1 ? ["Floor 1 is gone without Inner Monologue.", "Each step then holds 16 tokens (Sec 5.5, p. 30).", "Spoken QA accuracy drops to about a third (Table 8, p. 29)."] : info(sel);
+      $("[data-i1]").textContent = a; $("[data-i2]").textContent = b; $("[data-i3]").textContent = c;
+      const K = mode === "noim" ? 16 : 17, own = mode === "noim" ? 8 : 9;
+      $("[data-n1]").textContent = `Tokens: K = ${mode === "noim" ? "2Q" : "2Q + 1"} = ${K}, with Q = 8 Mimi codebooks per speaker.`;
+      $("[data-n2]").textContent = mode === "train" ? `Predicted and scored: all ${K} floors.` : `Sampled by Moshi: ${own} (floors ${mode === "noim" ? "2" : "1"} to 9).`;
+      $("[data-n3]").textContent = mode === "train" ? "Both speakers are predicted, so it can invent whole dialogues." : `From your microphone: 8 (floors 10 to 17).`;
+    }
+    gs.forEach((g) => g.addEventListener("click", () => { sel = +g.dataset.floor!; draw(); }));
+    root.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach((b) => b.addEventListener("click", () => {
+      mode = b.dataset.mode!; root.querySelectorAll("[data-mode]").forEach((o) => o.setAttribute("aria-pressed", String(o === b))); draw();
+    }));
+    draw();
+    setupFigure(root, () => { filled = 0; draw(); }, async (alive) => {
+      for (let k = 1; k <= 17; k++) { await wait(k <= 2 ? 0.5 : 0.18); if (!alive()) return; filled = k; sel = k; draw(); }
+      sel = 1; draw();
+    });
+  });
+</script>

@@ -1,0 +1,144 @@
+---
+// Additive vs insertive injection over one long conversation with three
+// retrievals of l = 17 vectors each (schematic lengths). Insertive splices the
+// vectors in as new positions, so the sequence grows; additive stacks them on
+// positions that exist anyway. Below: Table 6 of the paper (Appendix B.1.1),
+// ground-truth transcripts, reference injected at the start of the
+// conversation, Gemma 3 27B judge.
+const { alt } = Astro.props;
+const N = 60, L = 17, R = [8, 26, 44];
+const X0 = 150, S = 5.55, W = 4.4;
+// Insertive layout: position of each conversation cell after splices.
+const insCells: { x: number; ref: boolean; r?: number }[] = [];
+{
+  let p = 0;
+  for (let i = 0; i < N; i++) {
+    const ri = R.indexOf(i);
+    if (ri >= 0) for (let k = 0; k < L; k++) insCells.push({ x: X0 + p++ * S, ref: true, r: ri });
+    insCells.push({ x: X0 + p++ * S, ref: false });
+  }
+}
+const addRef = (i: number) => R.findIndex((r) => i >= r && i < r + L);
+const table = [
+  { enc: "T5 (uncompressed)", rows: [{ set: "TriviaQA", ins: 82.0, add: 28.5 }, { set: "HaluEval", ins: 47.1, add: 13.9 }] },
+  { enc: "ARC-Encoder ×4 (shipped)", rows: [{ set: "TriviaQA", ins: 82.2, add: 73.1 }, { set: "HaluEval", ins: 49.0, add: 41.8 }] },
+];
+const BX = [150, 450], BW = 1.8;
+---
+<div class="blog-diagram im" tabindex="0" role="region" aria-label={alt} data-im>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 400" role="img" aria-labelledby="im-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="im-title">Additive and insertive injection compared</title>
+    <g font-size="11.5" fill="#2b2b30">
+      <text x="14" y="44">insertive</text>
+      <text x="14" y="124">additive</text>
+      <text x="14" y="134" font-size="9.5" fill="#5f5f66" dy="12">MoshiRAG's choice</text>
+    </g>
+    <text x="14" y="56" font-size="9.5" fill="#5f5f66">new positions</text>
+
+    <!-- insertive sequence -->
+    <g data-ins>
+      {insCells.map((c, j) => <rect data-j={j} data-ref={c.ref ? c.r : undefined} x={c.x} y={c.ref ? 30 : 36} width={W} height={c.ref ? 22 : 16} rx="1" fill={c.ref ? "#4F5D3A" : "#594578"} fill-opacity={c.ref ? 0.75 : 0.45} />)}
+    </g>
+    <text data-inslen x="150" y="74" font-size="11" fill="#2b2b30" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">{N + R.length * L} positions</text>
+
+    <!-- additive sequence -->
+    <g data-add>
+      {Array.from({ length: N }, (_, i) => (
+        <g>
+          <rect x={X0 + i * S * ((N + R.length * L) / N)} y="116" width={W} height="16" rx="1" fill="#594578" fill-opacity="0.45" />
+          {addRef(i) >= 0 && <rect data-cap={addRef(i)} x={X0 + i * S * ((N + R.length * L) / N)} y="108" width={W} height="7" rx="1" fill="#4F5D3A" fill-opacity="0.75" />}
+        </g>
+      ))}
+    </g>
+    <text data-addlen x="150" y="154" font-size="11" fill="#2b2b30" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">{N} positions, always</text>
+    <g font-size="9.5" fill="#5f5f66">
+      <rect x="560" y="164" width="8" height="8" fill="#594578" fill-opacity="0.45" /><text x="572" y="172">conversation step</text>
+      <rect x="664" y="164" width="8" height="8" fill="#4F5D3A" fill-opacity="0.75" /><text x="676" y="172">reference vector</text>
+    </g>
+
+    <!-- Table 6 -->
+    <line x1="14" y1="194" x2="766" y2="194" stroke="#ececf1" />
+    <text x="14" y="216" font-size="11" letter-spacing="1" fill="#5f5f66">TABLE 6 · ACCURACY %, SAME REFERENCES, BEST CASE TIMING</text>
+    {table.map((t, ti) => (
+      <g>
+        <text x={BX[ti]} y="244" font-size="11.5" font-weight="600" fill="#2b2b30">{t.enc}</text>
+        {t.rows.map((r, ri) => {
+          const y = 262 + ri * 64;
+          return (
+            <g>
+              <text x={BX[ti]} y={y + 8} font-size="10" fill="#5f5f66">{r.set}</text>
+              <rect data-bar x={BX[ti] + 62} y={y} width={r.ins * BW} height="12" rx="1.5" fill="#594578" fill-opacity="0.35" />
+              <text data-num x={BX[ti] + 66 + r.ins * BW} y={y + 10} font-size="10" fill="#2b2b30">{r.ins.toFixed(1)} insertive</text>
+              <rect data-bar x={BX[ti] + 62} y={y + 18} width={r.add * BW} height="12" rx="1.5" fill="#4F5D3A" fill-opacity="0.8" />
+              <text data-num x={BX[ti] + 66 + r.add * BW} y={y + 28} font-size="10" font-weight="600" fill="#2b2b30">{r.add.toFixed(1)} additive</text>
+            </g>
+          );
+        })}
+      </g>
+    ))}
+    <text x="14" y="392" font-size="10" fill="#5f5f66">Insertive wins both times; addition loses information. With the long T5 encoding the reference also streams in too late, and additive nearly collapses.</text>
+  </svg>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { animate, dur, setupFigure, wait } from "../../lib/figure-motion";
+
+  // Three retrievals happen in turn. Insertive: the conversation to the right
+  // slides over to make room and the counter grows. Additive: caps drop onto
+  // existing steps and the counter does not move. Then the bars grow.
+  const N = 60, L = 17, S = 5.55;
+  document.querySelectorAll<HTMLElement>("[data-im]").forEach((root) => {
+    const insCells = Array.from(root.querySelectorAll<SVGRectElement>("[data-ins] rect"));
+    const caps = Array.from(root.querySelectorAll<SVGRectElement>("[data-cap]"));
+    const bars = Array.from(root.querySelectorAll<SVGRectElement>("[data-bar]"));
+    const nums = Array.from(root.querySelectorAll<SVGTextElement>("[data-num]"));
+    const insLen = root.querySelector<SVGTextElement>("[data-inslen]")!;
+    // For each insertive cell, how many reference blocks sit to its left (shift).
+    const shiftOf = insCells.map((c) => {
+      const j = +c.dataset.j!; let before = 0;
+      insCells.slice(0, j).forEach((o) => { if (o.dataset.ref !== undefined) before++; });
+      return Math.floor(before / L);
+    });
+    const ownBlock = insCells.map((c) => (c.dataset.ref !== undefined ? +c.dataset.ref : -1));
+
+    const place = (done: number) => {
+      insCells.forEach((c, j) => {
+        const back = (shiftOf[j] - Math.min(shiftOf[j], done)) * L * S;
+        c.style.transform = `translateX(${-back}px)`;
+        c.style.opacity = ownBlock[j] >= 0 && ownBlock[j] >= done ? "0" : "1";
+      });
+      caps.forEach((c) => (c.style.opacity = +c.dataset.cap! < done ? "1" : "0"));
+      insLen.textContent = `${N + done * L} positions`;
+    };
+
+    setupFigure(
+      root,
+      () => {
+        place(0);
+        bars.forEach((b) => { b.style.transformBox = "fill-box"; b.style.transformOrigin = "0% 50%"; b.style.transform = "scaleX(0)"; });
+        nums.forEach((n) => (n.style.opacity = "0"));
+      },
+      async (alive) => {
+        for (let r = 0; r < 3; r++) {
+          await wait(0.35);
+          if (!alive()) return;
+          insCells.forEach((c, j) => {
+            if (ownBlock[j] === r) animate(c, { opacity: [0, 1], transform: ["translateY(-10px)", "translateY(0px)"] }, { duration: dur(0.4) });
+            else if (shiftOf[j] > r) {
+              const from = (shiftOf[j] - r) * L * S, to = (shiftOf[j] - r - 1) * L * S;
+              animate(c, { transform: [`translateX(${-from}px)`, `translateX(${-to}px)`] }, { duration: dur(0.55), ease: [0.65, 0, 0.35, 1] });
+            }
+          });
+          caps.filter((c) => +c.dataset.cap! === r).forEach((c, k) => animate(c, { opacity: [0, 1], transform: ["translateY(-10px)", "translateY(0px)"] }, { duration: dur(0.3), delay: dur(k * 0.02) }));
+          insLen.textContent = `${N + (r + 1) * L} positions`;
+          await wait(0.6);
+        }
+        if (!alive()) return;
+        bars.forEach((b, k) => animate(b, { transform: ["scaleX(0)", "scaleX(1)"] }, { duration: dur(0.6), delay: dur(k * 0.08), ease: [0.22, 1, 0.36, 1] }));
+        await wait(0.6);
+        nums.forEach((n) => animate(n, { opacity: [0, 1] }, { duration: dur(0.3) }));
+      },
+    );
+  });
+</script>

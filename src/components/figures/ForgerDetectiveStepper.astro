@@ -1,0 +1,51 @@
+---
+// Foundations, GANs post: the detective's binary cross-entropy on three real
+// scores (0.9, 0.8, 0.6) and three fake scores (0.3, 0.2, 0.5): 0.352. The
+// forger's saturating loss on the fakes −0.4243, non-saturating 1.1689.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-forger>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 230" role="img" aria-labelledby="fd-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="fd-title">Six notes with the detective's scores, and the losses computed from them</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Third fake's score <strong data-vf></strong></span><input class="scrub" data-f type="range" min="0.01" max="0.99" step="0.01" value="0.5" /></label>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt } from "../../lib/tiny-net";
+  import { INK, MUTED, GOLD, TINT, JADE, NEG } from "../../lib/net-diagram";
+  import { txt } from "../../lib/plot";
+  document.querySelectorAll<HTMLElement>("[data-forger]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const R = [0.9, 0.8, 0.6], F = [0.3, 0.2, 0.5];
+    const f4 = (v: number) => fmt(v, 4);
+    const terms = () => [...R.map((d) => -Math.log(d)), ...F.map((d) => -Math.log(1 - d))];
+    const steps = () => { const t = terms(), sum = t.reduce((a, b) => a + b, 0), sat = F.reduce((s, d) => s + Math.log(1 - d), 0) / 3, ns = F.reduce((s, d) => s - Math.log(d), 0) / 3; return [
+      ...R.map((d, i) => ({ say: `Real note ${i + 1}: the detective should say "real". Its surprise is −log D.`, math: `−log ${fmt(d)} = ${f4(t[i])}` })),
+      ...F.map((d, i) => ({ say: `Fake note ${i + 1}: the detective should say "fake". Its surprise is −log(1 − D).`, math: `−log(1 − ${fmt(d)}) = −log ${fmt(1 - d)} = ${f4(t[3 + i])}` })),
+      { say: "Average the six surprises: the detective's loss, plain binary cross-entropy.", math: `L_D = ${f4(sum)} / 6 = ${fmt(sum / 6, 3)}` },
+      { say: "The forger's saturating loss: the average of log(1 − D) on its fakes, to be made smaller.", math: `(${F.map((d) => `(${f4(Math.log(1 - d))})`).join(" + ")}) / 3 = ${f4(sat)}` },
+      { say: "The non-saturating loss: the forger's surprise that its fakes were called real.", math: `(${F.map((d) => f4(-Math.log(d))).join(" + ")}) / 3 = ${f4(ns)}` },
+    ]; };
+    function draw(k: number) {
+      const t = terms();
+      let s = "";
+      [...R, ...F].forEach((d, i) => {
+        const x = 40 + i * 118, real = i < 3, on = k === i;
+        s += `<rect x="${x}" y="30" width="96" height="60" rx="8" fill="${on ? TINT : "#fff"}" stroke="${real ? JADE : NEG}" stroke-width="${on ? 3 : 1.5}"/>` + txt(x + 48, 52, real ? `real ${i + 1}` : `fake ${i - 2}`, `font-size="11" text-anchor="middle" fill="${real ? JADE : NEG}"`) + txt(x + 48, 76, `D = ${fmt(d, 2)}`, `font-size="14" font-weight="700" text-anchor="middle" fill="${INK}"`);
+        s += `<rect x="${x + 8}" y="${170 - Math.min(2, t[i]) * 30}" width="80" height="${Math.min(2, t[i]) * 30}" fill="${real ? JADE : NEG}" fill-opacity="${k >= i ? 0.6 : 0.1}"/>` + txt(x + 48, 186, k >= i ? f4(t[i]) : "", `font-size="11.5" font-weight="700" text-anchor="middle" fill="${INK}"`);
+      });
+      s += txt(40, 210, "bars: each note's cross-entropy term", `font-size="10.5" fill="${MUTED}"`);
+      if (k >= 6) s += txt(400, 210, `detective loss ${fmt(t.reduce((a, b) => a + b, 0) / 6, 3)}`, `font-size="13" font-weight="700" fill="${GOLD}"`);
+      $("[data-draw]").innerHTML = s;
+      $("[data-vf]").textContent = fmt(F[2], 2);
+    }
+    const redraw = stepper(root, steps, draw, { delay: 1.4 });
+    $<HTMLInputElement>("[data-f]").addEventListener("input", (e) => { F[2] = +(e.target as HTMLInputElement).value; redraw(); });
+  });
+</script>

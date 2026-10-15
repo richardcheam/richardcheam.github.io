@@ -1,0 +1,64 @@
+---
+// Foundations, normalisation post: the same 4-by-3 batch under BatchNorm
+// (each column over the batch), LayerNorm and RMSNorm (each row over its
+// features). Example 1 becomes −1, −1, −1 / −0.65, −0.76, 1.41 /
+// 0.17, 0.09, 1.72.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-axis>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 270" role="img" aria-labelledby="na-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="na-title">One batch normalised down its columns or across its rows, with the three results side by side</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Normaliser</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-m="bn" aria-pressed="true">BatchNorm</button>
+      <button type="button" class="fig-chip" data-m="ln" aria-pressed="false">LayerNorm</button>
+      <button type="button" class="fig-chip" data-m="rms" aria-pressed="false">RMSNorm</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt } from "../../lib/tiny-net";
+  import { INK, MUTED, GOLD, TINT, JADE } from "../../lib/net-diagram";
+  import { txt } from "../../lib/plot";
+  import { X, col, batchNorm, layerNorm, rmsNorm } from "../../lib/norms";
+  type M = "bn" | "ln" | "rms";
+  const NAME: Record<M, string> = { bn: "BatchNorm", ln: "LayerNorm", rms: "RMSNorm" };
+  const OUT = { bn: batchNorm(X), ln: layerNorm(X), rms: rmsNorm(X) };
+  const r = (v: number) => fmt(v, 2);
+  document.querySelectorAll<HTMLElement>("[data-axis]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    let mode: M = "bn";
+    const steps = () => {
+      if (mode === "bn") return [0, 1, 2].map((j) => { const s = OUT.bn.stats[j], c = col(X, j); return { say: `BatchNorm works down feature ${j + 1}: the same feature across the 4 examples in the batch.`, math: `values ${c.join(", ")}: mean ${r(s.m)}, variance ${r(s.v)}, std ${r(s.s)}\noutputs ${c.map((x) => r((x - s.m) / s.s)).join(", ")}` }; });
+      if (mode === "ln") return X.map((row, i) => { const s = OUT.ln.stats[i]; return { say: `LayerNorm works across example ${i + 1}: its own 3 features, nothing from the other examples.`, math: `values ${row.join(", ")}: mean ${r(s.m)}, distances ${row.map((x) => r(x - s.m)).join(", ")}\nvariance ${r(s.v)}, std ${r(s.s)} → outputs ${OUT.ln.out[i].map(r).join(", ")}` }; });
+      return X.map((row, i) => { const s = OUT.rms.stats[i]; return { say: `RMSNorm also works across example ${i + 1}, but skips the mean: it only divides by the root mean square.`, math: `squares ${row.map((x) => x * x).join(", ")}: mean of squares ${r(s.ms)}, RMS √${r(s.ms)} = ${r(s.rms)}\noutputs ${OUT.rms.out[i].map(r).join(", ")}` }; });
+    };
+    function draw(k: number) {
+      let s = txt(30, 20, `Input batch (rows are examples), ${NAME[mode]} highlighted`, `font-size="12" font-weight="700" fill="${INK}"`);
+      const cx = (j: number) => 120 + j * 70;
+      if (k >= 0) s += mode === "bn" ? `<rect x="${cx(k) - 30}" y="30" width="60" height="124" rx="5" fill="${TINT}"/>` : `<rect x="24" y="${34 + k * 30}" width="300" height="28" rx="5" fill="${TINT}"/>`;
+      X.forEach((row, i) => { s += txt(30, 54 + i * 30, `example ${i + 1}`, `font-size="11" fill="${MUTED}"`); row.forEach((v, j) => (s += txt(cx(j), 54 + i * 30, String(v), `font-size="13" text-anchor="middle" fill="${INK}"`))); });
+      // Three result tables.
+      (["bn", "ln", "rms"] as M[]).forEach((m, t) => {
+        const l = 30 + t * 245, on = m === mode;
+        s += txt(l, 186, NAME[m], `font-size="12" font-weight="700" fill="${on ? JADE : MUTED}"`);
+        OUT[m].out.forEach((row, i) => row.forEach((v, j) => {
+          const shown = !on || k < 0 || (m === "bn" ? j <= k : i <= k);
+          s += txt(l + 30 + j * 62, 206 + i * 17, shown ? r(v) : "", `font-size="${on ? 12.5 : 11.5}" font-weight="${on ? 700 : 400}" text-anchor="middle" fill="${on ? INK : MUTED}"`);
+        }));
+      });
+      s += txt(370, 54, mode === "bn" ? "Down each column:" : "Across each row:", `font-size="12" font-weight="700" fill="${GOLD}"`);
+      s += txt(370, 74, mode === "bn" ? "each feature is compared with the same feature" : "each example is compared only with itself,", `font-size="11.5" fill="${MUTED}"`);
+      s += txt(370, 92, mode === "bn" ? "in the other examples of this batch." : "so the batch size does not matter.", `font-size="11.5" fill="${MUTED}"`);
+      if (mode !== "bn") s += txt(370, 120, "Feature 3 is ten times the others, so it dominates", `font-size="11.5" fill="${MUTED}"`) + txt(370, 138, "every row and the rows come out nearly alike.", `font-size="11.5" fill="${MUTED}"`);
+      $("[data-draw]").innerHTML = s;
+    }
+    const redraw = stepper(root, steps, draw, { delay: 2 });
+    root.querySelectorAll<HTMLButtonElement>("[data-m]").forEach((b) => b.addEventListener("click", () => { mode = b.dataset.m as M; root.querySelectorAll("[data-m]").forEach((o) => o.setAttribute("aria-pressed", String(o === b))); redraw(); }));
+  });
+</script>

@@ -1,0 +1,474 @@
+---
+title: "Neurons, layers and backpropagation"
+title_key: ["Neurons", "backpropagation"]
+date: 2026-10-15
+category: "deep-learning"
+read_time: "30 min"
+series_order: 1
+series: foundations
+featured: false
+excerpt: "A neural network is a pile of tiny calculators that multiply, add and bend. This post builds one with two inputs, two hidden neurons and one output, runs it forward, blames each weight for the error, and nudges every weight once, with every number small enough to check by hand."
+question: "What does a neural network actually compute, and how does it work out which of its numbers to change?"
+my_work: "A concept note. I worked every number of the tiny network by hand and checked the forward pass, all nine gradients and the update with a short script."
+result: "One forward pass, one backward pass and one update with learning rate 0.1 take the tiny network's loss from 0.03125 to about 0.00585, a drop of more than five times."
+evidence_limit: "This explains the standard method on a toy network with one training example. No experiments beyond the hand calculation and the XOR toy in the figures."
+lesson: "Backpropagation is only the chain rule applied in a sensible order: each piece of the network multiplies the blame it receives by its own local slope and passes it on."
+---
+
+import SingleNeuron from "../../components/figures/SingleNeuron.astro";
+import ActivationExplorer from "../../components/figures/ActivationExplorer.astro";
+import LinearCollapse from "../../components/figures/LinearCollapse.astro";
+import ForwardPassSteps from "../../components/figures/ForwardPassSteps.astro";
+import ChainRuleGears from "../../components/figures/ChainRuleGears.astro";
+import BackwardPassSteps from "../../components/figures/BackwardPassSteps.astro";
+import WeightUpdateStep from "../../components/figures/WeightUpdateStep.astro";
+import XorTrainer from "../../components/figures/XorTrainer.astro";
+
+Every model in this series, from the image classifiers of the 2010s to the speech models behind [Pocket TTS](/blog/pocket-tts-calm-explained/), is built from one small part repeated millions of times. That part multiplies some numbers, adds them up, and bends the result. We call it a **neuron**.
+
+This post builds a network from those parts, small enough that you can hold every number in your head: **2** inputs, **2** hidden neurons, **1** output, **9** adjustable numbers in total. We will push one example through it (the forward pass), measure how wrong it is (the loss), work out who is to blame for the error (backpropagation), and fix it a little (a weight update). The same numbers follow us the whole way, so you can check every step.
+
+Here are the numbers we will use everywhere. Keep this box handy.
+
+| What | Value |
+|---|---|
+| Inputs | $x_1 = 1$, $x_2 = 2$ |
+| Target (the right answer) | $y = 1$ |
+| Hidden neuron 1 | weights $w_{11} = 0.5$, $w_{12} = 0.25$, bias $b_1 = 0$ |
+| Hidden neuron 2 | weights $w_{21} = -1$, $w_{22} = 0.5$, bias $b_2 = 0.5$ |
+| Output neuron | weights $v_1 = 1$, $v_2 = -1$, bias $c = 0.25$ |
+| Activation | ReLU (rectified linear unit) in the hidden layer, none at the output |
+| Learning rate | $\eta = 0.1$ |
+
+Do not worry about any of those words yet. Each one gets its own section.
+
+
+## What a neuron computes
+
+A neuron does two things. First it takes a **weighted sum** of its inputs: each input is multiplied by its own weight, the results are added up, and one extra number called the **bias** is added on top. Then it passes that sum through an **activation function**, a fixed rule that bends the number.
+
+The everyday picture is a judge scoring a dish. The judge looks at a few things (taste, smell, look), cares about some more than others (the weights), has a personal mood that shifts every score up or down a little (the bias), and then turns the raw total into a final verdict (the activation).
+
+### The weighted sum
+
+In one sentence: multiply each input by how much it matters, add them up, and add a constant.
+
+$$
+z = w_1 x_1 + w_2 x_2 + b
+$$
+
+- $x_1, x_2$: the inputs, the numbers the neuron receives.
+- $w_1, w_2$: the weights, one per input, saying how strongly that input pushes the result up (positive weight) or down (negative weight).
+- $b$: the bias, a number added no matter what the inputs are. It lets the neuron give a non-zero answer even when every input is zero.
+- $z$: the result before bending, often called the **pre-activation**.
+
+Worked example with hidden neuron 1 from our box: $x_1 = 1$, $x_2 = 2$, $w_1 = 0.5$, $w_2 = 0.25$, $b = 0$.
+
+- $w_1 x_1 = 0.5 \times 1 = 0.5$
+- $w_2 x_2 = 0.25 \times 2 = 0.5$
+- $z = 0.5 + 0.5 + 0 = $ **1.0**
+
+What if a number changes? Raise $w_2$ from $0.25$ to $0.5$ and the second product doubles to $1$, so $z$ becomes $1.5$. Because $x_2 = 2$, every change to $w_2$ moves $z$ by twice as much. That fact (the input decides how sensitive $z$ is to its weight) will come back when we [compute every gradient](#every-gradient-of-the-tiny-network).
+
+### The activation
+
+In one sentence: the activation takes $z$ and returns a new number $a = f(z)$, using a fixed, usually curved, rule.
+
+$$
+a = f(z)
+$$
+
+- $f$: the activation function, the same rule for every neuron in a layer.
+- $a$: the neuron's output, called its **activation**. This is what the next layer receives.
+
+For hidden neuron 1 we use ReLU, which keeps positive numbers and replaces negative numbers with zero. $z = 1.0$ is positive, so $a = 1.0$. The next section explains why we bother with $f$ at all.
+
+<figure class="blog-figure blog-figure--wide">
+  <SingleNeuron alt="Two input circles joined by weighted lines to a neuron box that sums them with a bias, then an activation box, then the output. Sliders set the inputs, weights and bias; chips pick ReLU, sigmoid or tanh. Step buttons walk through the two products, the sum and the activation." />
+  <figcaption><strong>Figure 1. One neuron.</strong> Multiply, add, bend. Defaults are hidden neuron 1 of the tiny network: z = 1 and a = 1. Switch to sigmoid for 0.731, or set b = −2 to see ReLU output 0.</figcaption>
+</figure>
+
+
+## Why we need non-linear activations
+
+Why bend the number at all? Why not just pass $z$ straight on? The short answer: without the bend, a hundred layers can do no more than one layer.
+
+### Three common activations
+
+Each of these takes any number and returns a number. Here is each one in a plain sentence, then the formula.
+
+**Sigmoid** squashes any number into the range between 0 and 1: big positive numbers come out near 1, big negative numbers near 0, and zero comes out as exactly one half.
+
+$$
+\sigma(z) = \frac{1}{1 + e^{-z}}
+$$
+
+- $\sigma$: the Greek letter sigma, the usual name for this function.
+- $e$: a fixed number, about $2.718$. $e^{-z}$ is $e$ multiplied by itself $-z$ times; you only need to know it is huge when $z$ is very negative and tiny when $z$ is very positive.
+
+Example: $\sigma(0) = 1 / (1 + 1) = $ **0.5**. $\sigma(1) = 1/(1 + 0.368) \approx$ **0.731**. Raise $z$ to $10$ and $\sigma$ is about $0.99995$; going further barely changes it. That flat region matters in the [vanishing gradients post](/blog/foundations-recurrent-networks/).
+
+**Tanh** (hyperbolic tangent) is the same S shape stretched to run from −1 to 1, centred on zero.
+
+$$
+\tanh(z) = \frac{e^{z} - e^{-z}}{e^{z} + e^{-z}}
+$$
+
+Example: $\tanh(0) = 0$, $\tanh(1) \approx$ **0.762**, $\tanh(-1) \approx -0.762$. It is symmetric: flip the sign of the input, and the output flips too.
+
+**ReLU** (rectified linear unit) keeps positive numbers and turns negative numbers into zero.
+
+$$
+\text{ReLU}(z) = \max(0, z)
+$$
+
+- $\max(0, z)$: whichever is larger, zero or $z$.
+
+Example: $\text{ReLU}(1) = 1$, $\text{ReLU}(-3) = 0$, $\text{ReLU}(0.5) = 0.5$. The everyday picture is a one-way valve: water flows through in one direction, and nothing at all comes back the other way. ReLU became the default for deep networks after Nair and Hinton (2010) and Glorot, Bordes and Bengio (2011) showed it trains faster than sigmoid and tanh in deep stacks, partly because its slope for positive inputs is always 1 and never shrinks.
+
+<figure class="blog-figure blog-figure--wide">
+  <ActivationExplorer alt="A plot of ReLU, sigmoid and tanh for inputs from −4 to 4, the chosen one bold, with a gold tangent line showing the slope at the chosen input and a table of all three values and slopes." />
+  <figcaption><strong>Figure 2. Three ways to bend.</strong> The gold line is the slope. The steps visit z = 0, 1, 4 and −2. At z = 4 the S curves are flat (slopes 0.018 and 0.001) while ReLU's slope is still 1.</figcaption>
+</figure>
+
+The slopes in that figure are not decoration. When we [pass blame backwards](#backpropagation-passing-blame-backwards), every neuron multiplies the blame by its slope. A slope near zero means almost no blame gets through.
+
+### Stacking linear layers stays linear
+
+Suppose we skip the activation, so each layer just multiplies and adds. Take a one-number toy. Layer A doubles its input and adds 1. Layer B triples its input and subtracts 1.
+
+- Layer A: $u = 2x + 1$
+- Layer B: $y = 3u - 1$
+
+Put A's output into B:
+
+$$
+y = 3(2x + 1) - 1 = 6x + 3 - 1 = 6x + 2
+$$
+
+Two layers, and the result is one multiply ($6$) and one add ($2$): exactly what a single layer could have done. Check with $x = 1$: A gives $u = 3$, B gives $y = 8$, and the single layer gives $6 \times 1 + 2 = 8$. Same answer. This is true however many layers you stack and however many inputs each has: a chain of multiply-and-add steps is always one multiply-and-add step. The everyday picture is stacking magnifying glasses. Two lenses give a stronger zoom, but they still only zoom; they can never bend a straight line into a curve.
+
+Now put a ReLU between them: $u = \text{ReLU}(2x + 1)$. For $x = 1$, nothing changes ($u = 3$, $y = 8$). But for $x = -1$, $2x + 1 = -1$, ReLU turns it into $0$, and $y = 3 \times 0 - 1 = -1$, whereas the straight line $6x + 2$ would give $-4$. The graph now has a corner at $x = -0.5$. Corners, added up across many neurons, can build any shape we like. This is why every network in this series puts a non-linear activation between its layers.
+
+<figure class="blog-figure blog-figure--wide">
+  <LinearCollapse alt="Two stacked layer boxes, multiply by a and add b, then multiply by c and add d, with an optional ReLU between them, and a plot of the output against the input with the equivalent single layer dashed on top." />
+  <figcaption><strong>Figure 3. Why we bend.</strong> Without an activation, two layers are one layer: 3(2x + 1) − 1 = 6x + 2. With a ReLU between them the line gets a corner at x = −0.5, and x = −1 gives −1 instead of −4.</figcaption>
+</figure>
+
+
+## Layers and the matrix form
+
+A **layer** is a group of neurons that all read the same inputs. Our hidden layer has two neurons, both reading $x_1$ and $x_2$. Writing each neuron out separately gets long, so we use two pieces of shorthand: vectors and matrices.
+
+A **vector** is just a list of numbers written in a column. Our inputs are the vector
+
+$$
+\mathbf{x} = \begin{bmatrix} 1 \\ 2 \end{bmatrix}
+$$
+
+A **matrix** is a table of numbers. We put each neuron's weights in its own row:
+
+$$
+W = \begin{bmatrix} w_{11} & w_{12} \\ w_{21} & w_{22} \end{bmatrix} = \begin{bmatrix} 0.5 & 0.25 \\ -1 & 0.5 \end{bmatrix}, \qquad \mathbf{b} = \begin{bmatrix} 0 \\ 0.5 \end{bmatrix}
+$$
+
+- $w_{ij}$: the weight from input $j$ into hidden neuron $i$. So $w_{21}$ is "into neuron 2, from input 1".
+- $\mathbf{b}$: the list of biases, one per neuron.
+
+In one sentence: multiplying a matrix by a vector means doing one weighted sum per row.
+
+$$
+\mathbf{z} = W\mathbf{x} + \mathbf{b}
+$$
+
+Row 1 times $\mathbf{x}$: $0.5 \times 1 + 0.25 \times 2 = 1$; plus $b_1 = 0$ gives $z_1 = $ **1**.
+Row 2 times $\mathbf{x}$: $-1 \times 1 + 0.5 \times 2 = 0$; plus $b_2 = 0.5$ gives $z_2 = $ **0.5**.
+
+So $\mathbf{z} = [1, 0.5]$. Then the activation is applied to each entry separately: $\mathbf{h} = \text{ReLU}(\mathbf{z}) = [1, 0.5]$. The everyday picture is a row of judges at a contest, each holding their own scorecard (a row of $W$) and all tasting the same dish ($\mathbf{x}$).
+
+The matrix form is not a new idea, just a shorter way of writing the same sums. It matters in practice because computers, and especially graphics cards, are built to do these row-times-column sums for thousands of neurons at once.
+
+
+## A forward pass through the tiny network
+
+The **forward pass** means running the inputs through the network, layer by layer, to get an answer. Our network has two layers of weights.
+
+**Hidden layer** (done above): $z_1 = 1$, $z_2 = 0.5$, $h_1 = \text{ReLU}(1) = 1$, $h_2 = \text{ReLU}(0.5) = 0.5$.
+
+**Output layer**: one neuron reading $h_1$ and $h_2$ with weights $v_1 = 1$, $v_2 = -1$ and bias $c = 0.25$, and no activation (we want any number out, not just positive ones).
+
+$$
+\hat{y} = v_1 h_1 + v_2 h_2 + c
+$$
+
+- $\hat{y}$: read "y hat", the network's prediction. The hat means "our guess at $y$".
+
+- $v_1 h_1 = 1 \times 1 = 1$
+- $v_2 h_2 = -1 \times 0.5 = -0.5$
+- $\hat{y} = 1 - 0.5 + 0.25 = $ **0.75**
+
+The target was $y = 1$, so the network is short by $0.25$.
+
+<figure class="blog-figure blog-figure--wide">
+  <ForwardPassSteps alt="The tiny network drawn left to right: inputs x1 and x2, hidden neurons h1 and h2, output y hat, then the target and a loss box. Each step highlights the weights and nodes it uses and writes the arithmetic below." />
+  <figcaption><strong>Figure 4. The forward pass, one operation at a time.</strong> Seven steps from inputs to loss: z = (1, 0.5), h = (1, 0.5), ŷ = 0.75, L = 0.03125. Set x₁ = 2 and neuron 2 switches off, giving ŷ = 1.75.</figcaption>
+</figure>
+
+
+## Measuring the error with a loss
+
+To improve, the network needs one number that says how wrong it was. That number is the **loss**. In one sentence: square the gap between guess and target, and halve it.
+
+$$
+L = \tfrac{1}{2}(\hat{y} - y)^2
+$$
+
+- $L$: the loss. Zero means perfect; bigger means worse.
+- $\hat{y} - y$: the gap, or error. Here $0.75 - 1 = -0.25$.
+- The square makes the loss positive whether we guessed too high or too low, and punishes big misses much more than small ones.
+- The $\tfrac{1}{2}$ is only there to make the slope tidy, as we will see in a moment.
+
+Our loss: $(-0.25)^2 = 0.0625$, halved: $L = $ **0.03125**.
+
+If the guess had been $0.5$ instead, the gap would double to $-0.5$ and the loss would quadruple to $0.125$. This is called squared error, and the [next post on loss functions](/blog/foundations-loss-gradient-descent/) compares it with other choices and explains when each one fits.
+
+
+## The chain rule from scratch
+
+Our goal is to find, for each of the nine weights and biases, how much the loss changes if we nudge that number a tiny bit. That "how much" is called the **gradient** (or slope, or derivative) of the loss with respect to that number, written $\partial L / \partial w$ and read "the change in $L$ per change in $w$".
+
+The trouble is that a weight like $w_{11}$ does not touch the loss directly. It changes $z_1$, which changes $h_1$, which changes $\hat{y}$, which changes $L$. We need a way to combine effects along a chain. That is the **chain rule**.
+
+### An everyday picture: gears
+
+Picture three gears in a row. Turn gear A once and gear B turns 3 times. Turn gear B once and gear C turns 2 times. How many times does C turn when A turns once?
+
+$3 \times 2 = $ **6**. You multiply the ratios along the chain.
+
+That is the whole chain rule. In one sentence: when one thing affects another through a middle step, the overall rate of change is the product of the rates of each step.
+
+$$
+\frac{\partial C}{\partial A} = \frac{\partial C}{\partial B} \times \frac{\partial B}{\partial A}
+$$
+
+- $\partial B / \partial A$: how much B moves per unit move of A (here 3).
+- $\partial C / \partial B$: how much C moves per unit move of B (here 2).
+- The left side: how much C moves per unit move of A (here 6).
+
+Check with the numbers from [the linear collapse example](#stacking-linear-layers-stays-linear): $u = 2x + 1$ changes by $2$ per unit of $x$; $y = 3u - 1$ changes by $3$ per unit of $u$; so $y$ should change by $2 \times 3 = 6$ per unit of $x$. And indeed $y = 6x + 2$. The chain rule just told us the $6$ without expanding anything.
+
+If one gear in the chain is jammed (its ratio is $0$), the whole product is $0$ and nothing downstream moves. A ReLU with a negative input is exactly such a jammed gear.
+
+### The local slopes we need
+
+Every step in our network is one of three simple operations, and each has an easy slope.
+
+- **Multiply by a constant**, $z = w x$: the slope of $z$ with respect to $x$ is $w$, and with respect to $w$ is $x$. (Each factor's slope is the other factor.) Example: $0.25 \times 2$; nudge $w$ by $0.01$ and the product moves by $0.02$, which is $x = 2$ times the nudge.
+- **Add**, $z = p + q$: the slope with respect to each part is $1$. Adding passes changes through unchanged.
+- **ReLU**, $h = \text{ReLU}(z)$: slope $1$ if $z > 0$, slope $0$ if $z < 0$.
+- **Half square**, $L = \tfrac{1}{2}(\hat{y} - y)^2$: slope with respect to $\hat{y}$ is $\hat{y} - y$. (The $2$ from the square cancels the $\tfrac{1}{2}$; that is why the half was there.) Here it is $-0.25$.
+
+<figure class="blog-figure blog-figure--wide">
+  <ChainRuleGears alt="Three gears A, B and C linked by arrows labelled times 3 and times 2. Each step turns gear A and counts the turns of B and C; the last step jams the second link." />
+  <figcaption><strong>Figure 5. The chain rule is gear ratios.</strong> Turn A once: B turns 3 times and C turns 3 × 2 = 6 times. Jam one link (ratio 0) and C stops, just as a ReLU with a negative input stops the blame.</figcaption>
+</figure>
+
+
+## Backpropagation: passing blame backwards
+
+**Backpropagation** is a way of computing every gradient in the network in one sweep from the output back to the inputs. In one sentence: start with the blame at the loss, and at every step backwards multiply by that step's local slope.
+
+The everyday picture is a relay team that lost a race by 0.25 seconds. The coach starts at the finish line and walks back down the track. Each runner gets handed the blame from the runner after them, and passes on to the runner before them a share scaled by how much their own leg mattered. Nobody has to re-run the race; one walk back down the track is enough.
+
+Why walk backwards rather than forwards? Because the blame on $h_1$ is needed by every weight feeding into $h_1$. Computing it once and reusing it is what makes backpropagation fast. The same reuse is why a network with a billion weights can get all billion gradients for roughly the cost of two or three forward passes.
+
+The method was popularised for neural networks by Rumelhart, Hinton and Williams (1986). The underlying idea, reverse-mode differentiation, is older: Linnainmaa described it in 1970, and Werbos proposed applying it to neural networks in his 1974 thesis.
+
+We write $\delta$ (delta) for "blame on this quantity", meaning $\partial L / \partial(\text{that quantity})$.
+
+
+## Every gradient of the tiny network
+
+We walk back from the loss. Each line multiplies the blame arriving from the right by one local slope.
+
+**At the output.** The blame on the prediction is the slope of the half square:
+
+$$
+\delta_{\hat{y}} = \hat{y} - y = 0.75 - 1 = -0.25
+$$
+
+Negative blame means "if $\hat{y}$ went up, the loss would go down". That matches what we know: the guess was too low.
+
+**The output weights and bias.** $\hat{y} = v_1 h_1 + v_2 h_2 + c$. The slope of $\hat{y}$ with respect to $v_1$ is $h_1$ (each factor's slope is the other factor), with respect to $c$ is $1$.
+
+- $\partial L / \partial v_1 = \delta_{\hat{y}} \times h_1 = -0.25 \times 1 = $ **−0.25**
+- $\partial L / \partial v_2 = \delta_{\hat{y}} \times h_2 = -0.25 \times 0.5 = $ **−0.125**
+- $\partial L / \partial c = \delta_{\hat{y}} \times 1 = $ **−0.25**
+
+**Passing blame to the hidden activations.** The slope of $\hat{y}$ with respect to $h_1$ is $v_1$.
+
+- $\delta_{h_1} = \delta_{\hat{y}} \times v_1 = -0.25 \times 1 = -0.25$
+- $\delta_{h_2} = \delta_{\hat{y}} \times v_2 = -0.25 \times (-1) = 0.25$
+
+Notice $\delta_{h_2}$ is positive. $h_2$ reaches the output through a negative weight, so raising $h_2$ would lower $\hat{y}$, which is the wrong direction. The blame says "push $h_2$ down".
+
+**Through the ReLUs.** Both $z_1 = 1$ and $z_2 = 0.5$ are positive, so both ReLU slopes are $1$ and the blame passes through unchanged.
+
+- $\delta_{z_1} = \delta_{h_1} \times 1 = -0.25$
+- $\delta_{z_2} = \delta_{h_2} \times 1 = 0.25$
+
+**The hidden weights and biases.** $z_1 = w_{11} x_1 + w_{12} x_2 + b_1$, so the slope with respect to $w_{11}$ is $x_1 = 1$, with respect to $w_{12}$ is $x_2 = 2$, with respect to $b_1$ is $1$.
+
+- $\partial L / \partial w_{11} = -0.25 \times 1 = $ **−0.25**
+- $\partial L / \partial w_{12} = -0.25 \times 2 = $ **−0.5**
+- $\partial L / \partial b_1 = -0.25 \times 1 = $ **−0.25**
+- $\partial L / \partial w_{21} = 0.25 \times 1 = $ **0.25**
+- $\partial L / \partial w_{22} = 0.25 \times 2 = $ **0.5**
+- $\partial L / \partial b_2 = 0.25 \times 1 = $ **0.25**
+
+Read one end to end, say $w_{12}$: it is the product of every local slope on its path, $(\hat{y} - y) \times v_1 \times \text{ReLU}'(z_1) \times x_2 = (-0.25) \times 1 \times 1 \times 2 = -0.5$. That is the gear chain from before, four gears long.
+
+What would change? If $z_2$ had been negative, the ReLU slope would be $0$, and $w_{21}$, $w_{22}$ and $b_2$ would all get gradient $0$: that neuron learns nothing from this example. A neuron stuck in that state for every example is called a "dead ReLU". And because $x_2 = 2$ is twice $x_1$, the weights on $x_2$ always get twice the gradient of the weights on $x_1$: larger inputs mean larger blame.
+
+<figure class="blog-figure blog-figure--wide">
+  <BackwardPassSteps alt="The same tiny network with its forward values faded in place. Gold blame labels appear from the loss backwards: first on the output, then on the output weights, then on the hidden neurons, then through the ReLUs to the hidden weights." />
+  <figcaption><strong>Figure 6. Backpropagation, one multiplication at a time.</strong> Eleven steps, each multiplying the blame arriving from the right by one local slope. Defaults end with all nine gradients from the text. With x₁ = 2, neuron 2's ReLU is off and its three gradients are 0.</figcaption>
+</figure>
+
+
+## One weight update
+
+Now we know which way to push each number. In one sentence: move every weight a small step against its gradient.
+
+$$
+w_{\text{new}} = w_{\text{old}} - \eta \, \frac{\partial L}{\partial w}
+$$
+
+- $\eta$: the Greek letter eta, the **learning rate**, how big a step we take. Ours is $0.1$.
+- The minus sign: the gradient points uphill (the direction that increases the loss), so we step the other way.
+
+The everyday picture is walking down a foggy hill: you cannot see the bottom, but you can feel which way the ground slopes under your feet, so you take a small step downhill.
+
+Applying it to all nine numbers:
+
+| Number | Old | Gradient | Step $= -0.1 \times$ gradient | New |
+|---|---|---|---|---|
+| $w_{11}$ | 0.5 | −0.25 | +0.025 | 0.525 |
+| $w_{12}$ | 0.25 | −0.5 | +0.05 | 0.3 |
+| $b_1$ | 0 | −0.25 | +0.025 | 0.025 |
+| $w_{21}$ | −1 | 0.25 | −0.025 | −1.025 |
+| $w_{22}$ | 0.5 | 0.5 | −0.05 | 0.45 |
+| $b_2$ | 0.5 | 0.25 | −0.025 | 0.475 |
+| $v_1$ | 1 | −0.25 | +0.025 | 1.025 |
+| $v_2$ | −1 | −0.125 | +0.0125 | −0.9875 |
+| $c$ | 0.25 | −0.25 | +0.025 | 0.275 |
+
+Run the forward pass again with the new numbers:
+
+- $z_1 = 0.525 \times 1 + 0.3 \times 2 + 0.025 = 0.525 + 0.6 + 0.025 = $ **1.15**, so $h_1 = 1.15$
+- $z_2 = -1.025 \times 1 + 0.45 \times 2 + 0.475 = -1.025 + 0.9 + 0.475 = $ **0.35**, so $h_2 = 0.35$
+- $\hat{y} = 1.025 \times 1.15 + (-0.9875) \times 0.35 + 0.275 = 1.17875 - 0.345625 + 0.275 = $ **1.108125**
+- $L = \tfrac{1}{2}(1.108125 - 1)^2 = \tfrac{1}{2}(0.108125)^2 \approx $ **0.00585**
+
+The loss fell from **0.03125** to about **0.00585**, more than five times smaller, after one step.
+
+Notice that the prediction jumped from $0.75$ past the target to about $1.11$. The step was a little too big: all nine numbers moved at once, and their effects added up. With $\eta = 0.05$ the steps would be half as large and the overshoot smaller. With $\eta = 1$ the first step flies far past: the loss jumps to **3.45**, then **4.88** after the second step, both hidden neurons end up with negative $z$, and the ReLUs shut them off for good. Choosing the step size well is the subject of the [optimisers post](/blog/foundations-optimisers/).
+
+<figure class="blog-figure blog-figure--wide">
+  <WeightUpdateStep alt="The tiny network with each weight written as old value arrow new value as the steps apply the update one number at a time, then the new forward pass. Below, a chart of the loss over 20 updates for the chosen learning rate." />
+  <figcaption><strong>Figure 7. One step downhill.</strong> Each number moves by minus the learning rate times its gradient. At η = 0.1 the loss falls from 0.03125 to 0.00585. At η = 1 the loss jumps to 3.45, then 4.88, and both hidden neurons die; only the output bias still learns.</figcaption>
+</figure>
+
+
+## The computational graph view
+
+Everything we did can be drawn as a **computational graph**: a diagram where each box is one simple operation (multiply, add, ReLU, half square) and arrows show which results feed which.
+
+Reading the graph left to right is the forward pass: each box computes its output from its inputs and remembers them. Reading it right to left is the backward pass: each box receives a blame from its output side, multiplies it by its local slope, and sends the result to each of its inputs. No box needs to know anything about the rest of the network. A multiply box only knows "my slope for one input is the other input"; a ReLU box only knows "pass the blame if my input was positive, otherwise send zero".
+
+Two rules cover every case:
+
+- **Along a chain, multiply.** That is the chain rule.
+- **Where a value feeds two places, add the blames coming back.** In our network, $x_1$ feeds both hidden neurons. If we wanted the blame on $x_1$ itself, it would be $\delta_{z_1} \times w_{11} + \delta_{z_2} \times w_{21} = (-0.25)(0.5) + (0.25)(-1) = -0.125 - 0.25 = -0.375$. (We never update inputs, but deeper networks need exactly this sum for every hidden neuron that feeds more than one neuron in the next layer.)
+
+This is how deep learning libraries work. When you write the forward pass in PyTorch, it quietly records the graph; calling `loss.backward()` walks it in reverse with these two rules. Every network later in this series, from [convolutions](/blog/foundations-convolutions/) to [attention](/blog/foundations-attention/), is just a bigger graph made of different boxes, and the same walk computes its gradients.
+
+The last figure ties it together on a problem a single layer cannot solve. XOR (exclusive or) outputs 1 when exactly one of its two inputs is 1. Minsky and Papert (1969) showed that a single-layer perceptron cannot compute it; a hidden layer with a non-linear activation can.
+
+<figure class="blog-figure blog-figure--wide">
+  <XorTrainer alt="Left: the input square shaded teal where the network outputs near 0 and rose where it outputs near 1, with a dark line at 0.5 and the four XOR points. Right: the loss curve over 2000 epochs, a readout of the epoch and loss, and the network with edge thickness following the weights." />
+  <figcaption><strong>Figure 8. Learning XOR.</strong> The full training loop on four points. With the defaults (seed 7, η = 0.5, 4 tanh neurons) all four points are right from epoch 530, and the loss is 0.0012 at epoch 2000. Choose “None (linear)” and the loss stalls at 0.125. Seed 2 gets stuck: a reminder that the random start matters.</figcaption>
+</figure>
+
+
+## Counting the parameters
+
+The weights and biases are the network's **parameters**: the numbers training is allowed to change. A model's size, as in "124 million parameters", is just their count.
+
+A dense layer (every input connected to every output) with $n_{\text{in}}$ inputs and $n_{\text{out}}$ outputs has
+
+$$
+n_{\text{in}} \times n_{\text{out}} + n_{\text{out}}
+$$
+
+parameters.
+
+- $n_{\text{in}} \times n_{\text{out}}$: one weight per line from an input to an output, the entries of the weight matrix $W$.
+- $n_{\text{out}}$: one bias per output neuron.
+
+Our tiny network has two such layers. The hidden layer, 2 inputs to 2 neurons: $2 \times 2 + 2 = 6$. The output layer, 2 inputs to 1 neuron: $2 \times 1 + 1 = 3$. In total **9**, exactly the nine numbers the [weight update](#one-weight-update) changed. The activation (ReLU) has no parameters: it is a fixed rule, not something learned.
+
+In PyTorch every layer keeps its learnable numbers in `.parameters()`, and `p.numel()` is how many numbers a tensor holds, so one line adds them up.
+
+```python
+import torch.nn as nn
+
+net = nn.Sequential(nn.Linear(2, 2), nn.ReLU(), nn.Linear(2, 1))
+for name, p in net.named_parameters():
+    print(name, tuple(p.shape), p.numel())
+print("total", sum(p.numel() for p in net.parameters()))
+```
+
+It prints:
+
+```text
+0.weight (2, 2) 4
+0.bias (2,) 2
+2.weight (1, 2) 2
+2.bias (1,) 1
+total 9
+```
+
+PyTorch stores a layer's weight matrix as (outputs, inputs), the transpose of how we wrote $W$ above; the count is the same.
+
+## What to remember
+
+- A neuron computes a weighted sum plus a bias, $z = w_1 x_1 + w_2 x_2 + b$, then bends it with an activation.
+- Without a non-linear activation, any stack of layers collapses into one layer ($3(2x + 1) - 1 = 6x + 2$).
+- A layer is many neurons at once: $\mathbf{z} = W\mathbf{x} + \mathbf{b}$, one weighted sum per row.
+- The chain rule multiplies local slopes along a path, like gear ratios.
+- Backpropagation walks from the loss back to the inputs, multiplying the blame by each step's local slope, and adding blame where paths merge.
+- One update moves each weight against its gradient by learning rate times gradient. On our network, loss went from **0.03125** to **0.00585** in one step.
+
+
+## Try it yourself
+
+- **SingleNeuron:** set $x_1 = 1$, $x_2 = 2$, $w_1 = 0.5$, $w_2 = 0.25$, $b = 0$. You should see $z = 1.000$. Switch to sigmoid: $a = 0.731$. Now set $b = -2$ with ReLU: $z = -1.000$, $a = 0.000$.
+- **ActivationExplorer:** move $z$ to 4. ReLU's slope should still read $1.000$; sigmoid's should read $0.018$, tanh's $0.001$.
+- **LinearCollapse:** with $a = 2$, $b = 1$, $c = 3$, $d = -1$ and ReLU off, the collapsed layer reads $6x + 2$. Turn ReLU on and set $x = -1$: $y = -1$ instead of $-4$.
+- **ForwardPassSteps:** step through with the defaults and confirm $\hat{y} = 0.75$, $L = 0.03125$. Then set $x_1 = 2$: $h_2$ switches off and $\hat{y} = 1.75$.
+- **BackwardPassSteps:** with the defaults, Step 10 must show $\partial L / \partial w_{22} = 0.5$. With $x_1 = 2$, all three of neuron 2's gradients must read 0.
+- **WeightUpdateStep:** with $\eta = 0.1$, one update gives $L = 0.00585$. Try $\eta = 0.05$ and $\eta = 1$ and watch the 20-update curve; at $\eta = 1$ the first update gives a loss of **3.4453**.
+- **XorTrainer:** with the defaults, all four points should be right from epoch **530**, and the loss should read **0.0012** at epoch 2000. Choose "None (linear)": the loss stalls at **0.125**. Try seed 2 to see a start that gets stuck.
+
+
+## Sources
+
+- Warren S. McCulloch and Walter Pitts (1943). "A logical calculus of the ideas immanent in nervous activity." *Bulletin of Mathematical Biophysics*, 5, 115–133. The first mathematical model of a neuron.
+- Frank Rosenblatt (1958). "The perceptron: a probabilistic model for information storage and organization in the brain." *Psychological Review*, 65(6), 386–408.
+- Marvin Minsky and Seymour Papert (1969). *Perceptrons*. MIT Press. The XOR limitation of single-layer networks.
+- Seppo Linnainmaa (1970). *The representation of the cumulative rounding error of an algorithm as a Taylor expansion of the local rounding errors*. Master's thesis (in Finnish), University of Helsinki. The first description of reverse-mode automatic differentiation.
+- Paul J. Werbos (1974). *Beyond Regression: New Tools for Prediction and Analysis in the Behavioral Sciences*. PhD thesis, Harvard University.
+- David E. Rumelhart, Geoffrey E. Hinton and Ronald J. Williams (1986). "Learning representations by back-propagating errors." *Nature*, 323, 533–536.
+- Vinod Nair and Geoffrey E. Hinton (2010). "Rectified linear units improve restricted Boltzmann machines." *Proceedings of ICML 2010* (International Conference on Machine Learning).
+- Xavier Glorot, Antoine Bordes and Yoshua Bengio (2011). "Deep sparse rectifier neural networks." *Proceedings of AISTATS 2011* (Artificial Intelligence and Statistics), PMLR 15, 315–323.

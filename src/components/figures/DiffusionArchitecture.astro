@@ -1,0 +1,92 @@
+---
+// Foundations, diffusion post: the whole diffusion model on the post's
+// two-point toy (data ±1, src/lib/diffusion.ts). Training: x0 = 1, t = 0.5,
+// ε = −1.5 → x_t = −0.354 → the ideal network predicts ε̂ = −0.038 → loss
+// 2.138. Sampling: start at x = 0.7 (t = 1) and take four DDIM steps.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-diff-arch>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 350" role="img" aria-labelledby="da-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="da-title">A diffusion model's training step and its sampling loop on a two-point toy</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Path</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-mode="train" aria-pressed="true">Training</button>
+      <button type="button" class="fig-chip" data-mode="sample" aria-pressed="false">Sampling</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt, par } from "../../lib/tiny-net";
+  import { INK, MUTED, NEG, JADE, GOLD, TINT } from "../../lib/net-diagram";
+  import { txt, arrow } from "../../lib/plot";
+  import { keep, noiseW, denoise, reverseStep } from "../../lib/diffusion";
+  const X0 = 1, T = 0.5, E = -1.5, XT = keep(T) * X0 + noiseW(T) * E, PRED = denoise(XT, T);
+  const START = 0.7, TS = [1, 0.75, 0.5, 0.25, 0];
+  const PATH = (() => { const out = [{ t: 1, x: START, x0: 0, eps: 0 }]; let x = START; for (let k = 0; k < 4; k++) { const r = reverseStep(x, TS[k], TS[k + 1], 0, true); out[k].x0 = r.x0; out[k].eps = r.eps; x = r.next; out.push({ t: TS[k + 1], x, x0: 0, eps: 0 }); } return out; })();
+  document.querySelectorAll<HTMLElement>("[data-diff-arch]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    let mode: "train" | "sample" = "train";
+    const f3 = (v: number) => fmt(v, 3);
+    const steps = () => mode === "train" ? [
+      { say: "Training starts from a real data point. The toy data are just two values, −1 and +1; take x₀ = 1.", math: "x₀ = 1" },
+      { say: "Pick a random noise level t between 0 (clean) and 1 (pure noise). Each training example gets its own.", math: `t = ${T}:  keep = cos(π t / 2) = ${f3(keep(T))},  noise = sin(π t / 2) = ${f3(noiseW(T))}` },
+      { say: "Draw the noise ε from a standard bell curve. This is the answer the network will have to guess.", math: `ε = ${fmt(E)}` },
+      { say: "Mix them: the noisy point is part data, part noise. The network will see only this point and t.", math: `x_t = ${f3(keep(T))} × ${X0} + ${f3(noiseW(T))} × ${par(E)} = ${f3(XT)}` },
+      { say: "The network takes (x_t, t) and guesses the noise. Here we use the ideal network, the exact best guess for this toy; a real network learns to approximate it.", math: `ε̂ = network(${f3(XT)}, ${T}) = ${f3(PRED.eps)}   (it also implies a clean guess x̂₀ = ${f3(PRED.x0)})` },
+      { say: "The loss is the squared gap between the true and the guessed noise. Even the best network cannot know this ε exactly: x_t = −0.354 could have come from either data point.", math: `(ε − ε̂)² = (${fmt(E)} − ${par(PRED.eps, 3)})² = ${f3((E - PRED.eps) ** 2)}` },
+      { say: "One gradient step on the network's weights, then repeat with a new x₀, t and ε, millions of times. Averaged over all of them, the network learns the best guess at every noise level.", math: "loop: pick x₀, t, ε → x_t → ε̂ → (ε − ε̂)² → update" },
+    ] : [
+      { say: "Sampling starts from pure noise at t = 1: one random draw from the standard bell curve.", math: `x = ${START}  at t = 1` },
+      ...PATH.slice(0, 4).map((p, k) => ({ say: k === 0 ? "Ask the network for its guess of the clean point and the noise, then step to a slightly cleaner noise level (DDIM: no fresh noise)." : k === 3 ? "Last step: to t = 0, which is the clean guess itself." : "Same network, lower noise level: the guess sharpens.", math: `t = ${p.t} → ${TS[k + 1]}:  x̂₀ = ${f3(p.x0)},  ε̂ = ${f3(p.eps)}\nx = keep(${TS[k + 1]}) × x̂₀ + noise(${TS[k + 1]}) × ε̂ = ${f3(keep(TS[k + 1]))} × ${par(p.x0, 3)} + ${f3(noiseW(TS[k + 1]))} × ${par(p.eps, 3)} = ${f3(PATH[k + 1].x)}` })),
+      { say: `The sample landed on ${f3(PATH[4].x)}, one of the two data values. One network, called four times, turned noise into data.`, math: `${PATH.map((p) => f3(p.x)).join(" → ")}` },
+    ];
+    function draw(k: number) {
+      let s = "";
+      const box = (x: number, y: number, w: number, title: string, val: string, on: boolean, col: string) => `<rect x="${x}" y="${y}" width="${w}" height="54" rx="8" fill="${on ? TINT : "#fff"}" stroke="${col}" stroke-width="${on ? 2.2 : 1.2}"/>` + txt(x + w / 2, y + 20, title, `font-size="11" font-weight="700" text-anchor="middle" fill="${INK}"`) + txt(x + w / 2, y + 40, val, `font-size="13" font-weight="700" text-anchor="middle" fill="${INK}"`);
+      if (mode === "train") {
+        s += box(16, 30, 96, "data x₀", k >= 0 ? "1" : "", k === 0, "#3E6E9E");
+        s += box(16, 100, 96, "noise level t", k >= 1 ? String(T) : "", k === 1, MUTED);
+        s += box(16, 170, 96, "noise ε", k >= 2 ? fmt(E) : "", k === 2, GOLD);
+        s += box(160, 100, 120, "mix → x_t", k >= 3 ? f3(XT) : "", k === 3, INK);
+        [57, 127, 197].forEach((y, i) => (s += arrow(114, y, 158, 127, k >= 3 ? INK : "#cfd5d4", 1.3)));
+        s += `<rect x="320" y="84" width="150" height="86" rx="12" fill="${k === 4 ? TINT : "#fff"}" stroke="${JADE}" stroke-width="2"/>` + txt(395, 112, "network", `font-size="12.5" font-weight="700" text-anchor="middle" fill="${INK}"`) + txt(395, 130, "input: x_t and t", `font-size="10.5" text-anchor="middle" fill="${MUTED}"`) + txt(395, 148, "output: noise guess ε̂", `font-size="10.5" text-anchor="middle" fill="${MUTED}"`);
+        s += arrow(282, 127, 318, 127, k >= 4 ? INK : "#cfd5d4", 1.5) + arrow(64, 154, 318, 160, k >= 4 ? MUTED : "#eef0f0", 1);
+        s += box(510, 100, 96, "guess ε̂", k >= 4 ? f3(PRED.eps) : "", k === 4, JADE);
+        s += arrow(472, 127, 508, 127, k >= 4 ? INK : "#cfd5d4", 1.5);
+        s += box(640, 100, 104, "loss (ε − ε̂)²", k >= 5 ? f3((E - PRED.eps) ** 2) : "", k === 5, NEG);
+        s += arrow(608, 127, 638, 127, k >= 5 ? INK : "#cfd5d4", 1.5);
+        if (k >= 5) s += `<path d="M112,197 C400,250 650,240 692,156" fill="none" stroke="${GOLD}" stroke-dasharray="4 3"/>` + txt(420, 238, "the true ε is the answer key", `font-size="10" text-anchor="middle" fill="${GOLD}"`);
+        if (k >= 6) s += arrow(690, 96, 470, 90, NEG, 2) + txt(580, 80, "gradient → network weights", `font-size="10.5" text-anchor="middle" fill="${NEG}"`);
+        // Number line.
+        const X = (v: number) => 380 + v * 150;
+        s += `<line x1="140" x2="620" y1="300" y2="300" stroke="#cfd5d4" stroke-width="2"/>`;
+        [-1.5, -1, -0.5, 0, 0.5, 1, 1.5].forEach((v) => (s += txt(X(v), 318, fmt(v), `font-size="10" text-anchor="middle" fill="${MUTED}"`)));
+        s += `<circle cx="${X(-1)}" cy="300" r="5" fill="#3E6E9E" fill-opacity="0.5"/><circle cx="${X(1)}" cy="300" r="${k >= 0 ? 7 : 5}" fill="#3E6E9E"/>` + txt(X(1), 284, "x₀", `font-size="10.5" text-anchor="middle" fill="#3E6E9E"`);
+        if (k >= 3) s += `<circle cx="${X(XT)}" cy="300" r="7" fill="${INK}"/>` + txt(X(XT), 284, "x_t", `font-size="10.5" text-anchor="middle" fill="${INK}"`) + arrow(X(1) - 8, 292, X(XT) + 8, 292, MUTED, 1);
+        if (k >= 4) s += `<circle cx="${X(PRED.x0)}" cy="300" r="5" fill="none" stroke="${JADE}" stroke-width="2"/>` + txt(X(PRED.x0), 338, "x̂₀", `font-size="10.5" text-anchor="middle" fill="${JADE}"`);
+      } else {
+        // Time runs left (t = 1, noise) to right (t = 0, data).
+        const L = 80, W = 600, tX = (t: number) => L + (1 - t) * W, yX = (v: number) => 190 - v * 110;
+        s += txt(L, 24, "the same network, called once per step", `font-size="11.5" font-weight="700" fill="${INK}"`);
+        s += `<line x1="${L}" x2="${L + W}" y1="${yX(1)}" y2="${yX(1)}" stroke="#3E6E9E" stroke-dasharray="3 3"/><line x1="${L}" x2="${L + W}" y1="${yX(-1)}" y2="${yX(-1)}" stroke="#3E6E9E" stroke-dasharray="3 3"/><line x1="${L}" x2="${L + W}" y1="${yX(0)}" y2="${yX(0)}" stroke="#eef0f0"/>`;
+        s += txt(L - 8, yX(1) + 4, "+1", `font-size="10" text-anchor="end" fill="#3E6E9E"`) + txt(L - 8, yX(-1) + 4, "−1", `font-size="10" text-anchor="end" fill="#3E6E9E"`) + txt(L - 8, yX(0) + 4, "0", `font-size="10" text-anchor="end" fill="${MUTED}"`);
+        TS.forEach((t) => (s += txt(tX(t), 330, `t = ${t}`, `font-size="10.5" text-anchor="middle" fill="${MUTED}"`)));
+        const shown = Math.max(0, Math.min(4, k));
+        PATH.slice(0, shown + 1).forEach((p, i) => {
+          if (i > 0) { const mid = (tX(PATH[i - 1].t) + tX(p.t)) / 2; s += arrow(tX(PATH[i - 1].t) + 8, yX(PATH[i - 1].x), tX(p.t) - 8, yX(p.x), INK, 1.8) + `<rect x="${mid - 30}" y="${(yX(PATH[i - 1].x) + yX(p.x)) / 2 + 14}" width="60" height="20" rx="5" fill="${i === k ? TINT : "#fff"}" stroke="${JADE}"/>` + txt(mid, (yX(PATH[i - 1].x) + yX(p.x)) / 2 + 28, "network", `font-size="9.5" text-anchor="middle" fill="${JADE}"`); }
+          if (i < shown && k >= 1) s += `<circle cx="${tX(p.t)}" cy="${yX(PATH[i].x0)}" r="4" fill="none" stroke="${GOLD}" stroke-width="1.5"/>`;
+          s += `<circle cx="${tX(p.t)}" cy="${yX(p.x)}" r="7" fill="${i === 4 ? "#3E6E9E" : INK}"/>` + txt(tX(p.t) + (i === 4 ? -12 : 11), yX(p.x) - 10, f3(p.x), `font-size="11" font-weight="700" text-anchor="${i === 4 ? "end" : "start"}" fill="${INK}"`);
+        });
+        if (k >= 1) s += txt(L + W, 24, "gold rings: the clean guess x̂₀ at each step", `font-size="10" text-anchor="end" fill="${GOLD}"`);
+      }
+      $("[data-draw]").innerHTML = s;
+    }
+    const redraw = stepper(root, steps, draw, { delay: 2.4 });
+    root.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach((b) => b.addEventListener("click", () => { mode = b.dataset.mode as "train" | "sample"; root.querySelectorAll("[data-mode]").forEach((o) => o.setAttribute("aria-pressed", String(o === b))); root.querySelector<HTMLButtonElement>("[data-sp-reset]")?.click(); redraw(); }));
+  });
+</script>

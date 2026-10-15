@@ -1,0 +1,293 @@
+---
+title: "Same model, new language: fine-tuning Pocket TTS to speak Khmer"
+title_key: "Pocket TTS to speak Khmer"
+date: 2026-10-13
+category: "speech-ai"
+read_time: "35 min"
+series_order: 13
+series: speech-ai
+featured: false
+excerpt: "How an English text-to-speech model learned to read Khmer: the data, the cleaning, the cut into prompt and target, the new tokenizer, what was trained and what stayed frozen, and why the best checkpoint was not the one with the lowest loss."
+question: "What does it take to adapt an English TTS model to a new language and new voices?"
+my_work: "My own project. I prepared the data, checked the number rules and alignment cuts by ear as the native listener, trained every run on an A100, and registered each experiment before running it."
+result: "The served system reaches 10.9% CER on 1,060 held-out sentences and runs faster than real time on a CPU. More real data fixed rare words that CER barely registered, and training longer hurt unseen voices while validation loss kept improving."
+evidence_limit: "One training seed per comparison, one native listener, and only two unseen speakers in the dev set. The sealed test set has not been opened. CER figures use an ASR judge chosen before training."
+lesson: "The trainer was upstream's, unmodified. What made the model work was everything around it: licensed data, text that matches the audio, honest splits, a tokenizer for the script, and a checkpoint rule written down before looking."
+---
+
+import KhmerRecipe from "../../components/figures/KhmerRecipe.astro";
+import NumberReview from "../../components/figures/NumberReview.astro";
+import RateCheck from "../../components/figures/RateCheck.astro";
+import DataFilters from "../../components/figures/DataFilters.astro";
+import GroupedSplit from "../../components/figures/GroupedSplit.astro";
+import SqrtSampling from "../../components/figures/SqrtSampling.astro";
+import PromptCut from "../../components/figures/PromptCut.astro";
+import KhmerCodepoints from "../../components/figures/KhmerCodepoints.astro";
+import TrainingStep from "../../components/figures/TrainingStep.astro";
+import CerVsLoss from "../../components/figures/CerVsLoss.astro";
+import AblationForest from "../../components/figures/AblationForest.astro";
+
+[Pocket TTS](/blog/pocket-tts-calm-explained/) is a small English text-to-speech (TTS) model from Kyutai. Earlier posts explained how it generates speech and how [Mimi](/blog/mimi-codec-explained/), its codec, turns audio into numbers and back. This post asks a different question. You have the English model. How do you make it speak Khmer, in many voices, without designing anything new?
+
+This is my own project, and every number below comes from my runs. Each section follows one step of the work, with a small example first and the details after.
+
+## The language, and what "fine-tuning" means
+
+**Khmer** is the language of Cambodia, spoken by about **17 million** people, but with few open speech datasets. Three things about its writing matter for everything that follows:
+
+- **It has its own script**, an *abugida*: each letter is a consonant that carries a built-in vowel, and other vowels are written as signs attached around it.
+- **Consonants stack.** In the word រង្គ, the last consonant is written *under* the one before it. An invisible sign called *coeng* (្) tells the computer to stack them.
+- **There are no spaces between words.** A Khmer sentence looks like one long run of letters; spaces separate phrases, not words. And spelling often does not tell you the sound: some letters are silent, and many words come from Pali and Sanskrit.
+
+If Khmer writing is new to you, [How Khmer writing looks to a text-to-speech model](/blog/khmer-script-for-tts/) walks through it letter by letter, byte by byte.
+
+**Fine-tuning** means starting from a model that is already trained and continuing to train it on new data. Think of a pianist learning a new style: their hands already know how to play, they only need new pieces. The English Pocket TTS already knows how to produce natural speech; it needs to learn how Khmer letters sound and what about **20** new voices sound like.
+
+It was *full* fine-tuning: every weight of the language model was updated. There was no shortcut such as LoRA (low-rank adaptation, which trains only small add-on matrices). Section 8 shows exactly which parts.
+
+All training ran on one NVIDIA A100 GPU (graphics processor) with **80 GB** of memory, one run at a time, so there were no large searches over settings. And there was one native listener: me.
+
+<figure class="blog-figure blog-figure--wide">
+  <KhmerRecipe alt="Nine stations on a line: licensed audio, normalise text, read numbers, quality control, split, align and cut, tokenizer, fine-tune, pick checkpoint, each with one real number underneath." />
+  <figcaption><strong>Figure 1. The recipe on one line.</strong> Each station has one number from the project. Seven of the nine stations are about data; the training code itself is upstream's, unmodified.</figcaption>
+</figure>
+
+## Where the speech comes from
+
+A model can only learn voices and words it has heard, and data whose licence forbids your use is useless however good it is. So every source was admitted only after a licence review. All three use Creative Commons licences: CC BY (credit the author) or CC BY-SA (credit the author and share derived work under the same terms).
+
+<div class="blog-table-scroll" tabindex="0">
+
+| Source | Licence | Hours | Speakers | What it is |
+| --- | --- | ---: | --- | --- |
+| DDD Khmer ASR Cultural Dataset, by Digital Divide Data | CC BY-SA 4.0 | **≈ 849** | 18–20 | read speech, 16 kHz; about **90k** sentences from **2,092** documents |
+| FLEURS-R km_kh, train split (Google) | CC BY 4.0 | **2.3** | many | restored read speech, 24 kHz; final run only |
+| OpenSLR 42, Google Khmer TTS | CC BY-SA 4.0 | **2.9** | ≈ 17 | studio read speech; final run only |
+
+</div>
+
+The first source dominates: **849 of 855 hours**. In it, each sentence was read by about **4** different speakers. So a sentence such as "the market opens at seven" might exist as four recordings in four voices. Keep that in mind; it matters for the split in Section 5.
+
+Two limits belong here, not in a footnote. Whether weights trained on CC BY-SA data must themselves be shared under CC BY-SA is unresolved. And none of these speakers agreed to have their voice cloned, which the base model's terms require. A consented voice is needed before anything is released.
+
+## Text that matches the audio
+
+A TTS model learns "these characters sound like this audio". If the text says one thing and the audio says another, the model learns the mismatch. So every cleaning step obeys one rule: **never change what the text says aloud.**
+
+### Normalisation: change little, flag a lot
+
+I first listed every character used in all **450,396** transcripts, then wrote four rules from that list:
+
+1. **Unicode NFC.** The same Khmer letter and vowel sign can be stored as different byte sequences that look identical. NFC (Normalization Form C) picks one standard order. Here it changed nothing.
+2. **Remove zero-width spaces** (Unicode U+200B). They are invisible: "ខ្ញុំ​ទៅ" and "ខ្ញុំទៅ" look the same on screen, but the first contains one, added by some editors to hint at a word boundary. About **5.5%** of rows had them. They are never spoken, so they go.
+3. **Collapse repeated spaces.**
+4. **Flag, never silently rewrite,** anything that changes what is spoken. A row containing "15%", "iPhone" or "&" is not edited by guesswork; it is flagged.
+
+A flagged row has no **spoken form**, meaning the text written exactly as it is read aloud, until a rule or a person gives it one. The model trains only on spoken forms.
+
+### Numbers: teach them, with a listener checking the rules
+
+"២០២៤" on a page is not a sound. The model would have to guess whether it is "two thousand twenty-four" or "two zero two four". So digits are written out as words before training, and the same rules run when the model is used, so it always sees the same kind of text.
+
+About **18k** recordings contained Khmer digits: **4,551** different sentences with **7,593** numbers. Dropping them would teach the model that numbers don't exist, so I chose to teach them. A small program, the **verbaliser**, proposes a reading for each number: years, counts, ordinals ("the 3rd"), times, percentages, money, thousands and simple decimals. Then I listened to **121** sentences next to their proposed readings. Figure 2 shows the three things that can happen.
+
+<figure class="blog-figure blog-figure--wide">
+  <NumberReview alt="Three rows. Row one: the text 'year 2024', the rule proposes 'two-thousand twenty-four', the speaker said the same: rule confirmed. Row two: '15 people', the rule proposes 'fifteen', the speaker said 'sixteen': recording dropped, 13 such. Row three: '100%' which is a typo, the rule proposes 'one hundred percent', the speaker said 'ten percent': text corrected. Below, a gauge fills to 16,736 of 18,220 digit recordings." />
+  <figcaption><strong>Figure 2. The rule proposes, the listener decides.</strong> The three example sentences are illustrative, with English glosses; the counts below them are the project's. Only rules confirmed on correct readings are applied automatically.</figcaption>
+</figure>
+
+- **The audio matches the rule** (first row): the rule is confirmed and can be applied to every similar number.
+- **The speaker misread** (second row): the text says 15, the speaker said 16. Neither the text nor a "corrected" text is safe to train on, so the recording is dropped. This happened **13** times.
+- **The text is wrong, the audio is right** (third row): the source had a typo. The recording is kept, with the text corrected to what was said.
+
+The confirmed rules agreed with the recordings **169 out of 169** times. A fresh check on **40** new recordings found **2** gaps, both fixed. In the end **16,736 of 18,220** digit recordings received a spoken form. Hard cases such as numbers of 100,000 and more were left without one, so those recordings are not used.
+
+The point is that I checked the *rules*, not every row. Listening to 121 sentences made 16,736 recordings usable.
+
+## Quality control: reject the broken, keep the hard
+
+Some rows are simply broken. Two checks caught them.
+
+**The same audio file under two different sentences.** One recording cannot say two different things, so at least one transcript is wrong. **768** rows were rejected.
+
+**A speaking rate no human could produce.** Divide the number of characters in the transcript by the length of the audio in seconds. Across the corpus, the typical (median) value is **12 characters per second**. A clip far outside that range almost always means the text and the audio don't belong together:
+
+- 150 characters in a 3-second clip is **50** per second. Nobody reads that fast: the text belongs to a longer recording.
+- 6 characters in a 3-second clip is **2** per second. Most of the audio has no text: the transcript was cut short.
+
+The accepted range was set to **4 to 36** characters per second, that is, from a third of the median to three times it. I fixed that range *before* checking how many rows it would remove, so it could not be adjusted to make the numbers look good. It removed only **32** rows.
+
+<figure class="blog-figure blog-figure--wide">
+  <RateCheck alt="A number line of characters per second from 0 to 48, with the kept range from 4 to 36 shaded and the median 12 marked. A dot moves to 50 for a too-fast clip, rejected; to 2 for a too-slow clip, rejected; and to 12 for a normal clip, kept." />
+  <figcaption><strong>Figure 3. The speaking-rate check.</strong> The three clips are illustrative; the range and the median are the project's. Click a clip to see where it lands.</figcaption>
+</figure>
+
+What is never rejected: a sentence that is merely *difficult*, with rare words or long clusters. Hard sentences are exactly what the model needs to learn from.
+
+<figure class="blog-figure blog-figure--wide">
+  <DataFilters alt="From 450,396 transcripts down to the foundation set of 854.5 hours and 350,470 recordings, with five side exits: 768 duplicate-audio rows, 32 speaking-rate rows, 13 number misreadings, 1,484 digit recordings without a confirmed reading, and 125.6 hours of single-phrase recordings." />
+  <figcaption><strong>Figure 4. Everything the filters took out.</strong> The 1,484 is 18,220 minus 16,736. The last exit is explained in Section 6. The filters overlap and count different units, rows or hours, so they are drawn as separate exits rather than one subtraction.</figcaption>
+</figure>
+
+## Splits: keep the exam honest
+
+To know whether the model learned to *read* Khmer, you test it on sentences it never trained on. That held-out part of the data is the **development set**, or dev set; a second, untouched part is the **test set**.
+
+Here is the trap. Each sentence was read by about 4 speakers, and the same sentence can appear in several documents. Say "the market opens at seven" is in document 1 and in document 2. If document 1 goes to training and document 2 to dev, the model is tested on a sentence it has already heard, and the dev score partly measures memory. Figure 5 shows this on a toy example: with "document, at random", red arcs mark the sentences that leak.
+
+The fix: any documents that share a sentence are merged into one group, **2,059** groups in all, and whole groups go to one side. Then **1%** of the hours goes to dev and **1%** to test. No sentence appears on both sides.
+
+The dev set has three separate jobs:
+
+- **200 "core" sentences pick the checkpoint** (Section 10), and do nothing else.
+- **1,060 sentences compare systems.** Because they never influenced which checkpoint was chosen, they cannot flatter it.
+- **2 held-out speakers** never appear in training. Their **96** sentences test an **unseen voice**: one the model must copy from a short sample without ever having trained on it.
+
+The **1,209**-sentence test set is sealed. Its SHA-256 hash, a fingerprint that changes if a single byte changes, was recorded, and the set has never been opened.
+
+<figure class="blog-figure blog-figure--wide">
+  <GroupedSplit alt="Eight toy documents, each sharing one sentence with its neighbour, move into train and dev bins. Split by document at random, red arcs connect shared sentences across the split. Split by group, no arcs remain. Below, the real dev set: 200 core, 1,060 for comparison, 96 unseen-speaker items, and a sealed test set of 1,209." />
+  <figcaption><strong>Figure 5. Why documents are grouped before splitting.</strong> Top: a toy with eight documents. Splitting them at random puts the same sentence on both sides; splitting by group does not. Bottom: how the real dev set is divided between its three jobs.</figcaption>
+</figure>
+
+## One recording becomes a prompt and a target
+
+When you use Pocket TTS, you give it a few seconds of someone's voice, the **voice prompt**, and some text, and it speaks the text in that voice. To learn this, each training recording teaches itself. Take a 12-second recording: its first few seconds become the prompt, and the rest becomes the **target**, the audio the model must learn to produce. This is a **self-prompted** example.
+
+### Where to cut: forced alignment
+
+The hard part is the cut. Cut in the middle of a word and the prompt ends in half a syllable, while the target starts with the other half. The cut must fall in a pause, and to find the pauses you need to know *when* each part of the sentence is spoken.
+
+That is what **forced alignment** does. Unlike speech recognition, it does not need to discover the words: the transcript is already known. It only finds the timestamps, for example "phrase 1 from 0.25 s to 1.90 s, phrase 2 from 2.20 s to 3.60 s".
+
+To do it, the aligner uses a speech recogniser trained with **CTC** (Connectionist Temporal Classification). Such a model looks at the audio in slices of about 20 milliseconds and, for each slice, gives a probability for every letter, plus a special "blank" meaning "no new letter here". Its output for one word looks like `ស ស _ _ ួ ួ _ …`: one label per slice, with repeats and blanks. Because every slice gets a label, you can read off when each letter, and so each phrase, starts and ends. For this project:
+
+- The aligner is upstream's own script, unmodified, with a Khmer CTC model (`gagan3012/wav2vec2-xlsr-khmer`).
+- It aligns **phrases, not words**, because Khmer writes spaces only between phrases (Section 1).
+- The cut goes in a pause between phrases. The prompt is at most **5 seconds**, and the cut stays at least **1 second** from both ends of the recording.
+- A recording that is one long phrase has no pause to cut at and cannot be used. That removed **125.6 hours**.
+- I listened to all **60** cuts of a first batch: **60 out of 60** fell cleanly between phrases.
+
+<figure class="blog-figure blog-figure--wide">
+  <PromptCut alt="A twelve-second waveform with six phrase bars above it. A cut line slides to the pause at about 3.75 seconds: the left part is shaded as the voice prompt, the right as the target, and the first and last second are hatched as no-cut zones. Below, the example as Mimi frames: text tokens, about 47 prompt frames and about 103 target frames. Moving the cut past 5 seconds turns it red; a one-phrase recording has no valid cut and is excluded." />
+  <figcaption><strong>Figure 6. Cutting one recording into prompt and target.</strong> The waveform and timings are synthetic; the rules are the project's. Move the cut between pauses to see which positions are allowed, then switch to a one-phrase recording. Mimi turns each second of audio into 12.5 frames, so a 3.75-second prompt is about 47 frames.</figcaption>
+</figure>
+
+### Before training, measure the floor
+
+The model never produces sound waves directly. It produces Mimi's compressed frames, and the frozen Mimi decoder turns them into audio. So the model can never sound better than a recording that has simply been passed through Mimi and back. It is worth measuring that limit before blaming training.
+
+To measure it, I used **CER** (character error rate): an automatic speech recogniser (ASR), the "judge", transcribes the audio, and CER is the fraction of characters it gets wrong. On 100 characters, 12 wrong means 12%. (The [evaluation post](/blog/speech-evaluation-metrics/) explains CER and why the judge has its own biases.)
+
+On **44** real clips, CER was **10.4%** on the original audio and **14.7%** after a trip through Mimi: **4.2 points** worse, with a 95% interval of 3.3 to 5.3. Yet I could not hear any difference in **44 of 44** pairs, so the codec was kept. The judge notices Mimi's small artefacts more than an ear does.
+
+### Balancing voices: square-root sampling
+
+A few speakers recorded far more than the others. Draw training examples in proportion to hours, and the model mostly hears those few voices. Draw every speaker equally, and the small ones repeat so often the model memorises their clips. The square root sits in between. For a speaker group $g$ with $h_g$ hours:
+
+$$
+P(g) = \frac{\sqrt{h_g}}{\sum_k \sqrt{h_k}}
+$$
+
+$P(g)$ is the chance that the next training example comes from group $g$. The top is that group's square-rooted hours; the bottom, $\sum_k$, adds the square-rooted hours of every group $k$, so all the chances add up to 1.
+
+A toy example with three speakers who recorded **100**, **25** and **1** hours. In proportion to hours, they get **79.4%**, **19.8%** and **0.8%** of draws. With square roots, 10, 5 and 1 out of 16, they get **62.5%**, **31.25%** and **6.25%**. The smallest voice goes from under 1% to about 6%, while the largest is still the most heard.
+
+In the final run, on all **854.5** hours, this cut the share of the three largest voices from **65%** to **38%**. The price was repetition: clips of the smallest speakers were heard up to about **240** times. I did not test the balancing on its own, so I cannot say how much it helped.
+
+<figure class="blog-figure blog-figure--wide">
+  <SqrtSampling alt="Three bars for a 100 hour, 25 hour and 1 hour speaker, showing each one's share of training draws. A slider moves the exponent from 0, uniform, through 0.5, square root, to 1, proportional; a readout shows how many times each clip of the smallest speaker is heard." />
+  <figcaption><strong>Figure 7. How much each voice is heard.</strong> Toy hours; the real result is in the last line. Slide toward uniform and the small voice is heard more, at the price of hearing each of its clips many times.</figcaption>
+</figure>
+
+## A tokenizer for the script
+
+A model cannot read letters directly. A **tokenizer** first chops the text into pieces, called tokens, and gives each piece a number. In English, "unbelievable" might become "un", "believ" and "able". The model then looks up a learned list of numbers, a vector, for each piece. The table of all these vectors is the **text embedding**.
+
+The English tokenizer has no pieces for Khmer. Given Khmer text, it falls back to raw bytes: each Khmer character becomes **3** meaningless byte tokens (Figure 8, bottom row). So the English tokenizer and its embedding table were both thrown away.
+
+The new tokenizer is a **SentencePiece** model with **4,000** pieces. Each piece gets an ID from 0 to 3,999, and the new text embedding has exactly one row per ID: **4,000 rows**, created fresh and learned during fine-tuning (step 4 of Figure 9 shows the lookup). SentencePiece learns which chunks of text occur most often directly from raw sentences, without needing spaces between words, which Khmer does not have. It learned from **108,242** different training sentences, in their spoken forms, and nothing from dev or test.
+
+It worked cleanly on all **1,237** dev sentences: no unknown pieces, no fallback to bytes. A typical sentence became **27** tokens, about **3.8** Unicode characters per token. In **5.9%** of pieces, a piece starts in the middle of a stacked cluster; that was noted and kept.
+
+There is no pronunciation dictionary: the model reads written pieces and learns how they sound from the audio. The one known gap is Latin script, which never appears in the training text. "ipad" becomes four byte tokens the model has never learned. A separate text front-end handles that, and belongs to a later post.
+
+<figure class="blog-figure blog-figure--wide">
+  <KhmerCodepoints alt="A Khmer word shown large, then broken into its Unicode code points as coloured boxes: consonants, vowel signs, the coeng sign that stacks consonants, and other signs, each with its U+ code. Below, the same word as UTF-8 bytes, three per character, which is what a tokenizer without Khmer pieces falls back to." />
+  <figcaption><strong>Figure 8. What a Khmer word is made of.</strong> Three words from the project's pronunciation work; the code points and bytes are computed in your browser. A Khmer tokenizer builds its pieces from the middle row. A tokenizer with no Khmer pieces sees only the bottom row: three bytes per character, none with a learned meaning.</figcaption>
+</figure>
+
+## What is trained and what is frozen
+
+The idea is to keep what transfers from English and retrain what does not:
+
+- **Frozen: the Mimi codec**, both the encoder that compresses the voice prompt and the decoder that produces sound. Sound is close enough to language-independent. Since Mimi never changes, its frames for every recording were computed once, before training.
+- **Thrown away and learned from scratch: the text embedding**, now a table of **4,000** rows, one per Khmer piece.
+- **Started from English, then trained: the 24-layer transformer and the flow head.** The transformer is the main network; it is *causal*, meaning each frame can only look at frames before it. The flow head is the small network that turns random noise into the next audio frame (the [Pocket TTS post](/blog/pocket-tts-calm-explained/) explains both).
+
+In total, **316,015,874** weights were trained, starting from Kyutai's English checkpoint `english_2026-04_24l`. Figure 9 follows one training step through all of these parts.
+
+<figure class="blog-figure blog-figure--wide">
+  <TrainingStep alt="A twelve-step walkthrough of one training step on one diagram. A batch of eight example cards, two with their text hidden and two with their voice hidden. A Khmer sentence split into three pieces with IDs, linked to their rows in a 4,000-row embedding table. A frozen Mimi encoder with prompt and target frame columns. Twenty-four transformer layers beside a causal mask, sending an instruction h_t to the flow head. One real target frame is picked; four noisy blends of it are made with different amounts of noise; the flow head guesses the way back for each, the true way back is shown beside it, and the loss is computed. A red gradient path returns through the layers into the embedding rows and stops before Mimi. Finally a weight moves from 1.00 to 1.10 while its smoothed copy moves to 1.0001." />
+  <figcaption><strong>Figure 9. One training step.</strong> Use Next and Back, drag the slider, or press Play all; each step has its own explanation at the top. Switch between the very first update and after 10,000 updates to see the embedding go from noise to structure and the guesses move closer to the truth. Every setting shown is the project's; the frames, noise, IDs, embedding values and losses are illustrative.</figcaption>
+</figure>
+
+## The training settings, one at a time
+
+One recipe was kept fixed across all runs, so every experiment differs in a single setting. Here is each one in plain terms, with the step of Figure 9 where you can see it:
+
+- **The optimiser, AdamW** (step 11). After each batch, the model computes in which direction each weight should move to reduce its error; the optimiser decides how far. AdamW adapts the step for each weight and adds *weight decay*, a gentle pull of every weight toward zero (strength **0.1**). A newer optimiser, Muon, was tried and not adopted (Section 11).
+- **The learning rate: 2 × 10⁻⁴, warmed up over 1,000 steps, then constant** (step 11). The learning rate scales every step. It starts near zero and grows over the first **1,000** steps, so that the brand-new Khmer embedding, still random, does not send large, noisy corrections through the trained transformer.
+- **Gradient clipping at 1.0** (step 11). If one batch asks for an unusually large change, the change is scaled down. This protects against rare spikes.
+- **EMA (exponential moving average) of the weights, decay 0.999** (step 12). Alongside the real weights, a smoothed copy is kept: after each step, smoothed = 0.999 × smoothed + 0.001 × current. If a weight jumps from 1.00 to 1.10 in one noisy step, the smoothed copy moves only to 1.0001. The smoothed copy is the one saved and used.
+- **Batches of 64 recordings, each up to 30 seconds** (step 1). Clips of similar length are batched together so little time is wasted on padding.
+- **Four noise draws per frame** (steps 7 to 10). The flow head learns by repair: take the real next frame, blend it with random noise by a random amount, and ask the head which way leads back to the real frame. The error in its answer is the main loss. Each frame is used with **4** different noise draws, so one pass through the large transformer yields 4 training examples for the small head.
+- **Text dropout 0.2 and voice dropout 0.2** (step 2). In a batch of 10 examples, about 2 have their text hidden and about 2 have their voice prompt hidden. The model must still predict something sensible, so it learns what speech sounds like *without* each condition. That is what later allows classifier-free guidance (CFG), explained in the Pocket TTS post, and it also lets the model speak with no prompt at all.
+- **End-of-speech signal** (step 10). For every frame the model also predicts "stop here or not", called EOS (end of speech), trained with a weight of **0.1** next to the main loss. In **30%** of examples the final punctuation mark is removed, so the model does not rely only on it to know when to stop.
+- **One random seed per experiment (seed 42).** Every comparison in Section 11 is one run on each side. That is a real limit.
+- **A checkpoint saved every 5,000 steps**, and the validation loss measured every 2,500.
+
+## Picking the checkpoint: CER, not validation loss
+
+Training saves a snapshot of the weights, a **checkpoint**, every 5,000 steps. Which one should be kept? The usual habit is the one with the lowest **validation loss**, the training error measured on held-out data. But here that error measures how well the model predicts Mimi frames, which is not the same as whether a listener can understand the words.
+
+So in every run, the checkpoint was chosen by CER on the **200** core dev sentences, under a rule written into the code before training started: take the best one, or a later one if it is within **0.5** points. The judge was chosen before any training too: Meta's `omniASR_CTC_300M_v2`, which scored **10.7%** CER on **296** real Khmer recordings, the best of four candidates.
+
+Two runs show why this mattered:
+
+- **The 100-hour baseline overfit.** CER was **13.37%** at 10,000 steps, then 14.83%, 14.86%, 17.25% and **18.07%** by 30,000. *Overfitting* means the model starts memorising its training clips instead of learning to read. The 10,000-step checkpoint was kept.
+- **The full 854.5-hour run flattened.** CER went from **11.49%** at 15,000 steps to **12.06%** at 40,000, while validation loss improved at every single step. A *cool-down*, slowly lowering the learning rate at the end, made validation loss better still, from −0.127 to −0.184, and made CER **worse by 0.34 points**. It was rejected.
+
+<figure class="blog-figure blog-figure--wide">
+  <CerVsLoss alt="Two CER curves by training step: the 100 hour baseline rising from 13.37 percent at 10k to 18.07 percent at 30k, and the foundation run from 11.49 percent at 15k to 12.06 percent at 40k. A falling validation-loss curve is drawn for shape. Buttons move a marker to the checkpoint each rule would pick: 40k by loss, 25k by the registered rule, 15k as served." />
+  <figcaption><strong>Figure 10. Loss keeps falling, CER does not.</strong> CER points are the project's; the validation-loss curve shows its shape only, since only its direction was recorded per step. Switch the rule to see which checkpoint each would pick.</figcaption>
+</figure>
+
+## What the experiments taught about the recipe
+
+Each experiment was **registered** before it ran: I wrote down the hypothesis, the metric, the decision rule, and the smallest effect worth acting on, usually **1.0** CER point with a 95% interval that does not include zero. A smaller effect counts as "no effect", even if it is statistically real. Every comparison is made on the same sentences, and the intervals come from bootstrapping: re-sampling the sentences many times to see how much the result could vary.
+
+- **Which 100 hours you pick matters, a little.** I compared sets of exactly 100 hours. One was chosen to cover as many different tokenizer pieces per second as possible; another was random. The coverage set won by **0.56** points: real, but under the bar. The gap was largest on unseen voices: **13.21%** against **16.34%**.
+- **More data stopped the overfitting and fixed rare words.** 300 hours against 100, with the same number of training steps, improved CER by only **0.39** points, and a second judge did not confirm even that. But the 100-hour run's validation loss started rising after 7,500 steps while the 300-hour run's kept falling. And on **100** rare words I checked by ear, mistakes fell from **17 to 5**. The main gain was one CER barely saw.
+- **Training longer hurt new voices.** On the full data, going from 15,000 to 25,000 steps made CER on unseen voices about **2.5** points worse, and their voice similarity (SIM, the cosine similarity of speaker embeddings) dropped from **0.948** to **0.938**, while known voices did not change. So the **15,000**-step checkpoint became the base of the system I use; 25,000 stays the official result of the registered rule.
+- **The optimiser was not the bottleneck.** Muon beat AdamW by **0.23** points, under its 0.5-point bar, and ran **30%** slower.
+- **An automatic judge could not tell right from wrong pronunciation.** Against **683** words I labelled by ear, automatic "wrong word" detectors barely beat guessing, because the recognisers misspell rare words even when they are spoken correctly. So pronunciation fixes became respellings of the input text, each checked by ear, which belongs to another post.
+
+<figure class="blog-figure blog-figure--wide">
+  <AblationForest alt="Five rows with a point and a 95 percent interval for the CER change: coverage versus random −0.56, coverage versus matched −0.26, 300 hours versus 100 hours −0.39, Muon versus AdamW −0.23, cool-down +0.34. A shaded band marks the −1.0 point bar, which no row reaches. Below, rare-word errors per 100 fall from 17 with 100 hours to 5 with 300 hours." />
+  <figcaption><strong>Figure 11. Five experiments, none past the bar.</strong> Every row is a CER change, where negative is better; the 300-hour result is reported as a 0.39-point gain and drawn as −0.39 to match. The green tick on the Muon row is its own 0.5-point bar. Below: the improvement CER barely registered.</figcaption>
+</figure>
+
+## What made it work
+
+The trainer was Kyutai's own, unmodified, with a project configuration file. What made the model work was everything around it: licensed data, text that says exactly what the audio says, a listener checking rules rather than rows, splits that keep shared sentences apart and hold voices out, a tokenizer built for the script, and a checkpoint rule written down before looking at the results.
+
+Two lessons surprised me. Training *shorter* served new voices better, while validation loss said the opposite. And more real data fixed exactly the mistakes the automatic metric could not see.
+
+The system I use today reaches **10.9%** CER on the **1,060** comparison sentences and runs faster than real time on a CPU. The limits are real: one seed per comparison, one listener, only two unseen speakers in dev, and a test set still sealed. How it runs, how it reads mixed Khmer and English text, and how pronunciation was fixed by ear will come in a later post.
+
+## Related
+
+- [How Khmer writing looks to a TTS model](/blog/khmer-script-for-tts/), the script, bytes and tokens in detail
+- [F5-TTS review](/paper-reviews/f5-tts/), a no-aligner recipe and its duration guess for Khmer
+- [Whisper review](/paper-reviews/whisper/), why off-the-shelf Whisper cannot transcribe Khmer

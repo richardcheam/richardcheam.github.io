@@ -1,0 +1,79 @@
+---
+// Moshi review, Figure 6: sliding the text row against the audio rows
+// (Sec 3.4.4, p. 16; App C, p. 56). Text 2 s late: streaming ASR (audio fed
+// in, text sampled). Text 2 s early: streaming TTS (text fed in, audio
+// sampled). 2 s = 25 steps of 80 ms (Sec 5.7, p. 31). Word timings are
+// illustrative.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram dd" role="region" aria-label={alt} data-dd>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 300" role="img" aria-labelledby="dd-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="dd-title">Shifting text against audio turns one model into a recogniser, a dialogue model or a speech synthesiser</title>
+    <g data-axis></g>
+    <text x="20" y="72" font-size="11.5" font-weight="700" fill="#2b2b30">Text</text>
+    <text x="20" y="130" font-size="11.5" font-weight="700" fill="#2b2b30">Audio</text>
+    <g data-text></g>
+    <g data-audio></g>
+    <text data-mode x="20" y="190" font-size="15" font-weight="700" fill="#594578"></text>
+    <text data-r1 x="20" y="214" font-size="12" fill="#2b2b30"></text>
+    <text data-r2 x="20" y="234" font-size="12" fill="#2b2b30"></text>
+    <text data-r3 x="20" y="258" font-size="12" font-weight="700" fill="#2b2b30"></text>
+    <rect x="20" y="276" width="12" height="12" fill="#2b2b30" /><text x="38" y="286" font-size="10.5" fill="#2b2b30">fed in (forced)</text>
+    <rect x="140" y="276" width="12" height="12" fill="#4F5D3A" fill-opacity="0.35" stroke="#4F5D3A" stroke-dasharray="2 2" /><text x="158" y="286" font-size="10.5" fill="#2b2b30">sampled by the model</text>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Text delay against audio<strong data-vd></strong></span><input class="scrub" data-d type="range" min="-2" max="2" step="0.08" value="0" /></label>
+    <div><span class="fig-panel__name">Snap to</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-snap="-2">TTS (text 2 s early)</button>
+      <button type="button" class="fig-chip" data-snap="0">Dialogue</button>
+      <button type="button" class="fig-chip" data-snap="2">ASR (text 2 s late)</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { setupFigure, tween, wait } from "../../lib/figure-motion";
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-dd]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const COLS = 75, CW = 9, X0 = 80, X = (s: number) => X0 + s * 12.5 * CW;
+    const words: [string, number, number][] = [["the", 2.0, 2.24], ["cat", 2.32, 2.72], ["sat", 2.8, 3.2], ["down", 3.28, 3.68]];
+    const mk = (g: Element, tag: string, a: Record<string, string | number>, txt?: string) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, String(a[k])); if (txt) e.textContent = txt; g.append(e); return e; };
+    for (let s = 0; s <= 6; s++) { mk($("[data-axis]"), "line", { x1: X(s), x2: X(s), y1: 34, y2: 150, stroke: "#ececf1" }); mk($("[data-axis]"), "text", { x: X(s), y: 26, "font-size": 10, "text-anchor": "middle", fill: "#5f5f66" }, `${s} s`); }
+    const dIn = $<HTMLInputElement>("[data-d]");
+    function draw(d: number) {
+      const mode = d >= 1.96 ? "asr" : d <= -1.96 ? "tts" : Math.abs(d) < 0.04 ? "dlg" : "mid";
+      const textForced = mode === "tts", audioForced = mode === "asr";
+      const gt = $("[data-text]"), ga = $("[data-audio]"); gt.replaceChildren(); ga.replaceChildren();
+      const cell = (g: Element, c: number, y: number, h: number, forced: boolean, speech: boolean) => mk(g, "rect", forced
+        ? { x: X0 + c * CW, y, width: CW - 1.5, height: h, fill: speech ? "#2b2b30" : "#b9b9c2" }
+        : { x: X0 + c * CW, y, width: CW - 1.5, height: h, fill: "#4F5D3A", "fill-opacity": speech ? 0.45 : 0.12, stroke: "#4F5D3A", "stroke-opacity": 0.5, "stroke-dasharray": "2 2" });
+      for (let c = 0; c < COLS; c++) {
+        const t = c / 12.5, sp = words.some(([, a, b]) => t >= a && t < b);
+        cell(ga, c, 106, 36, audioForced, sp);
+        const tt = t - d, isWord = words.some(([, a]) => Math.abs(tt - a) < 0.04);
+        cell(gt, c, 50, 30, textForced, isWord);
+      }
+      words.forEach(([w, a]) => { const x = X(a + d); if (x > X0 - 10 && x < 760) mk(gt, "text", { x: x + 2, y: 44, "font-size": 10.5, "font-weight": 700, fill: "#2b2b30" }, w); });
+      words.forEach(([w, a, b]) => mk(ga, "text", { x: (X(a) + X(b)) / 2, y: 100, "font-size": 10.5, "text-anchor": "middle", fill: "#2b2b30" }, w));
+      const steps = Math.round(Math.abs(d) * 12.5);
+      const names = { asr: "Streaming ASR: audio in, words out", tts: "Streaming TTS: words in, audio out", dlg: "Dialogue: Moshi writes both its words and its voice", mid: "Between modes" };
+      $("[data-mode]").textContent = names[mode];
+      $("[data-r1]").textContent = `Text is ${d > 0 ? "behind" : d < 0 ? "ahead of" : "level with"} the audio by ${Math.abs(d).toFixed(2)} s = ${steps} steps of 80 ms.`;
+      $("[data-r2]").textContent = mode === "asr" ? "Each word is written 2 s after it is heard, with its time known to 80 ms (Sec 5.7, p. 32)." : mode === "tts" ? "The model sees each word 2 s before it must say it; PAD and EPAD stay its own choice (App C, p. 56)." : mode === "dlg" ? "Each word is written one beat before its sound: the Inner Monologue." : "The paper trains the two end points; pretraining samples delays between −0.6 and +0.6 s (Sec 4.4, p. 20).";
+      $("[data-r3]").textContent = mode === "asr" ? "LibriSpeech test-clean: 5.7% word error rate (Sec 5.7, p. 32)." : mode === "tts" ? "LibriSpeech test-clean: 4.7% word error rate (Sec 5.7, p. 32)." : "";
+      dIn.value = String(d); dIn.style.setProperty("--p", `${((d + 2) / 4) * 100}%`);
+      $("[data-vd]").textContent = `${d > 0 ? "+" : ""}${d.toFixed(2)} s`;
+    }
+    dIn.addEventListener("input", () => draw(+dIn.value));
+    let cur = 0;
+    const slide = async (to: number, alive = () => true) => { const from = cur; await tween(0.9, (e) => { if (alive()) draw(Math.round((from + (to - from) * e) * 12.5) / 12.5); }); cur = to; draw(to); };
+    dIn.addEventListener("change", () => (cur = +dIn.value));
+    root.querySelectorAll<HTMLButtonElement>("[data-snap]").forEach((b) => b.addEventListener("click", () => { cur = +dIn.value; slide(+b.dataset.snap!); }));
+    draw(0);
+    setupFigure(root, () => { cur = 0; draw(0); }, async (alive) => {
+      await wait(0.6); if (!alive()) return; await slide(2, alive); await wait(1.4); if (!alive()) return; await slide(-2, alive); await wait(1.4); if (!alive()) return; await slide(0, alive);
+    });
+  });
+</script>

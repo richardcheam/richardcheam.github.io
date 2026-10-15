@@ -1,0 +1,68 @@
+---
+// Foundations, convolutions post: a 3×3 kernel over a 5×5 image (dark left
+// three columns, bright right two). Vertical edge kernel: every output row
+// 0, 27, 27. Horizontal edge: all 0. Blur: 0, 3, 6. Painting pixel (0, 3)
+// dark drops y[0,1] to 18.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-conv2>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 270" role="img" aria-labelledby="c2-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="c2-title">A three by three window walking over a five by five image, filling a three by three output</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Kernel</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-pre="v" aria-pressed="true">Vertical edge</button>
+      <button type="button" class="fig-chip" data-pre="h" aria-pressed="false">Horizontal edge</button>
+      <button type="button" class="fig-chip" data-pre="b" aria-pressed="false">Blur</button>
+    </div></div>
+    <div><span class="fig-panel__name">Image</span><div class="fig-chips"><button type="button" class="fig-chip" data-home>Reset image</button></div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt, par } from "../../lib/tiny-net";
+  import { INK, MUTED, GOLD, TINT, JADE, NEG } from "../../lib/net-diagram";
+  import { txt } from "../../lib/plot";
+  import { conv2d, clean } from "../../lib/conv";
+  const IMG0 = () => Array.from({ length: 5 }, () => [0, 0, 0, 9, 9]);
+  const K: Record<string, number[][]> = { v: [[-1, 0, 1], [-1, 0, 1], [-1, 0, 1]], h: [[-1, -1, -1], [0, 0, 0], [1, 1, 1]], b: [[1, 1, 1], [1, 1, 1], [1, 1, 1]].map((r) => r.map(() => 1 / 9)) };
+  document.querySelectorAll<HTMLElement>("[data-conv2]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    let img = IMG0(), ker = "v";
+    const kl = (v: number) => (Math.abs(v - 1 / 9) < 1e-6 ? "1/9" : fmt(v));
+    const kp = (v: number) => (v < 0 ? `(${kl(v)})` : kl(v));
+    const steps = () => {
+      const out = conv2d(img, K[ker]);
+      return Array.from({ length: 9 }, (_, i) => {
+        const r = Math.floor(i / 3), c = i % 3, w = K[ker];
+        const rows = w.map((row, a) => `${row.map((v, b) => `${kp(v)} × ${img[r + a][c + b]}`).join(" + ")} = ${fmt(clean(row.reduce((s, v, b) => s + v * img[r + a][c + b], 0)), 3)}`);
+        return { say: i === 0 ? "Lay the kernel on the top-left 3 by 3 patch: multiply the nine pairs and add." : c === 0 ? "Next row of windows: move down one pixel and back to the left." : "Slide one pixel to the right.", math: `${rows.join("\n")}\ny[${r},${c}] = ${fmt(clean(out[r][c]), 3)}` };
+      });
+    };
+    function draw(k: number) {
+      const out = conv2d(img, K[ker]), r0 = Math.floor(k / 3), c0 = k % 3, S = 40;
+      let s = txt(30, 20, "Image (click a pixel to switch it dark or bright)", `font-size="12" font-weight="700" fill="${INK}"`);
+      img.forEach((row, r) => row.forEach((v, c) => {
+        const g = Math.round(245 - v * 22);
+        s += `<rect data-px="${r},${c}" x="${30 + c * S}" y="${30 + r * S}" width="${S - 2}" height="${S - 2}" fill="rgb(${g},${g},${g})" style="cursor:pointer"/>` + txt(30 + c * S + 19, 30 + r * S + 24, String(v), `font-size="12" text-anchor="middle" fill="${v > 4 ? "#fff" : INK}" pointer-events="none"`);
+      }));
+      if (k >= 0) s += `<rect x="${30 + c0 * S - 2}" y="${30 + r0 * S - 2}" width="${3 * S + 2}" height="${3 * S + 2}" fill="none" stroke="${GOLD}" stroke-width="3" pointer-events="none"/>`;
+      s += txt(270, 20, "Kernel", `font-size="12" font-weight="700" fill="${INK}"`);
+      K[ker].forEach((row, a) => row.forEach((v, b) => (s += `<rect x="${270 + b * 44}" y="${30 + a * 44}" width="42" height="42" rx="4" fill="#FBF3E0" stroke="${GOLD}"/>` + txt(270 + b * 44 + 21, 30 + a * 44 + 26, kl(v), `font-size="12.5" font-weight="700" text-anchor="middle" fill="${v < 0 ? NEG : INK}"`))));
+      s += txt(450, 20, "Output (3 by 3)", `font-size="12" font-weight="700" fill="${INK}"`);
+      out.forEach((row, r) => row.forEach((v, c) => {
+        const i = r * 3 + c, done = i <= k, now = i === k;
+        s += `<rect x="${450 + c * 56}" y="${30 + r * 44}" width="54" height="42" rx="4" fill="${now ? TINT : "#fff"}" stroke="${now ? JADE : "#cfd5d4"}" stroke-width="${now ? 2.5 : 1}"/>` + txt(450 + c * 56 + 27, 30 + r * 44 + 26, done ? fmt(clean(v), 2) : "?", `font-size="13" font-weight="700" text-anchor="middle" fill="${done ? INK : "#B9C0BF"}"`);
+      }));
+      s += txt(450, 190, "5 − 3 + 1 = 3 windows across and down.", `font-size="11.5" fill="${MUTED}"`) + txt(450, 208, ker === "v" ? "Large values mark the vertical edge." : ker === "h" ? "No horizontal edge in this image: all zero." : "Blur averages each 3 by 3 patch.", `font-size="11.5" fill="${MUTED}"`);
+      $("[data-draw]").innerHTML = s;
+    }
+    const redraw = stepper(root, steps, draw, { delay: 1.3 });
+    root.querySelector("svg")!.addEventListener("click", (e) => { const px = (e.target as Element).getAttribute("data-px"); if (!px) return; const [r, c] = px.split(",").map(Number); img[r][c] = img[r][c] ? 0 : 9; redraw(); });
+    $("[data-home]").addEventListener("click", () => { img = IMG0(); redraw(); });
+    root.querySelectorAll<HTMLButtonElement>("[data-pre]").forEach((b) => b.addEventListener("click", () => { ker = b.dataset.pre!; root.querySelectorAll("[data-pre]").forEach((o) => o.setAttribute("aria-pressed", String(o === b))); redraw(); }));
+  });
+</script>

@@ -1,0 +1,103 @@
+---
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt}>
+<svg id="mss-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 300" role="img" aria-labelledby="mss-title mss-desc" class="blog-diagram-svg" font-family="Inter, sans-serif">
+<title id="mss-title">Signal size through Mimi</title><desc id="mss-desc">Sixteen bars, one per layer, on a log scale. Size rises from 24,000 numbers per second at the input to 1.5 million after the first convolution, falls through each downsampling stage to 102,400 at 200 Hz, drops to 400 at the latent, then mirrors back up through the decoder to 24,000 at the output.</desc>
+<g id="mss-grid" font-size="11" fill="#5f5f66"></g>
+<g id="mss-bars"></g>
+<text x="60" y="292" font-size="12" fill="#5f5f66">encoder</text>
+<text x="420" y="292" font-size="12" fill="#5f5f66">decoder</text>
+</svg>
+</div>
+<p class="blog-figure-reading"><label for="mss-range">Layer: <strong id="mss-name"></strong></label><br><span id="mss-detail"></span><br><span class="mss__controls"><button type="button" id="mss-replay">Replay</button><span class="mss__scrub"><input class="scrub" id="mss-range" type="range" min="0" max="15" value="7" style="--n: 15"><span class="scrub-scale" aria-hidden="true"><span>input</span><span>output</span></span></span></span></p>
+<style>
+  .mss__controls { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin-top: 0.4rem; }
+  .mss__controls button {
+    min-height: 36px;
+    padding: 0 0.85rem;
+    border: 1px solid var(--border-strong);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: 0.85rem;
+    cursor: pointer;
+  }
+  .mss__controls button:hover { border-color: var(--text); }
+  .mss__scrub { flex: 1 1 18rem; max-width: 460px; }
+</style>
+<script>
+  import { animate } from "motion/mini";
+
+
+  var stages = [
+    ["input waveform", "[1, 24 000]", 24000, 24000, 0],
+    ["conv k7, 1 → 64", "[64, 24 000]", 24000, 1536000, 0],
+    ["resblock + conv k8 s4, → 128", "[128, 6 000]", 6000, 768000, 0],
+    ["resblock + conv k10 s5, → 256", "[256, 1 200]", 1200, 307200, 0],
+    ["resblock + conv k12 s6, → 512", "[512, 200]", 200, 102400, 0],
+    ["conv k3, 512 → 512", "[512, 200]", 200, 102400, 0],
+    ["encoder transformer", "[512, 200]", 200, 102400, 0],
+    ["conv k32 s16, 512 → 32 (latent)", "[32, 12.5]", 12.5, 400, 1],
+    ["1×1 conv, 32 → 512", "[512, 12.5]", 12.5, 6400, 2],
+    ["depthwise conv-T k32 s16", "[512, 200]", 200, 102400, 2],
+    ["decoder transformer", "[512, 200]", 200, 102400, 2],
+    ["conv k7, 512 → 512", "[512, 200]", 200, 102400, 2],
+    ["conv-T k12 s6 + resblock, → 256", "[256, 1 200]", 1200, 307200, 2],
+    ["conv-T k10 s5 + resblock, → 128", "[128, 6 000]", 6000, 768000, 2],
+    ["conv-T k8 s4 + resblock, → 64", "[64, 24 000]", 24000, 1536000, 2],
+    ["conv k3, 64 → 1 (waveform)", "[1, 24 000]", 24000, 24000, 2]
+  ];
+  var colors = ["#594578", "#4F5D3A", "#594578"];
+  var x0 = 60, w = 42, top = 20, bottom = 270, lo = 2, hi = 6.5;
+  function y(v) { return bottom - (Math.log10(v) - lo) / (hi - lo) * (bottom - top); }
+  var grid = "", ticks = [[100, "100"], [1000, "1k"], [10000, "10k"], [100000, "100k"], [1000000, "1M"]];
+  ticks.forEach(function (t) { grid += '<line x1="' + x0 + '" x2="' + (x0 + 16 * w) + '" y1="' + y(t[0]) + '" y2="' + y(t[0]) + '" stroke="#ececf1"/><text x="20" y="' + (y(t[0]) + 4) + '">' + t[1] + '</text>'; });
+  grid += '<line x1="' + x0 + '" x2="' + (x0 + 16 * w) + '" y1="' + y(24000) + '" y2="' + y(24000) + '" stroke="#5f5f66" stroke-dasharray="4 4"/><text x="' + (x0 + 16 * w - 150) + '" y="' + (y(24000) - 6) + '">raw audio, 24 000/s</text>';
+  document.getElementById("mss-grid").innerHTML = grid;
+  var bars = "";
+  stages.forEach(function (s, i) {
+    bars += '<rect data-i="' + i + '" x="' + (x0 + i * w + 6) + '" y="' + y(s[3]) + '" width="' + (w - 12) + '" height="' + (bottom - y(s[3])) + '" fill="' + colors[s[4]] + '" fill-opacity="0.35" style="cursor:pointer;transform-box:fill-box;transform-origin:50% 100%"/>';
+  });
+  var barsEl = document.getElementById("mss-bars");
+  barsEl.innerHTML = bars;
+  var range = document.getElementById("mss-range");
+  function fmt(n) { return n.toLocaleString("en-US").replace(/,/g, " "); }
+  function select(i) {
+    range.value = i;
+    range.style.setProperty("--p", (i / 15) * 100 + "%");
+    Array.prototype.forEach.call(barsEl.children, function (r, j) { r.setAttribute("fill-opacity", j == i ? "0.95" : "0.35"); });
+    var s = stages[i];
+    document.getElementById("mss-name").textContent = (i + 1) + " / 16 · " + s[0];
+    document.getElementById("mss-detail").textContent = "shape per second " + s[1] + " · " + s[2] + " frames/s · " + fmt(s[3]) + " numbers/s · " + (s[3] / 24000).toFixed(s[3] < 24000 ? 3 : 1) + "× the raw audio";
+  }
+  barsEl.addEventListener("click", function (e) { var i = e.target.getAttribute("data-i"); if (i !== null) select(+i); });
+  range.addEventListener("input", function () { select(+range.value); });
+
+  // The signal travels left to right: each bar rises in turn and the readout follows it.
+  var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var token = 0;
+  async function sweep() {
+    var my = ++token;
+    var rects = Array.prototype.slice.call(barsEl.children);
+    rects.forEach(function (r) { r.style.transform = "scaleY(0)"; });
+    for (var i = 0; i < rects.length; i++) {
+      if (my !== token) return;
+      select(i);
+      await animate(rects[i], { transform: ["scaleY(0)", "scaleY(1)"] }, { duration: i === 7 ? 0.7 : 0.32, ease: [0.22, 1, 0.36, 1] });
+    }
+    if (my === token) select(7);
+  }
+  function finish() { token++; Array.prototype.forEach.call(barsEl.children, function (r) { r.style.transform = ""; }); }
+  barsEl.addEventListener("click", finish, true);
+  range.addEventListener("input", finish, true);
+  document.getElementById("mss-replay").addEventListener("click", function () { if (reduce) { finish(); select(7); } else sweep(); });
+  select(7);
+  if (!reduce && "IntersectionObserver" in window) {
+    var io = new IntersectionObserver(function (entries) {
+      if (entries.some(function (e) { return e.isIntersecting; })) { io.disconnect(); sweep(); }
+    }, { threshold: 0.6 });
+    io.observe(document.getElementById("mss-svg"));
+  }
+</script>

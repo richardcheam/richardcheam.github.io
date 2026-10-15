@@ -1,0 +1,69 @@
+---
+// Foundations, language models post: byte-pair encoding on Sennrich et al.'s
+// toy corpus (low 5, lower 2, newest 6, widest 3). Merges es, est, est_, lo;
+// tokens 95, 86, 77, 68, 61. "lowest" becomes lo, w, est_.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-bpe>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 290" role="img" aria-labelledby="bp2-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="bp2-title">Four words split into tiles, with the most frequent neighbouring pair glued together at each step</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Tokenize a new word with the learned merges</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-w="lowest" aria-pressed="true">lowest</button><button type="button" class="fig-chip" data-w="newer" aria-pressed="false">newer</button><button type="button" class="fig-chip" data-w="wider" aria-pressed="false">wider</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { INK, MUTED, GOLD, TINT, JADE } from "../../lib/net-diagram";
+  import { txt } from "../../lib/plot";
+  const CORPUS: [string, number][] = [["low", 5], ["lower", 2], ["newest", 6], ["widest", 3]];
+  const M = 4;
+  // Each state: the words as symbol lists; merges found with "first pair found wins ties".
+  function learn() {
+    let words = CORPUS.map(([w, c]) => ({ s: [...w.split(""), "_"], c }));
+    const states = [{ words, table: [] as [string, number][], merge: "", total: words.reduce((a, w) => a + w.s.length * w.c, 0) }];
+    const merges: [string, string][] = [];
+    for (let m = 0; m < M; m++) {
+      const counts = new Map<string, number>();
+      words.forEach((w) => w.s.slice(0, -1).forEach((a, i) => { const k = `${a} ${w.s[i + 1]}`; counts.set(k, (counts.get(k) ?? 0) + w.c); }));
+      let best = "", bc = -1; counts.forEach((v, k) => { if (v > bc) { bc = v; best = k; } });
+      const table = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
+      const [A, B] = best.split(" ");
+      merges.push([A, B]);
+      words = words.map((w) => { const out: string[] = []; for (let i = 0; i < w.s.length; i++) { if (i < w.s.length - 1 && w.s[i] === A && w.s[i + 1] === B) { out.push(A + B); i++; } else out.push(w.s[i]); } return { s: out, c: w.c }; });
+      states.push({ words, table, merge: best, total: words.reduce((a, w) => a + w.s.length * w.c, 0) });
+    }
+    return { states, merges };
+  }
+  const L = learn();
+  const apply = (word: string) => { let s = [...word.split(""), "_"]; const hist = [s.join(" ")]; L.merges.forEach(([A, B]) => { const out: string[] = []; for (let i = 0; i < s.length; i++) { if (i < s.length - 1 && s[i] === A && s[i + 1] === B) { out.push(A + B); i++; } else out.push(s[i]); } s = out; hist.push(s.join(" ")); }); return { s, hist }; };
+  document.querySelectorAll<HTMLElement>("[data-bpe]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    let word = "lowest";
+    const steps = () => [
+      ...L.states.slice(1).map((st, m) => ({ say: m === 0 ? `Count every neighbouring pair, weighted by how often each word appears. Three pairs tie at 9; the first one found wins.` : `Merge ${m + 1}: recount, then glue the most frequent pair everywhere.`, math: `top pairs: ${st.table.map(([k, v]) => `${k} ${v}`).join(",  ")}\nmerge "${st.merge}": tokens ${L.states[m].total} − ${L.states[m].total - st.total} = ${st.total}` })),
+      { say: `Tokenize "${word}" by applying the saved merges in order.`, math: apply(word).hist.join("  →  ") },
+    ];
+    function draw(k: number) {
+      const st = L.states[Math.max(0, Math.min(M, k + 1))];
+      let s = "";
+      st.words.forEach((w, i) => {
+        let x = 40; const y = 40 + i * 44;
+        s += txt(x, y + 18, `${CORPUS[i][0]} ×${CORPUS[i][1]}`, `font-size="11.5" fill="${MUTED}"`); x = 140;
+        w.s.forEach((sym) => { const wd = Math.max(26, sym.length * 11 + 12), fresh = k >= 0 && k < M && sym === L.states[k + 1].merge.replace(" ", ""); s += `<rect x="${x}" y="${y}" width="${wd}" height="28" rx="5" fill="${fresh ? TINT : sym.length > 1 ? "#FBF3E0" : "#fff"}" stroke="${fresh ? JADE : sym.length > 1 ? GOLD : "#cfd5d4"}" stroke-width="${fresh ? 2.5 : 1}"/>` + txt(x + wd / 2, y + 19, sym, `font-size="13" font-weight="700" text-anchor="middle" fill="${INK}"`); x += wd + 4; });
+      });
+      s += txt(500, 50, "tokens in the corpus", `font-size="11.5" fill="${MUTED}"`) + txt(500, 80, L.states.slice(0, Math.max(0, Math.min(M, k + 1)) + 1).map((q) => q.total).join("  →  "), `font-size="16" font-weight="700" fill="${GOLD}"`);
+      s += txt(500, 112, `merges learned: ${L.merges.slice(0, Math.max(0, Math.min(M, k + 1))).map((m) => m.join("")).join(", ") || "none yet"}`, `font-size="12" fill="${INK}"`);
+      if (k >= M) s += txt(40, 230, `"${word}" → ${apply(word).s.join(" | ")}  (${apply(word).s.length} tokens)`, `font-size="15" font-weight="700" fill="${INK}"`);
+      s += txt(40, 270, "_ marks the end of a word.", `font-size="10.5" fill="${MUTED}"`);
+      $("[data-draw]").innerHTML = s;
+    }
+    const redraw = stepper(root, steps, draw, { delay: 2.4 });
+    root.querySelectorAll<HTMLButtonElement>("[data-w]").forEach((b) => b.addEventListener("click", () => { word = b.dataset.w!; root.querySelectorAll("[data-w]").forEach((o) => o.setAttribute("aria-pressed", String(o === b))); redraw(); }));
+  });
+</script>

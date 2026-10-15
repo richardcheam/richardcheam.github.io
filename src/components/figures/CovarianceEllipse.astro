@@ -1,0 +1,118 @@
+---
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" tabindex="0" role="region" aria-label={alt} data-ell>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 52 780 198" role="img" aria-labelledby="covariance-ellipse-title covariance-ellipse-desc" class="blog-diagram-svg" font-family="Inter, sans-serif">
+<title id="covariance-ellipse-title">Covariance eigenvectors are the axes of the data ellipse</title><desc id="covariance-ellipse-desc">A tilted cloud of embeddings with an ellipse fitted to it. Two arrows leave the mean along the ellipse axes: a long one for the direction of greatest variance and a short one for the least.</desc>
+<defs><marker id="covariance-ellipse-a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#594578" stroke-width="1.6" /></marker></defs>
+<ellipse data-ellipse cx="310.4" cy="154.4" rx="138" ry="34" transform="rotate(-21.7 310.4 154.4)" fill="none" stroke="#d5d5dc" stroke-dasharray="4 4" />
+<circle data-pt cx="210" cy="205" r="4" fill="#4F5D3A" />
+<circle data-pt cx="219" cy="173" r="4" fill="#4F5D3A" />
+<circle data-pt cx="252" cy="201" r="4" fill="#4F5D3A" />
+<circle data-pt cx="249" cy="154" r="4" fill="#4F5D3A" />
+<circle data-pt cx="285" cy="177" r="4" fill="#4F5D3A" />
+<circle data-pt cx="283" cy="145" r="4" fill="#4F5D3A" />
+<circle data-pt cx="311" cy="175" r="4" fill="#4F5D3A" />
+<circle data-pt cx="309" cy="143" r="4" fill="#4F5D3A" />
+<circle data-pt cx="341" cy="167" r="4" fill="#4F5D3A" />
+<circle data-pt cx="334" cy="125" r="4" fill="#4F5D3A" />
+<circle data-pt cx="369" cy="143" r="4" fill="#4F5D3A" />
+<circle data-pt cx="373" cy="114" r="4" fill="#4F5D3A" />
+<circle data-pt cx="402" cy="132" r="4" fill="#4F5D3A" />
+<circle data-pt cx="408" cy="108" r="4" fill="#4F5D3A" />
+<line data-u1 x1="310.4" y1="154.4" x2="438.6" y2="103.4" stroke="#594578" stroke-width="1.8" marker-end="url(#covariance-ellipse-a)" />
+<line data-u2 x1="310.4" y1="154.4" x2="323" y2="186" stroke="#594578" stroke-width="1.8" marker-end="url(#covariance-ellipse-a)" />
+<circle data-mean cx="310.4" cy="154.4" r="3.5" fill="#4F5D3A" />
+<text data-l1 x="448" y="100" fill="#5f5f66" font-size="14">u₁ · most variance, √λ₁</text>
+<text data-l2 x="332" y="210" fill="#5f5f66" font-size="14">u₂ · least variance, √λ₂</text>
+<text data-ml x="258" y="146" fill="#4F5D3A" font-size="14">mean</text>
+<line data-probe stroke="#A8503A" stroke-width="1.4" stroke-dasharray="5 4" opacity="0" />
+<g data-proj fill="#A8503A"></g>
+<text data-readout x="520" y="200" fill="#A8503A" font-size="14"></text>
+</svg>
+<button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+<p class="blog-figure-reading">Ask “how much do embeddings spread along this direction?” and the answer is an eigenvalue</p>
+<p class="blog-figure-reading">The eigenvectors are orthogonal, so they form a frame in which the covariance is diagonal and the cloud is axis-aligned.</p>
+
+<script>
+  import { animate, drawStroke, dur, hideStroke, setupFigure, wait } from "../../lib/figure-motion";
+
+  // The definition, run: sweep a direction around the mean, project every point
+  // onto it, and read the spread of those projections. The sweep settles where
+  // the spread is largest; that direction is u1 and its spread is sqrt(lambda1).
+  document.querySelectorAll<HTMLElement>("[data-ell]").forEach((root) => {
+    const NS = "http://www.w3.org/2000/svg";
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const pts = Array.from(root.querySelectorAll<SVGCircleElement>("[data-pt]")).map((c) => [+c.getAttribute("cx")!, +c.getAttribute("cy")!]);
+    const dots = Array.from(root.querySelectorAll<SVGCircleElement>("[data-pt]"));
+    const mx = pts.reduce((a, p) => a + p[0], 0) / pts.length, my = pts.reduce((a, p) => a + p[1], 0) / pts.length;
+    const probe = $<SVGLineElement>("[data-probe]"), proj = $<SVGGElement>("[data-proj]"), readout = $("[data-readout]");
+    const u1 = $<SVGLineElement>("[data-u1]"), u2 = $<SVGLineElement>("[data-u2]"), ellipse = $<SVGEllipseElement>("[data-ellipse]");
+    const late = ["[data-mean]", "[data-ml]", "[data-l1]", "[data-l2]"].map((q) => $<SVGElement>(q));
+    const markers = { u1: u1.getAttribute("marker-end")!, u2: u2.getAttribute("marker-end")! };
+    // Angle in math orientation (y up), so a screen direction is (cos, -sin).
+    const spread = (a: number) => {
+      const c = Math.cos(a), s = -Math.sin(a);
+      const t = pts.map((p) => (p[0] - mx) * c + (p[1] - my) * s);
+      return Math.sqrt(t.reduce((acc, v) => acc + v * v, 0) / (t.length - 1));
+    };
+    let best = 0, bestS = 0;
+    for (let k = 0; k < 1800; k++) { const a = (k / 1800) * Math.PI, v = spread(a); if (v > bestS) { bestS = v; best = a; } }
+    const marks = pts.map(() => { const c = document.createElementNS(NS, "circle"); c.setAttribute("r", "2.5"); return c; });
+
+    function place(a: number) {
+      const c = Math.cos(a), s = -Math.sin(a);
+      probe.setAttribute("x1", String(mx - 170 * c)); probe.setAttribute("y1", String(my - 170 * s));
+      probe.setAttribute("x2", String(mx + 170 * c)); probe.setAttribute("y2", String(my + 170 * s));
+      pts.forEach((p, i) => {
+        const t = (p[0] - mx) * c + (p[1] - my) * s;
+        marks[i].setAttribute("cx", String(mx + t * c)); marks[i].setAttribute("cy", String(my + t * s));
+      });
+      readout.textContent = `spread along this direction σ = ${spread(a).toFixed(1)}`;
+    }
+    const tween = (seconds: number, step: (u: number) => void, alive: () => boolean) =>
+      new Promise<void>((res) => {
+        const d = dur(seconds) * 1000;
+        if (!d) { step(1); return res(); }
+        const t0 = performance.now();
+        const f = (now: number) => { if (!alive()) return res(); const u = Math.min(1, (now - t0) / d); step(u); u < 1 ? requestAnimationFrame(f) : res(); };
+        requestAnimationFrame(f);
+      });
+
+    setupFigure(
+      root,
+      () => {
+        proj.replaceChildren(); probe.style.opacity = "0"; readout.textContent = "";
+        dots.forEach((d) => (d.style.opacity = "0"));
+        late.forEach((e) => (e.style.opacity = "0"));
+        [u1, u2, ellipse].forEach(hideStroke);
+        u1.removeAttribute("marker-end"); u2.removeAttribute("marker-end");
+      },
+      async (alive) => {
+        dots.forEach((d, i) => animate(d, { opacity: [0, 1] }, { duration: dur(0.25), delay: dur(i * 0.03) }));
+        await wait(0.6);
+        animate(late[0], { opacity: [0, 1] }, { duration: dur(0.3) }); animate(late[1], { opacity: [0, 1] }, { duration: dur(0.3) });
+        proj.replaceChildren(...marks);
+        probe.style.opacity = "1";
+        // Sweep from vertical, once round, and ease into the maximum.
+        const start = Math.PI / 2, end = best + Math.PI;
+        await tween(3.2, (u) => { const e = 1 - Math.pow(1 - u, 3); place(start + (end - start) * e); }, alive);
+        if (!alive()) return;
+        readout.textContent = `maximum spread σ₁ = ${bestS.toFixed(1)}: this is u₁`;
+        await drawStroke(u1, 0.5); u1.setAttribute("marker-end", markers.u1);
+        animate(late[2], { opacity: [0, 1] }, { duration: dur(0.3) });
+        animate(probe, { opacity: [1, 0] }, { duration: dur(0.4) });
+        marks.forEach((m) => animate(m, { opacity: [1, 0] }, { duration: dur(0.4) }));
+        await wait(0.3);
+        if (!alive()) return;
+        await drawStroke(u2, 0.35); u2.setAttribute("marker-end", markers.u2);
+        animate(late[3], { opacity: [0, 1] }, { duration: dur(0.3) });
+        await drawStroke(ellipse, 0.9, "linear");
+        // Back to the original dashed outline once it is drawn.
+        ellipse.removeAttribute("pathLength"); ellipse.style.strokeDasharray = ""; ellipse.style.strokeDashoffset = "";
+        readout.textContent = `σ₁ = ${bestS.toFixed(1)}, σ₂ = ${spread(best + Math.PI / 2).toFixed(1)}`;
+      },
+    );
+  });
+</script>

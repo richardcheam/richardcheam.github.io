@@ -1,0 +1,53 @@
+---
+// Foundations, diffusion post: the exact best denoiser for data ±1,
+// x̂0 = tanh(a x / b²), ε̂ = (x − a x̂0)/b. x_t = −0.354 at t = 0.5:
+// fraction 1.414, x̂0 = −0.462, ε̂ = −0.038. x_t = 2: 0.993 and 1.835.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-denoise>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 260" role="img" aria-labelledby="dn-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="dn-title">A noisy point, the two blurred data bumps, and the best guess of the clean point</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Noisy point x_t <strong data-v="x"></strong></span><input class="scrub" data-k="x" type="range" min="-3" max="3" step="0.0001" value="-0.3536" /></label>
+    <label><span class="fig-panel__name">Noise level t <strong data-v="t"></strong></span><input class="scrub" data-k="t" type="range" min="0.05" max="0.95" step="0.05" value="0.5" /></label>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt, par } from "../../lib/tiny-net";
+  import { INK, MUTED, NEG, JADE, GOLD } from "../../lib/net-diagram";
+  import { frame, txt } from "../../lib/plot";
+  import { keep, noiseW, denoise } from "../../lib/diffusion";
+  document.querySelectorAll<HTMLElement>("[data-denoise]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const p: Record<string, number> = { x: -0.3536, t: 0.5 };
+    const f3 = (v: number) => fmt(v, 3);
+    const steps = () => { const a = keep(p.t), b = noiseW(p.t), fr = a / (b * b), d = denoise(p.x, p.t); return [
+      { say: "How strongly does the evidence point to one side? Divide what is left of the data by the noise power.", math: `a / b² = ${f3(a)} / ${f3(b * b)} = ${f3(fr)}` },
+      { say: "Multiply by the noisy point: far from 0 and low noise means strong evidence.", math: `${f3(fr)} × ${par(p.x, 3)} = ${f3(fr * p.x)}` },
+      { say: "tanh turns the evidence into the average clean value: chance of +1 minus chance of −1.", math: `x̂₀ = tanh(${f3(fr * p.x)}) = ${f3(d.x0)}` },
+      { say: "The best noise guess follows from the forward formula.", math: `ε̂ = (${f3(p.x)} − ${f3(a)} × ${par(d.x0, 3)}) / ${f3(b)} = ${f3(d.eps)}` },
+      { say: "No network can do better on average: the information is not there. If the true noise was −1.5, even this best guess has a loss of about 2.14.", math: `(−1.5 − ${par(d.eps, 3)})² = ${f3((-1.5 - d.eps) ** 2)}` },
+    ]; };
+    function draw(k: number) {
+      const a = keep(p.t), b = noiseW(p.t), d = denoise(p.x, p.t), F = frame({ l: 40, t: 30, w: 480, h: 170, x0: -3, x1: 3, y0: -1.1, y1: 1.1 });
+      let s = F.grid([-3, -2, -1, 0, 1, 2, 3], [-1, 0, 1], 0);
+      const dens = (x: number) => Math.exp(-((x - a) ** 2) / (2 * b * b)) + Math.exp(-((x + a) ** 2) / (2 * b * b));
+      s += F.curve((x) => dens(x) / Math.max(dens(a), dens(0)) - 1.05, `stroke="${JADE}" stroke-width="1.5" stroke-opacity="0.7"`, 300);
+      s += F.curve((x) => denoise(x, p.t).x0, `stroke="${GOLD}" stroke-width="2.5"`, 300);
+      s += `<circle cx="${F.X(p.x)}" cy="${F.Y(-1.05)}" r="7" fill="${NEG}"/>`;
+      if (k >= 2) s += `<line x1="${F.X(p.x)}" x2="${F.X(p.x)}" y1="${F.Y(-1.05)}" y2="${F.Y(d.x0)}" stroke="${NEG}" stroke-dasharray="3 3"/><circle cx="${F.X(p.x)}" cy="${F.Y(d.x0)}" r="6" fill="${GOLD}" stroke="#fff" stroke-width="2"/>`;
+      s += txt(40, 18, "green: the two blurred data bumps; gold: best clean guess x̂₀ for every x_t", `font-size="11.5" font-weight="700" fill="${INK}"`);
+      const rows: [string, string, number][] = [["x_t", f3(p.x), -1], ["evidence", f3((a / (b * b)) * p.x), 1], ["x̂₀", f3(d.x0), 2], ["ε̂", f3(d.eps), 3]];
+      rows.forEach(([n, v, at], i) => (s += txt(560, 60 + i * 30, n, `font-size="12" fill="${MUTED}"`) + txt(640, 60 + i * 30, k >= at ? v : "…", `font-size="14" font-weight="700" fill="${INK}"`)));
+      $("[data-draw]").innerHTML = s;
+      root.querySelectorAll<HTMLElement>("[data-v]").forEach((el) => (el.textContent = fmt(p[el.dataset.v!], el.dataset.v === "x" ? 3 : 2)));
+    }
+    const redraw = stepper(root, steps, draw, { delay: 1.8 });
+    root.querySelectorAll<HTMLInputElement>("[data-k]").forEach((inp) => inp.addEventListener("input", () => { p[inp.dataset.k!] = +inp.value; redraw(); }));
+  });
+</script>

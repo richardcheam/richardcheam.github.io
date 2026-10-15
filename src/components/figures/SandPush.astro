@@ -1,0 +1,79 @@
+---
+// Figure 1: 400 grains of standard-normal noise follow the exact marginal
+// velocity (Eq 8 with the OT paths of Eq 21, sigma_min = 0.01) into eight
+// data points on a circle of radius 4. Integrated with RK4, 200 steps.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram sp" role="region" aria-label={alt} data-sp>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 400" role="img" aria-labelledby="sp-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="sp-title">Noise grains flowing into eight data points arranged on a circle</title>
+    <rect x="200" y="10" width="380" height="380" fill="none" stroke="#ececf1" />
+    <g data-ghost></g>
+    <g data-grains></g>
+    <text x="20" y="40" font-size="11.5" font-weight="700" fill="#2b2b30">Time</text>
+    <text data-t x="20" y="66" font-size="22" font-weight="700" fill="#594578" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">t = 0.00</text>
+    <text data-say x="20" y="96" font-size="12" fill="#2b2b30"></text>
+    <text data-say2 x="20" y="114" font-size="12" fill="#2b2b30"></text>
+    <text x="600" y="40" font-size="11.5" font-weight="700" fill="#2b2b30">Data (the castle)</text>
+    <text x="600" y="58" font-size="11" fill="#5f5f66">8 points on a circle</text>
+    <text x="600" y="74" font-size="11" fill="#5f5f66">of radius 4</text>
+    <text x="600" y="110" font-size="11.5" font-weight="700" fill="#2b2b30">Noise (the mound)</text>
+    <text x="600" y="128" font-size="11" fill="#5f5f66">400 grains from a</text>
+    <text x="600" y="144" font-size="11" fill="#5f5f66">bell curve</text>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Time t<strong data-vt></strong></span><input class="scrub" data-scrub type="range" min="0" max="200" step="1" value="0" /></label>
+    <div><span class="fig-panel__name">Controls</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-play>Play</button>
+      <button type="button" class="fig-chip" data-new>New noise</button>
+    </div></div>
+  </div>
+</div>
+
+<script>
+  import { setupFigure, tween, reduce } from "../../lib/figure-motion";
+  import { integrate, noiseCloud, RING, RING_COLORS, type Vec } from "../../lib/flow-math";
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-sp]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const X = (v: number) => 390 + v * 33, Y = (v: number) => 200 - v * 33;
+    const scrub = $<HTMLInputElement>("[data-scrub]");
+    RING.forEach((c) => {
+      const e = document.createElementNS(NS, "circle");
+      e.setAttribute("cx", String(X(c[0]))); e.setAttribute("cy", String(Y(c[1]))); e.setAttribute("r", "13"); e.setAttribute("fill", "#ececf1");
+      $("[data-ghost]").append(e);
+    });
+    let trajs: Vec[][] = [], dest: number[] = [], dots: SVGCircleElement[] = [], seed = 7;
+    function build() {
+      trajs = noiseCloud(400, seed).map((x) => integrate("ot", x, 200, "rk4", true));
+      dest = trajs.map((tr) => { const e = tr[tr.length - 1]; let b = 0, d = 1e9; RING.forEach((c, k) => { const q = Math.hypot(e[0] - c[0], e[1] - c[1]); if (q < d) { d = q; b = k; } }); return b; });
+      const g = $("[data-grains]"); g.replaceChildren();
+      dots = trajs.map(() => { const c = document.createElementNS(NS, "circle"); c.setAttribute("r", "2.6"); g.append(c); return c; });
+    }
+    function draw(k: number) {
+      const t = k / 200, reveal = Math.max(0, (t - 0.85) / 0.15);
+      dots.forEach((d, i) => {
+        const p = trajs[i][k];
+        d.setAttribute("cx", X(p[0]).toFixed(1)); d.setAttribute("cy", Y(p[1]).toFixed(1));
+        d.setAttribute("fill", reveal > 0 ? RING_COLORS[dest[i]] : "#2b2b30");
+        d.setAttribute("fill-opacity", String(0.55 + 0.45 * reveal));
+      });
+      scrub.value = String(k); scrub.style.setProperty("--p", `${(k / 200) * 100}%`);
+      $("[data-t]").textContent = `t = ${t.toFixed(2)}`;
+      $("[data-vt]").textContent = t.toFixed(2);
+      $("[data-say]").textContent = t < 0.05 ? "Every grain starts as random noise." : t < 0.85 ? "Each grain follows the velocity" : "Coloured by the point it reached:";
+      $("[data-say2]").textContent = t < 0.05 ? "Press Play, or drag the time slider." : t < 0.85 ? "field at its spot, at this moment." : "nobody chose it in advance.";
+    }
+    const play = async (alive: () => boolean) => {
+      const from = +scrub.value >= 200 ? 0 : +scrub.value;
+      await tween(4 * (1 - from / 200), (e) => { if (alive()) draw(Math.round(from + (200 - from) * e)); });
+    };
+    let token = 0;
+    $("[data-play]").addEventListener("click", () => { const my = ++token; play(() => my === token); });
+    $("[data-new]").addEventListener("click", () => { token++; seed = (seed * 31 + 11) % 100000; build(); draw(0); });
+    scrub.addEventListener("input", () => { token++; draw(+scrub.value); });
+    build();
+    draw(reduce ? 200 : 0);
+    setupFigure(root, () => draw(0), async (alive) => { await play(alive); });
+  });
+</script>

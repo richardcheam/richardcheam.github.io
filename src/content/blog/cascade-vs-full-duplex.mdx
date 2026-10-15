@@ -1,0 +1,162 @@
+---
+title: "Walkie-talkie or conversation: cascaded vs full-duplex speech"
+title_key: "cascaded vs full-duplex"
+date: 2026-10-12
+category: "speech-ai"
+read_time: "15 min"
+series_order: 11
+series: speech-ai
+featured: false
+excerpt: "A cascaded voice assistant passes the turn between three models and waits at every handoff. A full-duplex model listens and speaks at once, 80 ms at a time. Where the latency goes, what the transcript throws away, and how interruptions actually work."
+question: "Why does a cascaded voice assistant feel like a walkie-talkie, and what does a full-duplex model change, mechanically?"
+my_work: "A concept note. I built the latency budget from documented defaults and published figures, and checked the full-duplex mechanics against the Moshi paper rather than the usual summaries."
+result: "In a cascade, the end-of-turn wait and the handoffs sit in series before any audio plays. Moshi reports 160 ms theoretical and 200 ms practical latency, with no turn boundary at all."
+evidence_limit: "Per-stage cascade figures are an illustrative budget you can adjust, not measurements of a specific product. Quoted latencies are the authors' and vendors' own published numbers."
+lesson: "Latency in a cascade is mostly architectural: making each model faster cannot remove the wait for the turn to end."
+---
+
+import ConversationTimeline from "../../components/figures/ConversationTimeline.astro";
+import LatencyBudget from "../../components/figures/LatencyBudget.astro";
+import AsrBoundary from "../../components/figures/AsrBoundary.astro";
+import CascadePipeline from "../../components/figures/CascadePipeline.astro";
+import DuplexSteps from "../../components/figures/DuplexSteps.astro";
+
+People in conversation leave remarkably little silence between turns. A study of ten languages, from Danish to Yélî Dnye, found the same pattern everywhere: overlap is avoided, gaps are minimised, and the languages' average gaps all sit within 250 ms of a common mean ([Stivers et al., 2009](https://www.pnas.org/doi/10.1073/pnas.0903616106)). A reply that arrives a second and a half late is not a slightly slow conversation. It is a different kind of exchange, closer to a radio channel: one side talks, says "over", and waits.
+
+That is what a cascaded voice assistant is, architecturally. This post compares it with the full-duplex design behind models such as Moshi and GPT-4o, starting from where the milliseconds go.
+
+<figure class="blog-figure blog-figure--wide">
+  <ConversationTimeline alt="Animated: two conversation timelines. In the cascade, the assistant answers only after a silence wait, transcription, a language-model call and speech synthesis; when the user interrupts, it must detect the new speech, stop, and wait again for the user to finish. In the full-duplex model both streams run continuously; the assistant starts about 200 ms after the user stops and falls silent within a few frames when interrupted." />
+  <figcaption><strong>Figure 1. The same exchange, two architectures.</strong> Press Simulate interruption to talk over the assistant. Cascade stage durations follow the default budget in Figure 3; the full-duplex reply uses Moshi's reported 200 ms.</figcaption>
+</figure>
+
+## The cascade: three programs and two handoffs
+
+A cascaded system chains independent programs. A voice activity detector (VAD) decides when you have finished speaking; a speech recogniser (ASR) turns that audio into a text string; a language model (LLM) reads the string inside a prompt, with its instructions and the conversation so far, and writes a reply token by token; a text-to-speech model (TTS) turns the reply back into audio.
+
+<figure class="blog-figure blog-figure--wide">
+  <CascadePipeline alt="Animated: one request through a cascade. Your audio reaches the VAD, which waits for 500 ms of silence; the ASR writes the words into a text string; the LLM assembles a prompt from its system instructions, the conversation history and your transcript, then writes the reply It leaves at nine token by token; the TTS turns the first phrase into audio. Under each stage, the artifact it hands on; under everything, a clock reaching first audio at 1.4 seconds." />
+  <figcaption><strong>Figure 2. One request, stage by stage.</strong> What each model does, what it hands to the next, and how long the user waits, using the default budget from Figure 3. Played at half speed.</figcaption>
+</figure>
+
+Each stage consumes the previous stage's finished output. The interfaces are plain strings, which is exactly what makes the design attractive: every component can be swapped, logged, tested and guarded on its own.
+
+### Where it has to stop and wait
+
+**End of turn.** Speech recognition runs continuously, but the system must decide when the user has *finished* before the language model can answer. The usual mechanism is voice activity detection (VAD) plus a silence timer: only after the user has been quiet for a fixed window is the turn closed. OpenAI's Realtime API, for example, ships server VAD with `silence_duration_ms: 500` by default ([docs](https://developers.openai.com/api/docs/guides/realtime-vad)). Shorter windows answer faster but cut people off when they pause to think; longer ones feel sluggish. Either way, that window is pure waiting, and it is spent before anything else can start.
+
+**Transcript finalisation.** Streaming recognisers emit partial hypotheses as audio arrives, but they revise them. After the turn closes, the final transcript still has to be committed.
+
+**The language model.** The transcript, plus the conversation so far, is sent to the model, typically over an API. Nothing can be spoken until the first output tokens exist: the time to first token, plus network and queueing overhead.
+
+**Speech synthesis.** TTS needs enough text to pronounce the first phrase well, then the first chunk of audio, then a playback buffer on the device.
+
+Streaming every stage helps a great deal: recognition while the user speaks, tokens forwarded to TTS as they arrive, audio played as it is synthesised. But the end-of-turn wait stays in series with everything after it, and each handoff adds its own setup and buffering.
+
+### The cost in one budget
+
+<figure class="blog-figure blog-figure--wide">
+  <LatencyBudget alt="Interactive stacked bar of time to first audio for a cascade: silence wait, transcript finalisation, language-model time to first token including network, and speech-synthesis first chunk. Scrubbers change each stage. Reference marks show Moshi's 200 ms practical latency and a typical human gap of about 200 ms." />
+  <figcaption><strong>Figure 3. Time to first audio, stage by stage.</strong> Defaults are an illustrative budget, not a measured product. Drag the stages down: the total only approaches the full-duplex marks if the silence wait shrinks to around 100 ms, short enough to cut people off whenever they pause for breath.</figcaption>
+</figure>
+
+With the defaults, the response starts about 1.4 seconds after the user stops speaking. That is consistent with what OpenAI reported for its own cascaded Voice Mode, which averaged 2.8 s with GPT-3.5 and 5.4 s with GPT-4 before GPT-4o replaced it with a single model answering in 320 ms on average ([OpenAI, 2024](https://openai.com/index/hello-gpt-4o/)).
+
+The consequences are behavioural, not just numerical. At this delay users fill the silence, repeat themselves, or start a new sentence just as the assistant begins, and the two talk over each other. People learn to speak to the system in complete, carefully finished sentences, which is the walkie-talkie protocol by another name.
+
+## What the transcript throws away
+
+Latency is the visible cost. The quieter one is information. A transcript keeps the words and drops nearly everything else about *how* they were said.
+
+<figure class="blog-figure blog-figure--wide">
+  <AsrBoundary alt="Animated: a spoken phrase with its pitch contour, loudness and timing reaches the speech-recognition boundary. Only the words pass through as text; the pitch contour, emphasis, pause and laughter are stopped at the boundary. In the full-duplex path, the same frames pass through unchanged as audio latents." />
+  <figcaption><strong>Figure 4. The transcript boundary.</strong> Schematic. "Sure, that's great" with a falling, drawn-out pitch and a sigh reads as sarcasm to a listener and as agreement to a text model.</figcaption>
+</figure>
+
+What does not survive the ASR boundary:
+
+- **Prosody:** pitch contour, stress, speaking rate. These carry sarcasm, doubt, emphasis, and whether a sentence is a question.
+- **Timing:** hesitations and pauses, which signal that someone is still thinking or wants to keep the turn.
+- **Non-speech sounds:** laughter, sighs, breathing, and background events.
+- **Who is speaking:** voice identity and the number of speakers, unless separate components add them back.
+
+None of this is unknowable to a cascade; extra classifiers can tag emotion or speaker. But each tag is another component with its own label set, and the language model still reasons over a description of the audio, never the audio. OpenAI's own description of its old pipeline says exactly this: the main model "can't directly observe tone, multiple speakers, or background noises, and it can't output laughter, singing, or express emotion" ([OpenAI, 2024](https://openai.com/index/hello-gpt-4o/)).
+
+The output side has the mirror problem. TTS receives text, so emphasis and emotion in the reply must be inferred from words or added through markup.
+
+## Full duplex: one model, two streams, 80 ms at a time
+
+*Full duplex* is a telecommunications term: both directions of a channel carry data at the same time, like a phone call and unlike a walkie-talkie. A full-duplex speech model listens and speaks continuously; there is no point at which the turn is handed over.
+
+Kyutai's [Moshi](https://arxiv.org/abs/2410.00037) is the best-documented example, and its design makes the mechanics concrete:
+
+- Audio, both the user's and Moshi's own, is encoded by the Mimi codec into frames at **12.5 Hz**, one every 80 ms. (The [Mimi post](/blog/mimi-codec-explained/) covers the codec layer by layer.)
+- At every 80 ms step, a large **Temporal Transformer** receives a single input built by summing the embeddings of everything at the previous step: the user's audio tokens, Moshi's audio tokens, and one text token.
+- A small **Depth Transformer** then predicts the current step's tokens one after another: the text token first, then the audio tokens. In training it predicts both speakers' audio; at inference the user's tokens come from the microphone instead.
+- The text token is Moshi's **inner monologue**, a time-aligned transcript of what it is saying, predicted inside the same step as the audio. It improves linguistic quality without a text boundary between stages.
+
+The paper is explicit that there are "no explicit boundaries for the change of turns". When Moshi is not speaking, its stream simply decodes to silence. When the user talks over it, the model sees that in the user stream at the very next step and can stop, keep going, or interject, because overlap is just another pattern in the training data.
+
+<figure class="blog-figure blog-figure--wide">
+  <DuplexSteps alt="Animated: a tape of 80 ms steps with three rows: the user's audio frames, Moshi's inner-monologue text tokens, and Moshi's audio frames. A cursor advances one step at a time; at each step the model reads every earlier column and fills the current one. When the user starts speaking over Moshi, Moshi's audio row turns to silence within two steps." />
+  <figcaption><strong>Figure 5. Moshi, one 80 ms step at a time.</strong> Schematic of the token layout described in the Moshi paper. Rows are simplified: real steps carry several codebook tokens per stream.</figcaption>
+</figure>
+
+### Where 160 ms comes from
+
+Moshi reports a **theoretical latency of 160 ms** and **200 ms in practice** ([Défossez et al., 2024](https://arxiv.org/abs/2410.00037)). The theoretical figure is two Mimi frames: one 80 ms frame must be heard before it can be encoded, and Moshi predicts its acoustic tokens with a one-step (80 ms) delay after the semantic ones, so a response cannot start sooner. The extra 40 ms measured in practice is overhead on top of that floor.
+
+Compare the structure, not just the totals. In the cascade, the end-of-turn decision is a *wait*: a timer must expire. In the full-duplex model it is a *prediction* made every 80 ms from everything heard so far, so the model can start answering at the first step where answering is likely, including before the user has fully finished, as people do.
+
+## Interruptions and echo
+
+Talking over the assistant is the stress test for both designs.
+
+**In a cascade,** barge-in is handled outside the models. The VAD that closes turns also watches for speech *starting* while the assistant is playing audio; when it fires, playback is cancelled and the in-flight LLM and TTS requests are abandoned. The Realtime API exposes this as `interrupt_response`. It works, but the new utterance then goes through the full pipeline again, end-of-turn wait included, and the assistant has no record of how much of its reply the user actually heard unless the client reports where playback stopped.
+
+**In a full-duplex model,** there is nothing to cancel. The interruption is in the input stream at the next step, and the model's own stream reacts like any other prediction: it can stop within a frame or two, finish a word, or say "sorry, go ahead". No special interrupt token is involved in Moshi; this behaviour is learned.
+
+**Echo** is the shared physical problem. On a laptop or phone speaker, the assistant's own voice re-enters the microphone. Unless it is removed, a cascade's VAD hears speech and interrupts itself, and a duplex model sees its own voice in the user's stream. The standard fix is acoustic echo cancellation (AEC): the device knows exactly what it played, models the room's echo path, and subtracts the estimated echo from the microphone signal before anything else sees it. Moshi additionally trains with simulated echo of its own voice mixed into the user channel, so that residual echo is not mistaken for the user. Headphones avoid the problem entirely.
+
+## Side by side
+
+<div class="blog-table-scroll" role="region" aria-label="Cascade and full-duplex compared" tabindex="0">
+
+| Axis | Cascade (ASR → LLM → TTS) | Full duplex (one multimodal stream model) |
+|---|---|---|
+| Interface between parts | Text strings at each boundary | Continuous audio tokens at a fixed frame rate (12.5 Hz in Moshi) |
+| Turn-taking | Explicit: a silence timer closes the user's turn | Implicit: predicted every step; overlap is allowed |
+| Time to first audio | Sum of stages in series; the silence wait alone is typically hundreds of ms | Moshi: 160 ms theoretical, 200 ms practical; GPT-4o: 320 ms average |
+| Paralinguistics | Lost at ASR unless re-added by extra classifiers; TTS infers style from text | Kept in the input stream; output prosody generated directly |
+| Interruptions | VAD barge-in cancels playback and requests; new turn re-enters the full pipeline | The next step sees the user; the model adapts its own stream |
+| Echo | AEC needed, or the system interrupts itself | AEC still useful; Moshi also trains with simulated echo |
+| Engineering strengths | Swappable parts, text logs, easy guardrails and tool calls, any LLM | One model to serve; lowest latency; natural overlap and backchannels |
+| Engineering costs | Latency floor from waiting; information loss; orchestration | Training data for full-duplex dialogue; harder to inspect, constrain and update; a single model must be both a strong LM and a strong speech model |
+| Compute shape | Three services, each sized and scaled separately; idle between turns | One stateful model running every 80 ms for the whole call, speaking or not |
+
+</div>
+
+The last two rows are why cascades remain common. They are easier to control: the transcript is a natural place to log, filter, call tools and switch models. A full-duplex model trades that control for timing and fidelity, and it holds a GPU stream open for the whole conversation because it never stops listening.
+
+## What to take away
+
+A cascade's latency is not a performance bug in any one model. It is the shape of the pipeline: the turn has to end, then each stage has to finish its part before the next can start. Full-duplex models remove the turn itself. They listen and speak in the same 80 ms steps, keep the audio instead of a transcript, and treat interruptions as data rather than as an event to handle. The price is a single, always-on model that is harder to steer.
+
+<div class="note-related">
+
+## Related
+
+- Previous: [Mimi: 24,000 samples in, 400 numbers out](/blog/mimi-codec-explained/)
+- Start of the series: [Speech without tokens: how Pocket TTS works](/blog/pocket-tts-calm-explained/)
+- [Moshi review](/paper-reviews/moshi/), the full-duplex model in depth
+- [Delayed Streams Modeling review](/paper-reviews/dsm/), streaming ASR and TTS on one clock
+
+
+## Sources
+
+- Défossez et al. (2024), [Moshi: a speech-text foundation model for real-time dialogue](https://arxiv.org/abs/2410.00037)
+- OpenAI (2024), [Hello GPT-4o](https://openai.com/index/hello-gpt-4o/)
+- OpenAI, [Realtime API: voice activity detection](https://developers.openai.com/api/docs/guides/realtime-vad)
+- Stivers et al. (2009), [Universals and cultural variation in turn-taking in conversation](https://www.pnas.org/doi/10.1073/pnas.0903616106), PNAS 106(26)
+
+</div>

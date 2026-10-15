@@ -1,0 +1,56 @@
+---
+// Khmer script post, Figure 3: two stored lists that can look alike.
+// KA + OE (U+1780 U+17BE) against KA + E + II (U+1780 U+17C1 U+17B8).
+// "Apply NFC" runs String.prototype.normalize("NFC") in your browser; it
+// leaves both as they are. "Repair" applies one hand-written rule.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram slt" role="region" aria-label={alt} data-slt>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 300" role="img" aria-labelledby="slt-title" class="blog-diagram-svg" font-family="Inter, 'Noto Sans Khmer', 'Khmer Sangam MN', sans-serif">
+    <title id="slt-title">Two Khmer spellings that can look the same but are stored differently</title>
+    <g data-cards></g>
+    <text data-badge x="390" y="252" font-size="15" font-weight="700" text-anchor="middle"></text>
+    <text data-r1 x="390" y="280" font-size="11.5" text-anchor="middle" fill="#5f5f66"></text>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Do</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-nfc>Apply NFC</button>
+      <button type="button" class="fig-chip" data-fix>Repair: U+17C1 U+17B8 → U+17BE</button>
+      <button type="button" class="fig-chip" data-reset>Reset</button>
+    </div></div>
+  </div>
+</div>
+
+<script>
+  import { tween } from "../../lib/figure-motion";
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-slt]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const mk = (g: Element, tag: string, a: Record<string, string | number>, txt?: string) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, String(a[k])); if (txt !== undefined) e.textContent = txt; g.append(e); return e; };
+    const A0 = "កើ", B0 = "កេី";
+    let A = A0, B = B0, note = "Press Apply NFC.", flash = 0;
+    const cps = (s: string) => [...s].map((c) => "U+" + c.codePointAt(0)!.toString(16).toUpperCase());
+    function draw() {
+      const g = $("[data-cards]"); g.replaceChildren();
+      [[A, "Spelled with one sign, OE"], [B, "Spelled with two signs, E then II"]].forEach(([s, lab], i) => {
+        const x = 40 + i * 380;
+        mk(g, "rect", { x, y: 16, width: 320, height: 200, rx: 10, fill: "#f7f7f9", stroke: i && flash ? "#a33b3b" : "#d5d5dc", "stroke-width": i && flash ? 2 : 1 });
+        mk(g, "text", { x: x + 16, y: 40, "font-size": 11.5, "font-weight": 700, fill: "#2b2b30" }, lab);
+        mk(g, "text", { x: x + 160, y: 132, "font-size": 72, "text-anchor": "middle", fill: "#2b2b30" }, s);
+        mk(g, "text", { x: x + 160, y: 176, "font-size": 12, "text-anchor": "middle", fill: "#2b2b30", "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace" }, cps(s).join("  "));
+        mk(g, "text", { x: x + 160, y: 198, "font-size": 11, "text-anchor": "middle", fill: "#5f5f66" }, `${[...s].length} code points, ${new TextEncoder().encode(s).length} bytes`);
+      });
+      const b = $("[data-badge]"), same = A === B;
+      b.textContent = same ? "Equal lists" : "Different lists"; b.setAttribute("fill", same ? "#4F5D3A" : "#a33b3b");
+      $("[data-r1]").textContent = note;
+    }
+    $("[data-nfc]").addEventListener("click", async () => {
+      A = A.normalize("NFC"); B = B.normalize("NFC");
+      note = A === B ? "NFC made them equal." : "NFC ran in your browser and changed nothing: Unicode does not treat these as the same text.";
+      await tween(0.6, (e) => { flash = e < 0.9 ? 1 : 0; draw(); }); flash = 0; draw();
+    });
+    $("[data-fix]").addEventListener("click", () => { B = B.replace(/េី/g, "ើ"); note = "A Khmer-specific rule merged them. A frontend needs rules like this; NFC is not enough."; draw(); });
+    $("[data-reset]").addEventListener("click", () => { A = A0; B = B0; note = "Press Apply NFC."; draw(); });
+    draw();
+  });
+</script>

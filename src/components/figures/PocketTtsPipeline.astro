@@ -1,0 +1,252 @@
+---
+// Pocket TTS as the algorithm actually runs: one causal sequence (the "tape")
+// holding the voice prefix, the text, and every generated latent. Each frame the
+// transformer attends over the whole tape, the head collapses noise into x_t in
+// one call, x_t is appended to the tape and decoded into 80 ms of waveform.
+// Markup is the final state (six frames done); the script rewinds and replays.
+const { alt } = Astro.props;
+
+const PITCH = 30, CELL = 26, X0 = 20, TAPE_Y = 214;
+const VOICE = 8, TEXT = 5, FRAMES = 6;
+const kinds = ["bos", ...Array(VOICE).fill("voice"), ...Array(TEXT).fill("text"), ...Array(FRAMES).fill("gen")];
+const cellX = (i: number) => X0 + i * PITCH;
+const fill = { bos: "#ececf1", voice: "#4F5D3A", text: "#bdb5cc", gen: "#594578" } as Record<string, string>;
+const opacity = { bos: 1, voice: 0.3, text: 0.55, gen: 0.85 } as Record<string, number>;
+
+// Six 80 ms waveform segments, deterministic so the figure never changes.
+const WAVE_X0 = 20, WAVE_W = 740 / FRAMES, WAVE_Y = 345;
+const amps = [10, 16, 7, 19, 12, 15];
+const freqs = [5, 6, 4, 7, 5, 6]; // whole cycles, so segments meet on the baseline
+const segment = (k: number) => {
+  let d = "";
+  for (let j = 0; j <= 60; j++) {
+    const x = WAVE_X0 + k * WAVE_W + (j / 60) * WAVE_W;
+    const env = 0.45 + 0.55 * Math.sin((Math.PI * j) / 60);
+    const y = WAVE_Y - amps[k] * env * Math.sin((2 * Math.PI * freqs[k] * j) / 60);
+    d += `${j ? "L" : "M"}${x.toFixed(1)} ${y.toFixed(1)} `;
+  }
+  return d.trim();
+};
+
+// Noise inside the head: 32 values, drawn as points that collapse to x_t.
+const HEAD = { x: 640, y: 96, w: 122, h: 92, cx: 701, cy: 150 };
+const noise = Array.from({ length: 32 }, (_, i) => {
+  const a = (i * 137.5 * Math.PI) / 180, r = 10 + ((i * 37) % 26);
+  return [HEAD.cx + Math.cos(a) * r * 1.6, HEAD.cy + Math.sin(a) * r * 0.62];
+});
+---
+<div class="blog-diagram ptp" tabindex="0" role="region" aria-label={alt} data-ptp data-cells={JSON.stringify(kinds)}>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 392" role="img" aria-labelledby="ptp-title ptp-desc" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="ptp-title">Pocket TTS generation loop</title>
+    <desc id="ptp-desc">A voice clip and a sentence become the first cells of one sequence. A causal transformer reads the whole sequence; for each new frame a small head turns 32 numbers of noise into one 32-number latent in a single call. That latent is appended to the sequence and decoded by Mimi into 80 milliseconds of audio, six times, growing the sequence and the waveform together.</desc>
+
+    <!-- inputs -->
+    <g data-src="voice">
+      <rect x="20" y="20" width="150" height="50" rx="8" fill="#fff" stroke="#d5d5dc" />
+      <path d="M32 45 l6 -10 l6 18 l6 -22 l6 26 l6 -18 l6 12 l6 -8 l6 4" fill="none" stroke="#4F5D3A" stroke-width="1.4" stroke-linejoin="round" />
+      <text x="96" y="41" font-size="12" fill="#2b2b30">voice clip</text>
+      <text x="96" y="58" font-size="11" fill="#5f5f66">10 s, 24 kHz</text>
+    </g>
+    <g data-src="text">
+      <rect x="190" y="20" width="150" height="50" rx="8" fill="#fff" stroke="#d5d5dc" />
+      <text x="202" y="41" font-size="12" fill="#2b2b30">"Hello world."</text>
+      <text x="202" y="58" font-size="11" fill="#5f5f66">tokenizer · 4 000 ids</text>
+    </g>
+    <text x="20" y="88" font-size="10.5" fill="#5f5f66" letter-spacing="0.5">MIMI → [125, 1024]</text>
+    <text x="190" y="88" font-size="10.5" fill="#5f5f66" letter-spacing="0.5">LOOKUP → [n_text, 1024]</text>
+
+    <!-- narration -->
+    <text data-caption x="372" y="38" font-size="13.5" fill="#594578" font-weight="600">6 frames, one latent each, decoded as they arrive</text>
+    <text data-counter x="372" y="60" font-size="12" fill="#5f5f66" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">t = 6 · 480 ms of audio</text>
+
+    <!-- transformer band -->
+    <rect x="16" y="104" width="604" height="44" rx="10" fill="#594578" fill-opacity="0.06" stroke="#594578" stroke-opacity="0.55" />
+    <text x="30" y="124" font-size="12.5" fill="#2b2b30" font-weight="600">causal transformer</text>
+    <text x="30" y="140" font-size="11" fill="#5f5f66">6 layers · 16 heads · d = 1024 · reads every earlier cell</text>
+    <g data-band-glow opacity="0"><rect x="16" y="104" width="604" height="44" rx="10" fill="#594578" fill-opacity="0.14" /></g>
+
+    <!-- attention arcs (drawn per frame) -->
+    <g data-arcs fill="none" stroke="#594578" stroke-linecap="round"></g>
+
+    <!-- the tape -->
+    <g data-tape>
+      {kinds.map((k, i) => (
+        <rect data-cell={i} x={cellX(i)} y={TAPE_Y} width={CELL} height={CELL} rx="4" fill={fill[k]} fill-opacity={opacity[k]} stroke={k === "gen" ? "#594578" : k === "voice" ? "#4F5D3A" : "#d5d5dc"} stroke-width="1" />
+      ))}
+    </g>
+    <g font-size="10.5" fill="#5f5f66">
+      <text x={cellX(1)} y={TAPE_Y + 44}>voice prefix · 125 frames</text>
+      <text x={cellX(1 + VOICE)} y={TAPE_Y + 44}>text tokens</text>
+      <text x={cellX(1 + VOICE + TEXT)} y={TAPE_Y + 44} fill="#594578">generated latents</text>
+      <text x={cellX(0)} y={TAPE_Y - 8} font-size="10" letter-spacing="0.8">ONE SEQUENCE · EVERY CELL 1024 WIDE</text>
+    </g>
+
+    <!-- head -->
+    <rect x={HEAD.x} y={HEAD.y} width={HEAD.w} height={HEAD.h} rx="10" fill="#fff" stroke="#594578" stroke-opacity="0.55" />
+    <text x={HEAD.x + 10} y={HEAD.y + 17} font-size="12" fill="#2b2b30" font-weight="600">MLP head</text>
+    <text x={HEAD.x + 10} y={HEAD.y + 84} font-size="10.5" fill="#5f5f66">noise(32) → xₜ(32), 1 call</text>
+    <g data-noise fill="#594578" opacity="0">
+      {noise.map(([x, y]) => <circle cx={x} cy={y} r="1.8" />)}
+    </g>
+    <circle data-xt cx={HEAD.cx} cy={HEAD.cy} r="5.5" fill="#594578" />
+
+    <!-- decoder + waveform -->
+    <rect x="640" y="236" width="122" height="44" rx="10" fill="#4F5D3A" fill-opacity="0.08" stroke="#4F5D3A" stroke-opacity="0.6" />
+    <text x="650" y="254" font-size="12" fill="#2b2b30" font-weight="600">Mimi decoder</text>
+    <text x="650" y="270" font-size="10.5" fill="#5f5f66">1 920 samples / frame</text>
+    <line x1="20" y1={WAVE_Y} x2="760" y2={WAVE_Y} stroke="#ececf1" />
+    <g data-wave fill="none" stroke="#4F5D3A" stroke-width="1.4">
+      {Array.from({ length: FRAMES }, (_, k) => <path data-seg={k} d={segment(k)} />)}
+    </g>
+    <g font-size="10" fill="#5f5f66" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">
+      {Array.from({ length: FRAMES + 1 }, (_, k) => (
+        <g>
+          <line x1={WAVE_X0 + k * WAVE_W} y1={WAVE_Y + 24} x2={WAVE_X0 + k * WAVE_W} y2={WAVE_Y + 29} stroke="#c9c9d1" />
+          <text x={WAVE_X0 + k * WAVE_W} y={WAVE_Y + 41} text-anchor={k === 0 ? "start" : k === FRAMES ? "end" : "middle"}>{k * 80} ms</text>
+        </g>
+      ))}
+    </g>
+  </svg>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+<p class="blog-figure-reading">The voice is not a separate stream: it is the start of the same sequence the transformer reads. Each frame costs one transformer pass and one head call, and its 80 ms of audio can play before the next frame exists.</p>
+
+<style>
+  .ptp :global(svg) { overflow: visible; }
+</style>
+
+<script>
+  import { animate, dur, setupFigure, wait } from "../../lib/figure-motion";
+
+  const NS = "http://www.w3.org/2000/svg";
+  const PITCH = 30, CELL = 26, X0 = 20, TAPE_Y = 214, VOICE = 8, TEXT = 5, FRAMES = 6;
+  const PREFIX = 1 + VOICE + TEXT;
+  const cx = (i: number) => X0 + i * PITCH + CELL / 2;
+
+  // Illustrative attention weights for the query at position q (frame t).
+  function weight(i: number, q: number, t: number) {
+    if (i === 0) return 0.08;
+    if (i <= VOICE) return [0.55, 0.3, 0.7, 0.4, 0.62, 0.35, 0.5, 0.45][i - 1];
+    if (i < PREFIX) return i - 1 - VOICE === (t - 1) % TEXT ? 0.95 : 0.12;
+    return i === q ? 0.7 : 0.25;
+  }
+
+  document.querySelectorAll<HTMLElement>("[data-ptp]").forEach((root) => {
+    const svg = root.querySelector("svg")!;
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const cell = (i: number) => $<SVGRectElement>(`[data-cell="${i}"]`);
+    const arcs = $<SVGGElement>("[data-arcs]");
+    const noise = $<SVGGElement>("[data-noise]");
+    const noiseDots = Array.from(noise.querySelectorAll<SVGCircleElement>("circle"));
+    const xt = $<SVGCircleElement>("[data-xt]");
+    const glow = $<SVGGElement>("[data-band-glow]");
+    const caption = $("[data-caption]"), counter = $("[data-counter]");
+    const segs = Array.from(root.querySelectorAll<SVGPathElement>("[data-seg]"));
+    const total = PREFIX + FRAMES;
+
+    const flyer = (fill: string, r = 5) => {
+      const c = document.createElementNS(NS, "circle");
+      c.setAttribute("r", String(r)); c.setAttribute("fill", fill); c.setAttribute("cx", "0"); c.setAttribute("cy", "0");
+      svg.append(c);
+      return c;
+    };
+    const fly = async (from: [number, number], via: [number, number], to: [number, number], seconds: number, fill = "#594578") => {
+      const c = flyer(fill);
+      const frames = Array.from({ length: 13 }, (_, k) => {
+        const u = k / 12, a = (1 - u) * (1 - u), b = 2 * u * (1 - u), d = u * u;
+        return `translate(${a * from[0] + b * via[0] + d * to[0]}px, ${a * from[1] + b * via[1] + d * to[1]}px)`;
+      });
+      await animate(c, { transform: frames }, { duration: dur(seconds), ease: [0.45, 0, 0.25, 1] });
+      c.remove();
+    };
+
+    function drawArcs(q: number, t: number) {
+      arcs.replaceChildren();
+      const x0 = cx(q);
+      for (let i = 0; i < q; i++) {
+        const w = weight(i, q, t);
+        const x1 = cx(i), lift = 18 + Math.min(52, Math.abs(x0 - x1) * 0.16);
+        const p = document.createElementNS(NS, "path");
+        p.setAttribute("d", `M${x0} ${TAPE_Y} Q${(x0 + x1) / 2} ${TAPE_Y - lift} ${x1} ${TAPE_Y}`);
+        p.setAttribute("stroke-width", (0.6 + w * 2.6).toFixed(2));
+        p.style.opacity = "0";
+        p.dataset.w = String(0.15 + w * 0.75);
+        arcs.append(p);
+      }
+      return Array.from(arcs.children) as SVGPathElement[];
+    }
+
+    setupFigure(
+      root,
+      () => {
+        for (let i = 0; i < total; i++) cell(i).style.opacity = "0";
+        arcs.replaceChildren();
+        noise.style.opacity = "0";
+        noiseDots.forEach((d) => (d.style.transform = ""));
+        xt.style.opacity = "0";
+        xt.style.transformBox = "fill-box"; xt.style.transformOrigin = "50% 50%";
+        glow.style.opacity = "0";
+        segs.forEach((s) => { s.setAttribute("pathLength", "1"); s.style.strokeDasharray = "1"; s.style.strokeDashoffset = "1"; });
+        caption.textContent = "the prefix: voice frames, then text";
+        counter.textContent = "t = 0 · 0 ms of audio";
+        svg.querySelectorAll("circle:not([data-xt]):not([data-noise] circle)").forEach((c) => c.remove());
+      },
+      async (alive) => {
+        // 1. Build the prefix on the tape.
+        animate(cell(0), { opacity: [0, 1] }, { duration: dur(0.3) });
+        for (let i = 1; i <= VOICE; i++) {
+          fly([95, 70], [95, 170], [cx(i), TAPE_Y + CELL / 2], 0.55, "#4F5D3A").then(() => animate(cell(i), { opacity: [0, 1] }, { duration: dur(0.15) }));
+          await wait(0.07);
+        }
+        for (let i = 1 + VOICE; i < PREFIX; i++) {
+          fly([265, 70], [265, 170], [cx(i), TAPE_Y + CELL / 2], 0.55, "#9d92b3").then(() => animate(cell(i), { opacity: [0, 1] }, { duration: dur(0.15) }));
+          await wait(0.07);
+        }
+        await wait(0.7);
+        if (!alive()) return;
+
+        // 2. Generate six frames.
+        for (let t = 1; t <= FRAMES; t++) {
+          const fast = t > 2 ? 0.55 : 1;
+          const q = PREFIX + t - 2; // newest filled cell: the query
+          caption.textContent = `frame ${t}: attend over all ${q + 1} cells`;
+          const paths = drawArcs(q, t);
+          animate(glow, { opacity: [0, 1] }, { duration: dur(0.3 * fast) });
+          await Promise.all(paths.map((p, k) => animate(p, { opacity: [0, +p.dataset.w!] }, { duration: dur(0.35 * fast), delay: dur(k * 0.012 * fast) })));
+          if (!alive()) return;
+
+          caption.textContent = `frame ${t}: hₜ goes to the head`;
+          await fly([cx(q), 148], [cx(q) + 140, 70], [700, 150], 0.6 * fast);
+          if (!alive()) return;
+          animate(glow, { opacity: [1, 0] }, { duration: dur(0.3) });
+          paths.forEach((p) => animate(p, { opacity: [+p.dataset.w!, 0] }, { duration: dur(0.4) }));
+
+          caption.textContent = `frame ${t}: 32 noise values → xₜ in one call`;
+          noiseDots.forEach((d) => (d.style.transform = "translate(0px, 0px)"));
+          await animate(noise, { opacity: [0, 1] }, { duration: dur(0.2 * fast) });
+          await Promise.all(noiseDots.map((d) => {
+            const x = +d.getAttribute("cx")!, y = +d.getAttribute("cy")!;
+            return animate(d, { transform: ["translate(0px, 0px)", `translate(${701 - x}px, ${150 - y}px)`] }, { duration: dur(0.5 * fast), ease: [0.7, 0, 0.84, 0] });
+          }));
+          if (!alive()) return;
+          noise.style.opacity = "0";
+          xt.style.opacity = "1";
+          await animate(xt, { transform: ["scale(1.8)", "scale(1)"] }, { duration: dur(0.25) });
+
+          caption.textContent = `frame ${t}: append xₜ, decode 80 ms`;
+          const slot = PREFIX + t - 1;
+          await Promise.all([
+            fly([701, 150], [cx(slot) + 60, 180], [cx(slot), TAPE_Y + CELL / 2], 0.55 * fast).then(() => animate(cell(slot), { opacity: [0, 1] }, { duration: dur(0.15) })),
+            fly([701, 150], [740, 210], [701, 258], 0.45 * fast, "#4F5D3A").then(() =>
+              animate(segs[t - 1], { strokeDashoffset: [1, 0] }, { duration: dur(0.45 * fast), ease: "linear" })),
+          ]);
+          xt.style.opacity = "0";
+          counter.textContent = `t = ${t} · ${t * 80} ms of audio`;
+          if (!alive()) return;
+        }
+        caption.textContent = "6 frames, one latent each, decoded as they arrive";
+        xt.style.opacity = "1";
+      },
+    );
+  });
+</script>

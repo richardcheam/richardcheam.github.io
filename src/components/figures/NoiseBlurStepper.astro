@@ -1,0 +1,46 @@
+---
+// Foundations, diffusion post: the forward process x_t = cos(πt/2) x0 +
+// sin(πt/2) ε on 400 points at ±1 (seed 14). The highlighted point x0 = 1,
+// ε = −1.5 reads 1, 0.350, −0.354, −1.003, −1.5 at t = 0, 0.25, 0.5, 0.75, 1.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-blur>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 270" role="img" aria-labelledby="nb-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="nb-title">Two spikes of data blurring into one bell curve as noise is added</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Noise level t <strong data-vt></strong></span><input class="scrub" data-t type="range" min="0" max="1" step="0.01" value="0" /></label>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt, par } from "../../lib/tiny-net";
+  import { INK, MUTED, NEG, JADE, GOLD } from "../../lib/net-diagram";
+  import { frame, txt } from "../../lib/plot";
+  import { gaussStream, keep, noiseW } from "../../lib/diffusion";
+  const PTS = (() => { const g = gaussStream(14); return Array.from({ length: 400 }, (_, i) => ({ x0: i % 2 ? -1 : 1, e: g() })); })();
+  document.querySelectorAll<HTMLElement>("[data-blur]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    let t = 0;
+    const setT = (v: number) => { t = v; $<HTMLInputElement>("[data-t]").value = String(v); };
+    const steps = () => [0, 0.25, 0.5, 0.75, 1].map((v) => { const a = keep(v), b = noiseW(v); return { say: v === 0 ? "No noise yet: two sharp spikes at −1 and +1." : v === 0.5 ? "Halfway: the red point has crossed zero. You can no longer be sure which side it started on." : v === 1 ? "All noise: nothing of the data is left, just one bell curve." : `t = ${v}: keep a bit less of the data, add a bit more noise.`, math: `keep = cos(π × ${v} / 2) = ${fmt(a, 3)},  noise = sin(π × ${v} / 2) = ${fmt(b, 3)},  ᾱ = ${fmt(a * a, 3)}\nx_t = ${fmt(a, 3)} × 1 + ${fmt(b, 3)} × (−1.5) = ${fmt(a - 1.5 * b, 3)}`, enter: () => setT(v) }; });
+    function draw() {
+      const a = keep(t), b = noiseW(t), F = frame({ l: 40, t: 30, w: 480, h: 180, x0: -3, x1: 3, y0: 0, y1: 1 });
+      const n = 40, h = Array(n).fill(0); PTS.forEach((p) => { const x = a * p.x0 + b * p.e, i = Math.floor(((x + 3) / 6) * n); if (i >= 0 && i < n) h[i]++; });
+      const top = t < 0.02 ? 200 : Math.max(...h);
+      let s = F.grid([-3, -2, -1, 0, 1, 2, 3], [], 0);
+      h.forEach((c, i) => (s += `<rect x="${F.X(-3 + (i * 6) / n)}" y="${F.Y(Math.min(1, c / top))}" width="${480 / n - 1}" height="${F.Y(0) - F.Y(Math.min(1, c / top))}" fill="${JADE}" fill-opacity="0.5"/>`));
+      if (b > 0.05) { const dens = (x: number) => 0.5 * (Math.exp(-((x - a) ** 2) / (2 * b * b)) + Math.exp(-((x + a) ** 2) / (2 * b * b))) / (b * Math.sqrt(2 * Math.PI)); const pk = Math.max(dens(a), dens(0)); s += F.curve((x) => dens(x) / pk * 0.95, `stroke="${INK}" stroke-width="1.5"`, 300); }
+      const xr = a - 1.5 * b; s += `<circle cx="${F.X(xr)}" cy="${F.Y(0) - 8}" r="7" fill="${NEG}" stroke="#fff" stroke-width="2"/>`;
+      s += txt(40, 18, `400 points at noise level t = ${fmt(t, 2)}`, `font-size="12" font-weight="700" fill="${INK}"`);
+      s += txt(560, 60, "the red point", `font-size="11.5" fill="${MUTED}"`) + txt(560, 82, "x₀ = 1, ε = −1.5", `font-size="12.5" font-weight="700" fill="${INK}"`) + txt(560, 110, `keep ${fmt(a, 3)}`, `font-size="12" fill="${INK}"`) + txt(560, 130, `noise ${fmt(b, 3)}`, `font-size="12" fill="${INK}"`) + txt(560, 158, `x_t = ${fmt(xr, 3)}`, `font-size="15" font-weight="700" fill="${NEG}"`);
+      $("[data-draw]").innerHTML = s;
+      $("[data-vt]").textContent = fmt(t, 2);
+    }
+    const redraw = stepper(root, steps, draw, { delay: 1.8 });
+    $<HTMLInputElement>("[data-t]").addEventListener("input", (e) => { t = +(e.target as HTMLInputElement).value; redraw(); });
+  });
+</script>

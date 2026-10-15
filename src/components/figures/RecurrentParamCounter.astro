@@ -1,0 +1,47 @@
+---
+// Foundations, LSTM and GRU post: weights in a recurrent layer with input
+// size n and hidden size m. RNN nm + m² + m, GRU 3(…), LSTM 4(…).
+// n = 80, m = 256: 86,272 / 258,816 / 345,088; with PyTorch's second bias
+// 259,584 and 346,112.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-params>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 230" role="img" aria-labelledby="pc-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="pc-title">Weight counts of a plain RNN, a GRU and an LSTM layer</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Input size n <strong data-v="n"></strong></span><input class="scrub" data-k="n" type="range" min="1" max="1024" step="1" value="80" /></label>
+    <label><span class="fig-panel__name">Hidden size m <strong data-v="m"></strong></span><input class="scrub" data-k="m" type="range" min="1" max="1024" step="1" value="256" /></label>
+    <div><span class="fig-panel__name">Biases</span><div class="fig-chips"><button type="button" class="fig-chip" data-pt aria-pressed="false">PyTorch: two per gate</button></div></div>
+  </div>
+</div>
+
+<script>
+  import { INK, MUTED, GOLD, JADE } from "../../lib/net-diagram";
+  import { txt } from "../../lib/plot";
+  const num = (v: number) => v.toLocaleString("en");
+  document.querySelectorAll<HTMLElement>("[data-params]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const p: Record<string, number> = { n: 80, m: 256 };
+    let pt = false;
+    function draw() {
+      const { n, m } = p, nm = n * m, mm = m * m, bias = pt ? 2 * m : m, one = nm + mm + bias;
+      const rows: [string, number][] = [["plain RNN", 1], ["GRU", 3], ["LSTM", 4]], max = 4 * one;
+      let s = txt(30, 22, `Weights for input size ${n} and hidden size ${m}`, `font-size="12" font-weight="700" fill="${INK}"`);
+      rows.forEach(([name, g], i) => {
+        const y = 50 + i * 56, W = 460, seg = (v: number) => (v * g / max) * W;
+        s += txt(30, y + 18, name, `font-size="12.5" font-weight="700" fill="${INK}"`);
+        s += `<rect x="130" y="${y}" width="${seg(nm)}" height="26" fill="${JADE}" fill-opacity="0.8"/><rect x="${130 + seg(nm)}" y="${y}" width="${seg(mm)}" height="26" fill="${GOLD}" fill-opacity="0.85"/><rect x="${130 + seg(nm) + seg(mm)}" y="${y}" width="${Math.max(1, seg(bias))}" height="26" fill="${INK}"/>`;
+        s += txt(600, y + 18, num(g * one), `font-size="14" font-weight="700" fill="${INK}"`);
+        s += txt(130, y + 44, `${g > 1 ? `${g} × ` : ""}(${num(nm)} + ${num(mm)} + ${num(bias)}) = ${num(g * one)}`, `font-size="11" fill="${MUTED}"`);
+      });
+      s += `<rect x="130" y="216" width="12" height="8" fill="${JADE}"/>` + txt(148, 224, "n × m input", `font-size="10.5" fill="${MUTED}"`) + `<rect x="250" y="216" width="12" height="8" fill="${GOLD}"/>` + txt(268, 224, "m × m recurrent", `font-size="10.5" fill="${MUTED}"`) + `<rect x="390" y="216" width="12" height="8" fill="${INK}"/>` + txt(408, 224, pt ? "2m biases" : "m biases", `font-size="10.5" fill="${MUTED}"`);
+      $("[data-draw]").innerHTML = s;
+      root.querySelectorAll<HTMLElement>("[data-v]").forEach((el) => (el.textContent = String(p[el.dataset.v!])));
+    }
+    root.querySelectorAll<HTMLInputElement>("[data-k]").forEach((inp) => inp.addEventListener("input", () => { p[inp.dataset.k!] = +inp.value; draw(); }));
+    $<HTMLButtonElement>("[data-pt]").addEventListener("click", (e) => { pt = !pt; (e.currentTarget as HTMLElement).setAttribute("aria-pressed", String(pt)); draw(); });
+    draw();
+  });
+</script>

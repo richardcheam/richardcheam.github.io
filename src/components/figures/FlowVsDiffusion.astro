@@ -1,0 +1,63 @@
+---
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" tabindex="0" role="region" aria-label={alt} data-fvd>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 260" role="img" aria-labelledby="fvd-title fvd-desc" class="blog-diagram-svg" font-family="Inter, sans-serif">
+<title id="fvd-title">Straight conditional path against a stochastic diffusion path</title><desc id="fvd-desc">Left panel: a noise point and a data point joined by a straight line with evenly spaced ticks for t equal to 0, 0.25, 0.5, 0.75 and 1. Right panel: the same two points joined by a jagged random walk.</desc>
+<defs><marker id="fvd-a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#594578" stroke-width="1.6"/></marker></defs>
+<text x="30" y="24" fill="#5f5f66" font-size="13" letter-spacing="1">FLOW MATCHING · x_t = (1 − t)x₀ + t·x₁</text>
+<text x="420" y="24" fill="#5f5f66" font-size="13" letter-spacing="1">DIFFUSION · STOCHASTIC FORWARD PROCESS</text>
+<line data-straight x1="60" y1="200" x2="320" y2="70" stroke="#594578" stroke-width="2.2" marker-end="url(#fvd-a)"/>
+<g data-ticks fill="#594578"><circle cx="125" cy="167.5" r="3"/><circle cx="190" cy="135" r="3"/><circle cx="255" cy="102.5" r="3"/></g>
+<g data-tick-labels font-size="12" fill="#5f5f66"><text x="120" y="190">0.25</text><text x="186" y="157">0.5</text><text x="252" y="125">0.75</text></g>
+<circle cx="60" cy="200" r="7" fill="#d5d5dc"/><text x="40" y="228" fill="#5f5f66" font-size="13">x₀ noise, t = 0</text>
+<circle cx="325" cy="67" r="7" fill="#4F5D3A"/><text x="270" y="52" fill="#4F5D3A" font-size="13">x₁ audio latent, t = 1</text>
+<path data-walk d="M450 200 l19.6 -19.9 l14 16.2 l16.8 -27.1 l-11.2 -12.6 l28 -5.4 l8.4 -21.7 l22.4 9 l5.6 -19.9 l25.2 7.2 l-8.4 -18.1 l30.8 3.6 l14 -14.4 l-5.6 -14.4 l33.6 9 l16.8 -16.2 l19.6 5.4 l22.4 -10.8" fill="none" stroke="#594578" stroke-width="1.6" stroke-linejoin="round"/>
+<circle cx="450" cy="200" r="7" fill="#d5d5dc"/><text x="430" y="228" fill="#5f5f66" font-size="13">noise</text>
+<circle cx="702" cy="70" r="7" fill="#4F5D3A"/><text x="650" y="52" fill="#4F5D3A" font-size="13">data</text>
+<circle data-dot-a r="6" fill="#594578" opacity="0"/><circle data-dot-b r="6" fill="#594578" opacity="0"/>
+</svg>
+<button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+<p class="blog-figure-reading">For a single pair the flow-matching velocity is constant: x₁ − x₀ at every tick. The jagged path is a cartoon of the noising process; a deterministic sampler like DDIM is smoother, but its learned path still bends.</p>
+
+<script>
+  import { alongPath, animate, drawStroke, dur, hideStroke, setupFigure } from "../../lib/figure-motion";
+
+  // Same start, same arrival time: one dot moves at constant velocity on the
+  // straight line (ticks land on schedule), the other wanders along the walk.
+  document.querySelectorAll<HTMLElement>("[data-fvd]").forEach((root) => {
+    const straight = root.querySelector<SVGLineElement>("[data-straight]")!;
+    const walk = root.querySelector<SVGPathElement>("[data-walk]")!;
+    const ticks = Array.from(root.querySelectorAll<SVGElement>("[data-ticks] circle, [data-tick-labels] text"));
+    const a = root.querySelector<SVGCircleElement>("[data-dot-a]")!;
+    const b = root.querySelector<SVGCircleElement>("[data-dot-b]")!;
+    const marker = straight.getAttribute("marker-end")!;
+    const T = 2.8;
+    setupFigure(
+      root,
+      () => {
+        hideStroke(straight); hideStroke(walk);
+        straight.removeAttribute("marker-end");
+        ticks.forEach((t) => (t.style.opacity = "0"));
+        a.style.opacity = "0"; b.style.opacity = "0";
+      },
+      async (alive) => {
+        a.style.opacity = "1"; b.style.opacity = "1";
+        drawStroke(straight, T, "linear");
+        drawStroke(walk, T, "linear");
+        animate(b, { transform: alongPath(walk, 80) }, { duration: dur(T), ease: "linear" });
+        // Ticks at t = 0.25, 0.5, 0.75: each circle and its label appear together.
+        [0, 1, 2].forEach((k) => {
+          const delay = dur(T * (k + 1) * 0.25);
+          [ticks[k], ticks[k + 3]].forEach((el) => animate(el, { opacity: [0, 1] }, { duration: dur(0.2), delay }));
+        });
+        await animate(a, { transform: alongPath(straight, 2) }, { duration: dur(T), ease: "linear" });
+        if (!alive()) return;
+        straight.setAttribute("marker-end", marker);
+        animate(a, { opacity: [1, 0] }, { duration: dur(0.3) });
+        animate(b, { opacity: [1, 0] }, { duration: dur(0.3) });
+      },
+    );
+  });
+</script>

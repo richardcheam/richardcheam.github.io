@@ -1,0 +1,384 @@
+---
+title: "Delayed Streams Modeling: Streaming ASR and TTS from One Shifted Clock"
+published: true
+date: 2026-10-14
+question: "Can one model listen and write, or read and speak, at the same time, just by sliding one stream a fixed distance behind the other?"
+excerpt: "Kyutai's DSM lines text and audio up on a shared 12.5 Hz clock using word timestamps, then delays whichever stream is the output. Delay the text and you get streaming speech recognition; delay the audio and you get streaming text to speech. DSM-ASR averages 6.4% WER on the OpenASR short-form sets while streaming, and DSM-TTS writes long dialogues with the lowest WER in its comparison."
+type: paper
+topic: [speech, generative, inference]
+tags: [Speech, ASR, TTS, Streaming, DSM, Mimi, Moshi, Kyutai]
+org: "Kyutai"
+authors: "Neil Zeghidour, Eugene Kharitonov, Manu Orsini, Václav Volhejn, Gabriel de Marmiesse, Edouard Grave, Patrick Pérez, Laurent Mazaré, Alexandre Défossez"
+source_url: https://arxiv.org/abs/2509.08753
+source_label: "Read the paper (arXiv)"
+source_date: 2025-09-10
+links:
+  - label: "Code"
+    url: https://github.com/kyutai-labs/delayed-streams-modeling
+  - label: "TTS evaluation set"
+    url: https://github.com/kyutai-labs/tts_longeval
+math: true
+tldr:
+  - "**Authors' claim:** one decoder-only recipe gives state-of-the-art streaming ASR and TTS, competitive even with offline models, over arbitrarily long inputs (Abstract, p. 1)."
+  - "**The trick:** align text and audio to one 12.5 Hz frame clock in preprocessing (word timestamps), then delay the output stream by a fixed number of frames; no learned read/write policy (Sec 3, pp. 4 to 5, Eq 7)."
+  - "**Evidence:** DSM-ASR averages 6.4% WER short-form vs 7.0% for block-streaming Parakeet and 9.4% for streaming Whisper large-v3 (Table 1, p. 7); DSM-TTS long-form English WER 1.72% (Table 3, p. 9); 400 real-time ASR streams on one H100 (Sec 4.3.1, p. 9)."
+  - "**My reading:** the alignment problem was not solved, it was moved into the data pipeline. That is cheap for English (whisper-timestamped) and the hard part for Khmer."
+---
+import WordsOnTheClock from "../../components/figures/WordsOnTheClock.astro";
+import XorCoinTrap from "../../components/figures/XorCoinTrap.astro";
+import StreamShiftLab from "../../components/figures/StreamShiftLab.astro";
+import ActionStreamPlayer from "../../components/figures/ActionStreamPlayer.astro";
+import GuidanceMixer from "../../components/figures/GuidanceMixer.astro";
+import FirstAudioTimer from "../../components/figures/FirstAudioTimer.astro";
+import DsmScoreboard from "../../components/figures/DsmScoreboard.astro";
+
+## The question and why it matters
+
+Picture a live interpreter at a conference. She does not wait for the speaker to finish the whole talk; she listens, stays a sentence or so behind, and talks while the speaker keeps going. If she stays too close she guesses wrong; too far and the audience waits.
+
+Computers face the same choice in two jobs:
+
+- **Automatic speech recognition (ASR):** sound in, words out (what Whisper does; see [/paper-reviews/whisper/](/paper-reviews/whisper/)).
+- **Text to speech (TTS):** words in, sound out.
+
+Both are **sequence-to-sequence (seq2seq)** problems: one sequence goes in, a different sequence comes out. Most strong systems are **offline**: they swallow the whole input first, then produce the output (Sec 1, p. 1). Whisper reads a 30-second window before writing. That is fine for a podcast transcript, bad for a voice assistant that must answer while you are still talking.
+
+**Streaming** systems produce output while input is still arriving. Earlier streaming methods learn a **policy**: at each moment, a little decision "read more input, or write output now?" (Sec 1, p. 1; Sec 2, p. 2). The paper names two costs: these policies are hard to **batch** (run many users at once on one GPU), and speech-to-text and text-to-speech usually need different model designs (Sec 2, p. 2).
+
+DSM's bet: skip the policy. Line both streams up on one clock before training, then make the output wait a fixed number of ticks. The interpreter's rule becomes "always stay exactly 2.5 seconds behind".
+
+If you have read the Moshi review, this is the dial from [One dial: dialogue, ASR or TTS](/paper-reviews/moshi/#one-dial-dialogue-asr-or-tts) turned into a full method and pushed to state-of-the-art quality. I will not re-explain Moshi's streams, Mimi tokens or the depth transformer here; the [Moshi review](/paper-reviews/moshi/) covers them.
+
+Where we go: [one clock for two streams](#one-clock-for-two-streams), [why the output must wait](#why-the-output-must-wait), [the model](#the-model-one-backbone-many-streams), [DSM-ASR](#dsm-asr-listening-with-a-fixed-lag), [DSM-TTS](#dsm-tts-speaking-with-a-fixed-lag), then [What the evidence shows](#what-the-evidence-shows).
+
+## The pieces, before the details
+
+- **Stream:** a row of tokens, one token per tick of a shared clock.
+- **Frame:** one tick. DSM uses Mimi's clock, **12.5** ticks per second, so one frame is **80 ms** (Sec 3.1, p. 4; Sec 3.2, p. 5).
+- **Delay** $\tau$: how many frames the output row is shifted to the right of the input row (Sec 3, p. 4, Eq 7).
+- **PAD** and **WORD:** special text tokens. PAD means "no new word at this tick"; WORD means "a word starts here" (Sec 3.1, p. 5).
+- **Backbone:** one decoder-only Transformer that reads all streams at each tick (Sec 3, p. 4).
+
+## One clock for two streams
+
+### Turning timestamps into a grid
+
+Speech datasets usually say "this sentence goes with this clip", not where each word sits (Sec 3.2, p. 5). DSM needs word-level times. The authors get them from **whisper-timestamped**, a wrapper around Whisper that outputs words with start times (Sec 3.2, p. 5; Sec 4.3.1, p. 9 says it wraps Whisper Medium).
+
+Then each word is placed on the grid with one rule (Sec 3.1, p. 5):
+
+$$
+i = \lfloor s \cdot f_r \rfloor
+$$
+
+- $s$: the time in seconds where the word starts.
+- $f_r$: frames per second, here $12.5$.
+- $s \cdot f_r$: how many frames have gone by at that moment (can be a fraction).
+- $\lfloor \cdot \rfloor$: "floor", round down to a whole number.
+- $i$: the index of the frame where the word is placed.
+
+At frame $i$ goes the WORD token, at $i+1$ the word's first text token, at $i+2$ the second, and so on. Every unused cell gets PAD (Sec 3.1, p. 5).
+
+**Intuition:** a music box drum. Time runs around the drum in fixed slots; each word is a pin pushed into the slot where it starts.
+
+**Worked example:** "Alan" starts at $s = 0.35$ s: $0.35 \cdot 12.5 = 4.375$, floor gives $i = 4$. WORD at frame 4, "Alan" at frame 5. "Turing" starts at $s = 0.80$: $0.80 \cdot 12.5 = 10$, so WORD at frame 10. Frames 0 to 3, 6 to 9 are PAD. (Times are illustrative, not from the paper.)
+
+<figure class="blog-figure blog-figure--wide">
+  <WordsOnTheClock alt="Six word markers on a time line above a row of 80 ms cells. Each word drops a red WORD token into the frame where it starts and its text into the next frame; the rest are grey PAD cells. Words can be dragged and the arithmetic updates." />
+  <figcaption><strong>Figure 1. Words on the clock.</strong> Rule i = floor(12.5 s) from Sec 3.1 (p. 5); the sentence and times are toy values.</figcaption>
+</figure>
+
+### Fixing the transcripts
+
+Two cleanup steps for fine-tuning data that has human transcripts but no word times (Sec 3.2, p. 5):
+
+1. A **300M**-parameter prefix language model rewrites transcripts into a consistent style of capitals and punctuation.
+2. Whisper makes its own transcript with times; **dynamic time warping (DTW)**, an algorithm that finds the best stretch-and-match between two sequences, lines the human words up with Whisper's timed words, so the human words inherit times.
+
+## Why the output must wait
+
+### The coin trap
+
+The authors give a neat counter-example (Sec 3, p. 5). Flip fair coins $X_1, X_2, \dots$ (each 0 or 1). The answer stream is
+
+$$
+Y_t = X_t \oplus X_{t+1}
+$$
+
+- $X_t$: the coin at tick $t$.
+- $X_{t+1}$: the next coin.
+- $\oplus$: XOR, "1 if the two differ, 0 if they match".
+- $Y_t$: the answer the model must write at tick $t$.
+
+**Intuition:** the answer at each tick depends on a coin that has not landed yet. A model forced to answer at tick $t$ can only guess, 50/50.
+
+**Worked example:** coins $X = (0, 1)$. The true $Y_1 = 0 \oplus 1 = 1$, always. A model at tick 1 has only seen $X_1 = 0$, so it outputs 1 with probability one half. Its answers are wrong half the time even though it was trained perfectly (Sec 3, p. 5).
+
+### The fix: shift the output right
+
+So DSM lets the output peek $\tau$ frames ahead in the input (Sec 3, p. 5, Eq 7):
+
+$$
+q_\tau(y \mid X_{\le t+\tau}, Y_{<t}) \approx P[Y_t = y \mid X_{\le t+\tau}, Y_{<t}]
+$$
+
+- $Y_t$: the output token at tick $t$; $y$ is one candidate value.
+- $X_{\le t+\tau}$: all input tokens up to $\tau$ ticks after $t$.
+- $Y_{<t}$: the outputs already written.
+- $P[\cdot]$: the true probability; $q_\tau$: the model's estimate.
+- $\approx$: the model is trained to match it.
+
+**Intuition:** the interpreter stays $\tau$ ticks behind, so she has heard a little of what comes next before she commits.
+
+**Worked example:** in the coin trap with $\tau = 1$, at tick 1 the model sees $X_1 = 0$ and $X_2 = 1$, so it writes $Y_1 = 1$ correctly every time. With $\tau = 0$ it is 50/50.
+
+Two extremes (Sec 3, p. 5): $\tau = 0$ gives the trap; $\tau = T$ (the whole length) is just offline seq2seq again. Real speech sits in between: a name might only become clear several words later, so a bigger $\tau$ buys accuracy and costs latency.
+
+<figure class="blog-figure blog-figure--wide">
+  <XorCoinTrap alt="A row of 16 coins and a row of answers, each answer the XOR of a coin and the next one. A dashed box shows which coins the model has seen; with no delay it guesses and gets about half wrong, with a delay of one or more it is always right." />
+  <figcaption><strong>Figure 2. The coin trap.</strong> The construction is the paper’s (Sec 3, p. 5); the coins are seeded toy values.</figcaption>
+</figure>
+
+## The model: one backbone, many streams
+
+At each tick the backbone gets one token from each stream, looks each up in its own embedding table, **adds** the vectors, and runs one step (Sec 3, p. 4; Fig 2, p. 5). A **sampler** then produces the output token for that tick. Loss is only computed on the output stream; input tokens are fed in but not graded (Sec 3, p. 4).
+
+- For text out, the sampler is one linear layer.
+- For audio out, it is a small **RQ-Transformer** that writes Mimi's codebooks one after another inside the tick (Sec 3.3, p. 6). That is Moshi's depth transformer; see the [Moshi review](/paper-reviews/moshi/).
+- The paper notes it could be a flow or diffusion head for continuous outputs (Sec 3, p. 4), which is the CALM direction explained in [/blog/pocket-tts-calm-explained/](/blog/pocket-tts-calm-explained/).
+
+Because every user's input arrives at the same 12.5 ticks per second, many users can share one GPU step: one forward pass, one tick for everyone. That is the batching claim (Sec 1, p. 2), measured in [Batching and speed](#batching-and-speed).
+
+Sizes (Sec 4.1, p. 7): DSM-ASR backbone **2.6B** parameters, 48 layers, 2048 wide, text vocabulary **4000**, English only. DSM-TTS backbone **1B**, 16 layers, **1.8B** total with the codebook sampler, vocabulary **8000**, English and French.
+
+## DSM-ASR: listening with a fixed lag
+
+Input $X$: Mimi audio tokens. Output $Y$: the padded text grid (Sec 3.2, p. 5). The model is graded on PAD and WORD too, so it learns where words begin. Shift its WORD positions back by $\tau$ and you get word timestamps at **80 ms** resolution (Sec 3.2, p. 5).
+
+### Choosing the delay at run time
+
+Training one model per delay is wasteful, so DSM-ASR is also trained with a random delay per example, sampled in **0.25 to 4 s**, and told the delay through a **cosine embedding** (the same sine/cosine position code Transformers use) added to its inputs (Sec 3.2, p. 5; Sec 4.1, p. 7). The default evaluated model uses a fixed **2.5 s** delay (Sec 4.3, p. 8).
+
+<figure class="blog-figure blog-figure--wide">
+  <StreamShiftLab alt="Eight words, each with a number of frames until it becomes unambiguous. A delay slider marks how far the model may look ahead; words whose clue arrives in time turn green, others stay amber with a question mark. Readouts give how many are sure and the latency." />
+  <figcaption><strong>Figure 3. Delay buys certainty.</strong> Clue offsets are toy values, not a model of WER; the trade-off is the one the paper describes (Sec 3, p. 5; Fig 4, p. 9).</figcaption>
+</figure>
+
+## DSM-TTS: speaking with a fixed lag
+
+Swap roles: text in, Mimi audio out, audio delayed (Sec 3.3, p. 6). The paper's stated TTS delay is inconsistent: **1.28 s (16 steps)** in Sec 3.3 (p. 6), **1.6 s, or 16 steps** in Sec 4.1 (p. 7), and **2 s, or 25 steps** in App I (p. 22). At 12.5 Hz, 16 steps is 1.28 s and 25 steps is 2 s. The paper does not say which one the released model uses.
+
+### The action stream: when to feed the next word
+
+At training time the padded text is known. At run time you only have plain text: nobody tells you how many PADs go between words. So the model gets an extra output, the **action stream**, which predicts "the next input should be a WORD now" (Sec 3.3, p. 6). When it fires, the system feeds the next word's tokens over the following ticks; until then it feeds PAD (Fig 3, p. 5). The model chooses its own speaking rhythm.
+
+### The lookahead stream
+
+The action stream decides where words go but cannot see what they are. A second text stream feeds word $m_{i+l}$ while the main stream feeds $m_i$, with $l = 2$ (Sec 3.3, p. 6; Sec 4.1, p. 7). So when deciding the pause before word 5, the model already knows word 7.
+
+<figure class="blog-figure blog-figure--wide">
+  <ActionStreamPlayer alt="Four rows over 26 frames: the action stream firing WORD markers, the main text stream receiving each word, the lookahead stream receiving the word two ahead, and the audio stream starting after five frames. A switch replaces the chosen word timing with a fixed gap." />
+  <figcaption><strong>Figure 4. Streams of DSM-TTS.</strong> Layout from Sec 3.3 (p. 6) and Fig 3 (p. 5); the timing is scripted. What a fixed gap does to real WER is in Table 15 (p. 25).</figcaption>
+</figure>
+
+### Voices, turns and guidance
+
+- **Speakers:** up to **5** speaker embeddings, each from a **10 s** clip, fed through cross-attention; the speaker encoder starts from Mimi's encoder (Sec 3.3, p. 6).
+- **Turns:** special MAIN and OTHER tokens mark who speaks next, so you can script a two-voice dialogue (Sec 3.3, p. 6).
+- **Classifier-free guidance (CFG)** (Sec 3.3, p. 6, Eq 8):
+
+$$
+l_{t,q} = l^{\emptyset}_{t,q} + \alpha \left( l^{\text{text,speaker}}_{t,q} - l^{\emptyset}_{t,q} \right)
+$$
+
+- $l_{t,q}$: the final score (logit) for codebook $q$ at tick $t$.
+- $l^{\emptyset}_{t,q}$: the score when the model is given no text and no speaker.
+- $l^{\text{text,speaker}}_{t,q}$: the score with text and speaker.
+- $\alpha$: guidance strength, $\alpha \ge 1$; default **2**.
+- The bracket: "how much does knowing the text and voice change my mind".
+
+**Intuition:** take the direction from "mumbling" to "reading this text in this voice" and walk past it, to exaggerate it.
+
+**Worked example:** for one token, $l^{\emptyset} = 1$ and $l^{\text{text,speaker}} = 3$. With $\alpha = 2$: $1 + 2 \cdot (3 - 1) = 5$. With $\alpha = 1$: $1 + 1 \cdot 2 = 3$, the plain conditioned score.
+
+Training drops speaker and text independently **20%** of the time so the unconditioned score exists (Sec 3.3, p. 6). For the public release they then distil CFG into the model (fine-tuned **2400** updates with $\alpha$ as an input, $\alpha \in \{1, 1.5, \dots, 4\}$) because the speaker encoder is kept closed for safety, which rules out the unconditioned pass (Sec 4.2, pp. 7 to 8).
+
+<figure class="blog-figure blog-figure--wide">
+  <GuidanceMixer alt="Bars for six candidate tokens: scores without text or voice, with text and voice, and guided, plus their softmax probabilities. A slider sets the guidance strength from 1 to 4." />
+  <figcaption><strong>Figure 5. Guidance on scores.</strong> Eq 8 (p. 6) on toy scores; the paper’s default strength is 2.</figcaption>
+</figure>
+
+## Training stages and data
+
+- **Pretraining** on **2.5 million hours** of public English and French audio transcribed by whisper-timestamped (Sec 4.2, p. 7). For ASR the authors call this "hard distillation" of whisper-timestamped.
+- **DSM-ASR:** 90 s segments, **1.6M** steps on 48 H100s; then **28k hours** of human-transcribed public data for 100k updates; then a long-form mixture for 25k updates (Sec 4.2, p. 7).
+- **DSM-TTS:** 150 s extracts, 750k updates, batch 64, 32 H100s (Sec 4.2, p. 7).
+- A **public-data-only** DSM-TTS with a **300M** backbone on **88k hours** is provided for reproducibility (Sec 4.4.1, p. 11).
+
+## What the evidence shows
+
+Metrics: **word error rate (WER)** is words wrong per 100 words; for TTS an ASR model transcribes the output first. See [/blog/speech-evaluation-metrics/](/blog/speech-evaluation-metrics/). **MUSHRA** is a 1 to 100 listening score; **Elo** turns pairwise "which sounds more like the target speaker" votes into a rating; **RTF (real-time factor)** here is seconds of output per second of compute, so above 1 means faster than real time (Table 6 caption, p. 11).
+
+### ASR, short clips (Table 1, p. 7)
+
+Average WER over eight OpenASR leaderboard sets, all with Whisper's text normaliser (Sec 4.3, p. 8):
+
+| Model | Streaming? | Avg WER (%) |
+|---|---|---|
+| Whisper medium.en | no | 8.1 |
+| Whisper large-v3 | no | 7.5 |
+| ElevenLabs Scribe | no | 6.9 |
+| Canary-Flash | no | 6.4 |
+| Parakeet-TDT-v2 | no | 6.1 |
+| Canary-Qwen-2.5B | no | 5.6 |
+| Whisper medium.en (streaming) | yes | 9.0 |
+| Whisper large-v3 (streaming) | yes | 9.4 |
+| SeamlessStreaming | yes | 19.7 |
+| Parakeet-TDT-v2 (block streaming, 2.5 s) | yes | 7.0 |
+| **DSM-ASR** | yes | **6.4** |
+
+DSM-ASR LibriSpeech clean **1.7**, other **4.3** (Table 1, p. 7). The text says 6.1 is the best leaderboard score (Sec 4.3.1, p. 8), yet Table 1 lists Canary-Qwen-2.5B at 5.6. The paper does not explain the gap; it probably reflects the leaderboard when the text was written.
+
+**Beats its teacher:** pretrained only on Whisper-medium labels, DSM-ASR reaches **7.1** vs the teacher's **8.1**; after fine-tuning **6.4** (Sec 4.3.1, p. 9). Authors' guesses: more diverse audio, low-temperature sampling removing random teacher errors.
+
+**Smaller model:** a **300M** DSM-ASR averages **8.2**, close to non-streaming Whisper medium.en's **8.1** with 760M parameters (App B, Table 11, p. 20).
+
+### ASR, long recordings up to 2 hours (Table 2, p. 8)
+
+| Model | Avg | TED-LIUM | Meanwhile | Rev16 | Earnings21 |
+|---|---|---|---|---|---|
+| Whisper large-v2 (offline) | 9.0 | 4.4 | 6.3 | 13.6 | 11.8 |
+| Whisper large-v3 (streaming) | 8.1 | 3.4 | 6.1 | 11.4 | 11.4 |
+| Parakeet-0.6B-TDT-v2 (streaming) | **7.8** | 3.7 | 5.0 | 11.0 | 11.3 |
+| DSM-ASR | 7.9 | **2.9** | 5.7 | 12.3 | **10.6** |
+
+Offline Parakeet ran out of memory on an 80 GB GPU and was excluded (Sec 4.3.1, p. 8).
+
+### The delay ablation (Fig 4, p. 9)
+
+Fig 4 left plots WER vs delay from about 0.5 to 4 s for fixed-delay models, the delay-conditioned model and Whisper-Streaming; WER falls as delay grows. The paper's text gives three claims: actual delay lands within **about 300 ms** of the requested value; the single delay-conditioned model beats the fixed-delay models; Whisper-Streaming's delay varies widely (Sec 4.3.1, p. 9). Exact curve values are not tabulated. The caption does not name the test set.
+
+**Timestamps:** on LibriSpeech test-clean, word-timing F1 **0.73** vs Whisper large-v3 **0.22** and CrisperWhisper **0.85** (App E, Table 12, p. 21).
+
+### Batching and speed
+
+- **ASR:** **400** sequences in real time on one H100, throughput independent of delay; about **100x** the throughput of Whisper-Streaming, which re-runs on partial audio and cannot batch (Sec 4.3.1, p. 9; Fig 4 right).
+- ASR by batch size (App C, Table 10, p. 20): batch 1 RTF **6.9**; batch 64 RTF 3.5, throughput **224.0**; batch 256 RTF **1.49**, throughput **380.1**.
+- **TTS** (Table 6, p. 11):
+
+| Model | Size | Latency (ms) | RTF | Throughput |
+|---|---|---|---|---|
+| Dia | 1.6B | n/a | 0.7 | 0.7 |
+| CSM | 1.5B | n/a | 1.0 | 1.0 |
+| Orpheus | 3.8B | n/a | 0.7 | 0.7 |
+| Chatterbox | 0.8B | n/a | 1.8 | 1.8 |
+| DSM-TTS batch 1 | 1.8B | **150** | 3.2 | 3.2 |
+| DSM-TTS batch 32 | 1.8B | 380 | 2.4 | 76.8 |
+| DSM-TTS batch 64 | 1.8B | 403 | 2.1 | **137.3** |
+
+Throughput is RTF times batch size (caption). Check: $2.4 \cdot 32 = 76.8$ matches; $2.1 \cdot 64 = 134.4$, not 137.3 (RTF probably rounded).
+
+
+
+### Time to first audio
+
+App I (pp. 22 to 23) gives batch-1 latency as
+
+$$
+(\tau f_r - 1)\, d_b + (1 + 2)(d_b + d_q)
+$$
+
+- $\tau f_r$: the delay in ticks (they use $\tau = 2$ s, so 25 ticks).
+- $d_b$: time for one backbone step, **5 ms**.
+- $d_q$: time for the codebook sampler in one tick, **25 ms**.
+- First term: ticks where only the backbone runs, because no audio is due yet.
+- $(1 + 2)$: the first audio tick plus Moshi's **2**-step acoustic delay between the first codebook and the rest.
+
+**Intuition:** warm-up ticks are cheap (backbone only); real audio ticks are expensive (backbone plus sampler).
+
+**Worked example:** $(25 - 1) \cdot 5 + 3 \cdot (5 + 25) = 120 + 90 = 210$ ms. Table 6 reports **150** ms. With 16 ticks: $15 \cdot 5 + 90 = 165$ ms, still not 150. As printed, the formula and Table 6 do not agree.
+
+<figure class="blog-figure blog-figure--wide">
+  <FirstAudioTimer alt="A bar of compute ticks before the first sound: grey backbone-only warm-up ticks, then three ticks of backbone plus codebook sampler, with a dashed line at the 150 ms Table 6 reports. Sliders set the delay in ticks and the two step costs." />
+  <figcaption><strong>Figure 6. Time to first audio.</strong> Formula and step costs from App I (pp. 22 to 23). With the paper’s own inputs it gives 210 ms, not the 150 ms of Table 6.</figcaption>
+</figure>
+
+### TTS quality (Tables 3 to 5, pp. 9 to 10)
+
+Evaluation is a new long-form set: news monologues from NTREX-128 and **110** LLM-written dialogues per language (Sec 4.4, pp. 9 to 10).
+
+WER, English average (Table 3, p. 9): Orpheus 3.51, CSM 3.82, Dia 2.79, Chatterbox **1.95**, DSM-TTS turn-by-turn 2.06, DSM-TTS long-form **1.72**. French average: Dia 14.20, DSM-TTS long-form **2.96**. On the small subset shared with ElevenLabs: DSM-TTS 2.35, ElevenLabs Flash 2.59, ElevenLabs Multilingual v2 **2.01** (English).
+
+Speaker similarity, English average (Table 4, p. 10): DSM-TTS turn-by-turn **80.90**, long-form 76.46, CSM 74.44, ElevenLabs Multilingual v2 56.40.
+
+Human ratings, English (Table 5, p. 10): quality MUSHRA Chatterbox **67.7 ± 2.0**, ElevenLabs Flash 65.0, DSM-TTS 54.8; speaker Elo DSM-TTS turn-by-turn **2092.6 ± 18.3**, Chatterbox 2068.3. So DSM-TTS wins on intelligibility and voice match, not on how good it sounds.
+
+Public-data model on LibriSpeech test-clean (Table 7, p. 11): DSM-TTS (32 codebooks) WER **1.68**, SIM-o 0.71, latency **172 ms** vs F5-TTS (32 flow steps) 2.42, 0.66, about 400 ms. For F5-TTS see [/paper-reviews/f5-tts/](/paper-reviews/f5-tts/).
+
+### TTS ablations (Table 15, p. 25)
+
+| Variant | WER En | WER Fr | Spk sim En |
+|---|---|---|---|
+| DSM-TTS baseline | **1.60%** | 3.02% | 0.743 |
+| No lookahead | 3.51% | 3.25% | 0.743 |
+| Fixed padding, 4 from start | 2.86% | 3.60% | 0.694 |
+| Fixed padding, 2 from end | 2.32% | 3.13% | 0.715 |
+
+Lookahead matters for words; the learned action stream matters for voice and rhythm (App L, p. 24).
+
+<figure class="blog-figure blog-figure--wide">
+  <DsmScoreboard alt="Dot plots of word error rates: short-clip ASR, long-recording ASR, TTS English WER and TTS ablations, with DSM highlighted and offline systems drawn hollow. A switch hides offline systems." />
+  <figcaption><strong>Figure 7. The scoreboard.</strong> Tables 1, 2, 3 and 15 (pp. 7, 8, 9, 25).</figcaption>
+</figure>
+
+### Other findings
+
+- Mimi round-trip with 32 codebooks removes common watermarks: Perth detection **100% to 0%**, AudioSeal **100% to 45.2%** (App K, Table 13, p. 23).
+- Fewer than **24** Mimi codebooks hurt ASR WER; more do not help (App F, p. 21).
+
+## Where it breaks
+
+- **Needs aligned data.** The authors name this as the main limitation: aligned domains reduce the gold-standard data usable for training (Sec 5, p. 11).
+- **Distilled from Whisper.** Pretraining labels are Whisper medium's; timing quality sits below CrisperWhisper (Table 12, p. 21).
+- **Quality gap in TTS.** Lower MUSHRA than Chatterbox and ElevenLabs Flash (Table 5, p. 10).
+- **Closed voice encoder.** The best TTS's speaker encoder is not released; users get precomputed embeddings (Sec 4.2, p. 8; Societal impact, p. 12).
+- **Internal inconsistencies** around the TTS delay and latency formula, noted above.
+
+## Toy experiments
+
+All run in the browser with fixed seeds and no trained model.
+
+1. **Frame placement** (WordsOnTheClock): six words at toy times 0.35, 0.80, 1.30, 1.55, 1.70, 2.10 s; frame indices 4, 10, 16, 19, 21, 26.
+2. **Coin trap** (XorCoinTrap): 16 coins, seed 7; expected accuracy 50% at $\tau = 0$, 100% at $\tau \ge 1$.
+3. **Delay vs ambiguity** (StreamShiftLab): clue offsets $[0, 0, 1, 3, 0, 6, 2, 10]$ frames; accuracy 3/8 at $\tau = 0$, 5/8 at 2, 6/8 at 3, 7/8 at 6, 8/8 at 10.
+4. **CFG** (GuidanceMixer): the two 6-token logit vectors above; $\alpha$ from 1 to 4.
+5. **First audio** (FirstAudioTimer): App I preset gives 210 ms.
+
+## My interpretation
+
+DSM is less a new model than a new place to put the hard part. Learned read/write policies are replaced by a forced aligner run once, offline. Once the data sits on one clock, a plain decoder with plain attention does both directions, batches like a language model, and runs for hours. The 400-stream number is what a production team would care about most.
+
+The weakness is in the same move. Every training example needs word timestamps, and for English those come almost for free from whisper-timestamped. The ASR student even beats its teacher (7.1 vs 8.1), which says label noise in timing and text is tolerable at 2.5 million hours.
+
+**For Khmer** (see [/blog/khmer-tts-fine-tuning/](/blog/khmer-tts-fine-tuning/)):
+- Khmer writes words without spaces, so "word start time" first needs a word segmenter, then an aligner that has seen Khmer. Errors in either shift WORD tokens.
+- Whisper's Khmer is weak, so the DSM trick of distilling Whisper's timestamps would distil its mistakes too. A CTC (connectionist temporal classification) forced aligner trained on Khmer is the likelier route.
+- The ablation suggests where to spend effort: without lookahead, English WER doubles (1.60% to 3.51%, Table 15, p. 25). Khmer's long, stacked syllables may need a larger lookahead $l$, a cheap knob to try.
+- The public-data 300M model (Table 7, p. 11) is the realistic scale for free/local compute, not the 1.8B one.
+
+## Open questions
+
+- How small can $\tau$ go for TTS before rhythm breaks, and does delay conditioning (shown only for ASR) work for TTS too?
+- How sensitive is DSM to timestamp error? A test that jitters WORD positions by plus or minus 1 to 3 frames would answer it.
+- Which TTS delay and latency numbers are correct (1.28, 1.6 or 2 s; 150 or 210 ms)?
+- Could a Moshi-style random negative delay let one checkpoint do ASR and TTS together?
+- For languages without spaces, is a subword or syllable "WORD" marker enough?
+
+## Related
+
+- [/paper-reviews/moshi/](/paper-reviews/moshi/)
+- [/paper-reviews/whisper/](/paper-reviews/whisper/)
+- [/paper-reviews/f5-tts/](/paper-reviews/f5-tts/)
+- [/blog/pocket-tts-calm-explained/](/blog/pocket-tts-calm-explained/)
+- [/blog/speech-evaluation-metrics/](/blog/speech-evaluation-metrics/)
+- [/blog/khmer-tts-fine-tuning/](/blog/khmer-tts-fine-tuning/)

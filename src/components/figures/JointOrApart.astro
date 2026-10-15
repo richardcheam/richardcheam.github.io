@@ -1,0 +1,76 @@
+---
+// Moshi review, Figure 9: Toy 1. Two tokens per step, a and b, each in
+// {0,1,2,3}; a is uniform and b copies a with probability p. "Apart" samples
+// b from its own marginal (uniform), "joint" samples b given a, and "apart
+// with delay" predicts b from the a of the previous step, already seen.
+// Exact match rates: 0.25, p, p.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram joa" role="region" aria-label={alt} data-joa>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 300" role="img" aria-labelledby="joa-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="joa-title">Independent heads against a joint decoder on two correlated tokens</title>
+    <g data-rows></g>
+    <text x="20" y="282" font-size="11" fill="#5f5f66">Each pair: top square a, bottom square b; colour = token value. Red outline: b does not match a. A toy, not Moshi's tokens.</text>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">How often b copies a<strong data-vp></strong></span><input class="scrub" data-p type="range" min="0.25" max="1" step="0.05" value="0.9" /></label>
+    <div><span class="fig-panel__name">Sampling</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-go>Sample 10,000 steps</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { setupFigure, wait } from "../../lib/figure-motion";
+  import { rng } from "../../lib/flow-math";
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-joa]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const pIn = $<HTMLInputElement>("[data-p]"), cols = ["#a33b3b", "#b8722c", "#35588a", "#4F5D3A"];
+    const names = ["Apart: two independent heads", "Joint: b chosen after a (Depth Transformer)", "Apart, but b delayed one step"];
+    const mk = (g: Element, tag: string, a: Record<string, string | number>, txt?: string) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, String(a[k])); if (txt) e.textContent = txt; g.append(e); return e; };
+    let r = rng(0), n = 0, hits = [0, 0, 0], recent: [number, number][][] = [[], [], []], prevA = 0;
+    const p = () => +pIn.value;
+    const copy = (a: number) => (r() < p() ? a : (a + 1 + Math.floor(r() * 3)) % 4);
+    function step() {
+      const a = Math.floor(r() * 4);
+      const pairs: [number, number][] = [[a, Math.floor(r() * 4)], [a, copy(a)], [a, copy(prevA)]];
+      // For the delayed row the pair that matters is (previous a, this b).
+      const scored: [number, number][] = [pairs[0], pairs[1], [prevA, pairs[2][1]]];
+      if (n > 0) scored.forEach(([x, y], i) => { if (x === y) hits[i]++; });
+      else scored.slice(0, 2).forEach(([x, y], i) => { if (x === y) hits[i]++; });
+      scored.forEach((pr, i) => { recent[i].push(pr); if (recent[i].length > 40) recent[i].shift(); });
+      prevA = a; n++;
+    }
+    function draw() {
+      const g = $("[data-rows]"); g.replaceChildren();
+      const exact = [0.25, p(), p()];
+      names.forEach((nm, i) => {
+        const y = 14 + i * 88;
+        mk(g, "text", { x: 20, y: y + 10, "font-size": 11.5, "font-weight": 700, fill: "#2b2b30" }, nm);
+        recent[i].forEach(([a, b], k) => {
+          const x = 20 + k * 15;
+          mk(g, "rect", { x, y: y + 20, width: 12, height: 12, fill: cols[a] });
+          mk(g, "rect", { x, y: y + 34, width: 12, height: 12, fill: cols[b], stroke: a === b ? "none" : "#a33b3b", "stroke-width": a === b ? 0 : 2 });
+        });
+        const rate = n ? hits[i] / (i === 2 ? Math.max(1, n - 1) : n) : 0;
+        mk(g, "text", { x: 640, y: y + 32, "font-size": 15, "font-weight": 700, fill: Math.abs(rate - exact[i]) < 0.02 && n > 500 ? "#4F5D3A" : "#2b2b30", "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace" }, n ? rate.toFixed(3) : "–");
+        mk(g, "text", { x: 640, y: y + 50, "font-size": 10.5, fill: "#5f5f66" }, `exact ${exact[i].toFixed(2)}`);
+      });
+      mk(g, "text", { x: 640, y: 14 + 10, "font-size": 10.5, "font-weight": 700, fill: "#5f5f66" }, `match rate, ${n.toLocaleString("en")} steps`);
+      $("[data-vp]").textContent = p().toFixed(2); pIn.style.setProperty("--p", `${((p() - 0.25) / 0.75) * 100}%`);
+    }
+    const reset = () => { r = rng(0); n = 0; hits = [0, 0, 0]; recent = [[], [], []]; prevA = 0; };
+    let token = 0;
+    async function run(alive: () => boolean) {
+      reset();
+      for (let k = 0; k < 40; k++) { if (!alive()) return; step(); draw(); await wait(0.06); }
+      while (n < 10000) { if (!alive()) return; for (let k = 0; k < 250 && n < 10000; k++) step(); draw(); await wait(0.03); }
+    }
+    $("[data-go]").addEventListener("click", () => { const my = ++token; run(() => my === token); });
+    pIn.addEventListener("input", () => { token++; reset(); for (let k = 0; k < 10000; k++) step(); draw(); });
+    reset(); for (let k = 0; k < 10000; k++) step(); draw();
+    setupFigure(root, () => { reset(); draw(); }, async (alive) => { await run(alive); });
+  });
+</script>

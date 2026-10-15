@@ -1,0 +1,63 @@
+---
+import { getCollection, type CollectionEntry } from "astro:content";
+import Base from "./Base.astro";
+import "katex/dist/katex.min.css";
+import { series as allSeries } from "../data/series";
+
+interface Props {
+  post: CollectionEntry<"blog">;
+}
+const { post } = Astro.props;
+const { title, date, read_time, excerpt } = post.data;
+const seriesPosts = post.data.series
+  ? (await getCollection("blog", ({ data }) => data.published && data.series === post.data.series)).sort(
+      (a, b) => a.data.series_order - b.data.series_order,
+    )
+  : [];
+const position = seriesPosts.findIndex((p) => p.id === post.id) + 1;
+const seriesTitle = allSeries.find((s) => s.key === post.data.series)?.title ?? "Blog series";
+const byline = date.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
+const pad = (n: number) => String(n).padStart(2, "0");
+import SignatureMark from "../components/SignatureMark.astro";
+---
+<Base title={title} description={excerpt} mainClass="site-main site-main--article" image={`/og/blog/${post.id}.png`}>
+  <header class="page-heading blog-heading" data-reveal>
+    <p class="blog-all-posts"><a href="/blog/">← All posts</a></p>
+    <p class="blog-kicker">{seriesTitle}</p>
+    {post.data.series && <p class="blog-reading-order">Post {position} of {seriesPosts.length}</p>}
+    <h1>{title}</h1>
+    <div class="blog-meta-row">
+      <p class="blog-byline">{byline} <span aria-hidden="true">·</span> {read_time} read</p>
+    </div>
+    {seriesPosts.length > 0 && (
+      <details class="blog-series-nav">
+        <summary>Posts in this series <span>· {seriesPosts.length}</span></summary>
+        <nav aria-label="Posts in this series">
+          <ol>
+            {seriesPosts.map((p, i) => {
+              const current = p.id === post.id;
+              return (
+                <li>
+                  <a href={`/blog/${p.id}/`} aria-current={current ? "page" : undefined}>
+                    <span class="blog-series-nav__number">{pad(i + 1)}</span>
+                    <span>{p.data.title}</span>
+                    {current && <span class="blog-series-nav__current">Current</span>}
+                  </a>
+                </li>
+              );
+            })}
+          </ol>
+        </nav>
+      </details>
+    )}
+  </header>
+  <article class="note-article">
+    <slot />
+    <p class="post-seal"><SignatureMark class="post-seal__mark" label="Richard Cheam" painted /></p>
+  </article>
+  <nav class="blog-rail" aria-label="On this page" data-blog-rail data-rail-style={post.data.rail} data-series={post.data.series ?? ""} data-sky={post.data.sky ?? ""} hidden>
+    <p class="blog-rail__current" aria-hidden="true"><span class="blog-rail__current-number" data-blog-rail-number></span><span class="blog-rail__current-text"><span class="blog-rail__current-title" data-blog-rail-title></span><span class="blog-rail__current-sub" data-blog-rail-sub></span></span></p>
+    <p class="blog-rail__label">On this page</p>
+    <ol class="blog-rail__list" data-blog-rail-list></ol>
+  </nav>
+</Base>

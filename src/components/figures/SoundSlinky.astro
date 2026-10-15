@@ -1,0 +1,78 @@
+---
+// Figure 1 of the audio-basics post: a row of coils (air) pushed by a speaker,
+// and the pressure at one coil traced as a waveform. Pitch changes spacing,
+// loudness changes bunching. Motion is slowed far below real time.
+const { alt } = Astro.props;
+const N = 40, X0 = 70, GAP = 17;
+---
+<div class="blog-diagram ss" role="region" aria-label={alt} data-ss data-cfg={JSON.stringify({ N, X0, GAP })}>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 320" role="img" aria-labelledby="ss-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="ss-title">Air pushed by a speaker, and the pressure at one spot drawn as a waveform</title>
+    <path data-cone d="" fill="#2b2b30" />
+    <g data-coils></g>
+    <text x={X0} y="22" font-size="11" fill="#5f5f66">air, drawn as a slinky: each line is a patch of air</text>
+    <text data-squeeze x="0" y="134" font-size="10.5" text-anchor="middle" fill="#594578">squeezed</text>
+    <line x1="40" x2="740" y1="230" y2="230" stroke="#ececf1" />
+    <text x="40" y="168" font-size="10.5" fill="#a33b3b">pressure at the red patch</text>
+    <text x="740" y="180" font-size="10" text-anchor="end" fill="#5f5f66">↑ squeezed</text>
+    <text x="740" y="286" font-size="10" text-anchor="end" fill="#5f5f66">↓ stretched</text>
+    <path data-wave d="" fill="none" stroke="#2b2b30" stroke-width="2" />
+    <line data-one1 y1="292" y2="292" stroke="#594578" stroke-width="2" />
+    <text data-one x="0" y="308" font-size="10.5" text-anchor="middle" fill="#594578"></text>
+    <text x="740" y="308" font-size="10.5" text-anchor="end" fill="#5f5f66">10 ms of time →</text>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Pitch<strong data-vf></strong></span><input class="scrub" data-f type="range" min="110" max="880" step="1" value="440" /></label>
+    <label><span class="fig-panel__name">Loudness<strong data-va></strong></span><input class="scrub" data-a type="range" min="0" max="1" step="0.05" value="0.6" /></label>
+  </div>
+</div>
+
+<script>
+  import { whileVisible } from "../../lib/figure-motion";
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-ss]").forEach((root) => {
+    const c = JSON.parse(root.dataset.cfg!);
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const fIn = $<HTMLInputElement>("[data-f]"), aIn = $<HTMLInputElement>("[data-a]");
+    const RED = 24;
+    const coils = Array.from({ length: c.N }, (_, i) => {
+      const l = document.createElementNS(NS, "line");
+      l.setAttribute("y1", "40"); l.setAttribute("y2", "118");
+      l.setAttribute("stroke", i === RED ? "#a33b3b" : "#2b2b30"); l.setAttribute("stroke-width", i === RED ? "3" : "1.5");
+      $("[data-coils]").append(l);
+      return l;
+    });
+    const scrubFill = (el: HTMLInputElement) => el.style.setProperty("--p", `${((+el.value - +el.min) / (+el.max - +el.min)) * 100}%`);
+    const draw = (t: number) => {
+      const f = +fIn.value, A = +aIn.value;
+      // Slow motion: the 110..880 Hz range plays at 0.25..2 waves per second, with 1..8 waves across the slinky.
+      const k = (2 * Math.PI * (f / 110)) / (c.N * c.GAP), w = 2 * Math.PI * (f / 440) * 0.5;
+      let best = { x: 0, d: -1e9 };
+      coils.forEach((l, i) => {
+        const x0 = c.X0 + i * c.GAP, u = A * 7 * Math.sin(w * t - k * (x0 - c.X0));
+        l.setAttribute("x1", String(x0 + u)); l.setAttribute("x2", String(x0 + u));
+        const press = -Math.cos(w * t - k * (x0 - c.X0));
+        if (A > 0 && press > best.d) best = { x: x0, d: press };
+      });
+      const cone = c.X0 - 22 + A * 7 * Math.sin(w * t);
+      $("[data-cone]").setAttribute("d", `M${cone - 14} 62 h8 l8 -14 v84 l-8 -14 h-8 z`);
+      const sq = $("[data-squeeze]");
+      sq.setAttribute("x", String(best.x)); sq.style.opacity = A > 0.05 ? "1" : "0";
+      // Waveform: pressure at the red coil, 10 ms window, scrolling with t.
+      const phase = w * t - k * (RED * c.GAP);
+      let d = "";
+      for (let px = 0; px <= 700; px += 2) {
+        const ms = (px / 700) * 10, y = 230 - A * 42 * Math.cos(phase - 2 * Math.PI * f * (10 - ms) / 1000);
+        d += `${px ? "L" : "M"}${40 + px} ${y.toFixed(1)}`;
+      }
+      $("[data-wave]").setAttribute("d", d);
+      const per = 1000 / f, wpx = (per / 10) * 700;
+      $("[data-one1]").setAttribute("x1", "40"); $("[data-one1]").setAttribute("x2", String(40 + wpx));
+      const one = $("[data-one]"); one.setAttribute("x", String(40 + wpx / 2)); one.textContent = `one wave = ${per.toFixed(2)} ms`;
+      $("[data-vf]").textContent = `${f} Hz, ${(f / 100).toFixed(1)} waves in 10 ms`;
+      $("[data-va]").textContent = A === 0 ? "silent" : `${Math.round(A * 100)}%`;
+    };
+    const redraw = whileVisible(root, draw);
+    [fIn, aIn].forEach((el) => { scrubFill(el); el.addEventListener("input", () => { scrubFill(el); redraw(); }); });
+  });
+</script>

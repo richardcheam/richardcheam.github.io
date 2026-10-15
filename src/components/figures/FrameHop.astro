@@ -1,0 +1,109 @@
+---
+// Figure 5: slicing "see" into overlapping frames. Hann humps mark each frame;
+// Step slides the highlighted frame by one hop and shows its faded slice.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram fh" role="region" aria-label={alt} data-fh>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 330" role="img" aria-labelledby="fh-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="fh-title">The word see cut into overlapping frames</title>
+    <text x="30" y="22" font-size="11" fill="#5f5f66">the word "see", 0.62 seconds</text>
+    <text x="100" y="44" font-size="11" font-weight="700" fill="#2b2b30">s</text>
+    <text x="330" y="44" font-size="11" font-weight="700" fill="#2b2b30">ee</text>
+    <g data-humps></g>
+    <path data-wave d="" fill="#2b2b30" />
+    <rect data-hi x="0" y="54" width="0" height="150" fill="#594578" fill-opacity="0.1" stroke="#594578" />
+    <text data-hilab x="0" y="220" font-size="10.5" text-anchor="middle" fill="#594578" font-weight="700">this frame</text>
+    <text x="30" y="220" font-size="10.5" fill="#5f5f66">0</text>
+    <text x="580" y="220" font-size="10.5" text-anchor="end" fill="#5f5f66">620 ms</text>
+    <rect x="608" y="54" width="152" height="150" rx="6" fill="#f6f6f8" />
+    <text x="684" y="44" font-size="11" text-anchor="middle" fill="#594578" font-weight="700">one frame, faded at the edges</text>
+    <path data-one d="" fill="none" stroke="#594578" stroke-width="1.2" />
+    <text data-r1 x="30" y="256" font-size="12.5" fill="#2b2b30"></text>
+    <text data-r2 x="30" y="280" font-size="12.5" fill="#2b2b30"></text>
+    <text data-r3 x="30" y="304" font-size="11" fill="#5f5f66"></text>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Window<strong data-vw></strong></span><input class="scrub" data-win type="range" min="10" max="100" step="5" value="25" /></label>
+    <label><span class="fig-panel__name">Hop<strong data-vh></strong></span><input class="scrub" data-hop type="range" min="5" max="100" step="5" value="10" /></label>
+    <div><span class="fig-panel__name">Presets</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-pre="asr" aria-pressed="true">Speech recogniser: 25 / 10 ms at 16 kHz</button>
+      <button type="button" class="fig-chip" data-pre="mimi" aria-pressed="false">Mimi: 80 ms at 24 kHz</button>
+      <button type="button" class="fig-chip" data-step>Step →</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { setupFigure, wait } from "../../lib/figure-motion";
+  import { seeTwo } from "../../lib/audio-math";
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-fh]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const win = $<HTMLInputElement>("[data-win]"), hop = $<HTMLInputElement>("[data-hop]");
+    const DUR = 0.62, X = (ms: number) => 30 + (ms / 620) * 550;
+    const clips: Record<number, Float64Array> = { 16000: seeTwo(16000, DUR).x, 24000: seeTwo(24000, DUR).x };
+    let sr = 16000, idx = 0;
+    const peak = (x: Float64Array) => x.reduce((m, v) => Math.max(m, Math.abs(v)), 0);
+    function drawWave() {
+      const x = clips[sr], per = x.length / 550, pk = peak(x);
+      let top = "", bot = "";
+      for (let px = 0; px < 550; px++) {
+        let lo = 0, hi = 0;
+        for (let i = Math.floor(px * per); i < Math.floor((px + 1) * per); i++) { lo = Math.min(lo, x[i]); hi = Math.max(hi, x[i]); }
+        top += `${px ? "L" : "M"}${30 + px} ${(129 - (hi / pk) * 60).toFixed(1)}`;
+        bot = `L${30 + px} ${(129 - (lo / pk) * 60).toFixed(1)}` + bot;
+      }
+      $("[data-wave]").setAttribute("d", top + bot + "Z");
+    }
+    const count = () => Math.floor((620 - +win.value) / +hop.value) + 1;
+    function draw() {
+      const W = +win.value;
+      if (+hop.value > W) hop.value = String(W);
+      const H = +hop.value, n = count();
+      idx = Math.min(idx, n - 1);
+      win.style.setProperty("--p", `${((W - 10) / 90) * 100}%`);
+      hop.max = String(W); hop.style.setProperty("--p", `${((H - 5) / Math.max(1, W - 5)) * 100}%`);
+      const g = $("[data-humps]"); g.replaceChildren();
+      for (let k = 0; k < n; k++) {
+        const a = X(k * H), w = X(k * H + W) - a;
+        let d = `M${a} 204`;
+        for (let i = 0; i <= 20; i++) d += `L${a + (w * i) / 20} ${204 - 150 * (0.5 - 0.5 * Math.cos((2 * Math.PI * i) / 20))}`;
+        const p = document.createElementNS(NS, "path");
+        p.setAttribute("d", d); p.setAttribute("fill", "none"); p.setAttribute("stroke", "#594578"); p.setAttribute("stroke-opacity", k === idx ? "0.9" : "0.18");
+        g.append(p);
+      }
+      const a = X(idx * H), w = X(idx * H + W) - a, hi = $("[data-hi]");
+      hi.setAttribute("x", String(a)); hi.setAttribute("width", String(w));
+      $("[data-hilab]").setAttribute("x", String(a + w / 2));
+      // The highlighted slice, multiplied by the Hann hump.
+      const x = clips[sr], s0 = Math.round((idx * H * sr) / 1000), N = Math.round((W * sr) / 1000), pk = peak(x);
+      let d = "";
+      const stepN = Math.max(1, Math.floor(N / 300));
+      for (let i = 0; i < N; i += stepN) {
+        const h = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (N - 1));
+        d += `${i ? "L" : "M"}${(614 + (i / N) * 140).toFixed(1)} ${(129 - ((x[s0 + i] ?? 0) * h / pk) * 65).toFixed(1)}`;
+      }
+      $("[data-one]").setAttribute("d", d);
+      const ws = Math.round((sr * W) / 1000), hs = Math.round((sr * H) / 1000), fps = 1000 / H;
+      $("[data-vw]").textContent = `${W} ms`; $("[data-vh]").textContent = `${H} ms`;
+      $("[data-r1]").innerHTML = `Window: ${sr.toLocaleString("en")} × ${W / 1000} s = <tspan font-weight="700">${ws.toLocaleString("en")}</tspan> samples. Hop: <tspan font-weight="700">${hs.toLocaleString("en")}</tspan> samples.`;
+      $("[data-r2]").innerHTML = `<tspan font-weight="700">${+fps.toFixed(1)}</tspan> frames per second; this 620 ms clip gives <tspan font-weight="700">${n}</tspan> frames.`;
+      $("[data-r3]").textContent = H < W ? `Neighbouring frames overlap by ${W - H} ms, so every moment sits near the middle of some frame.` : "No overlap: frames sit end to end, like Mimi's output frames.";
+    }
+    const setPre = (p: string) => {
+      root.querySelectorAll("[data-pre]").forEach((b) => b.setAttribute("aria-pressed", String((b as HTMLElement).dataset.pre === p)));
+      sr = p === "mimi" ? 24000 : 16000;
+      if (p === "mimi") { win.value = "80"; hop.max = "80"; hop.value = "80"; } else { win.value = "25"; hop.value = "10"; }
+      idx = 0; drawWave(); draw();
+    };
+    root.querySelectorAll<HTMLButtonElement>("[data-pre]").forEach((b) => b.addEventListener("click", () => { auto = false; setPre(b.dataset.pre!); }));
+    $("[data-step]").addEventListener("click", () => { auto = false; idx = (idx + 1) % count(); draw(); });
+    [win, hop].forEach((el) => el.addEventListener("input", () => { auto = false; draw(); }));
+    let auto = true;
+    setupFigure(root, () => { auto = true; setPre("asr"); }, async (alive) => {
+      for (let k = 0; k < 14; k++) { await wait(0.35); if (!alive() || !auto) return; idx = (idx + 1) % count(); draw(); }
+    });
+    drawWave(); draw();
+  });
+</script>

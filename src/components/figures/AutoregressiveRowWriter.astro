@@ -1,0 +1,81 @@
+---
+// VALL-E review, Figure 4: the autoregressive model's input line (Sec 4.2.1,
+// p. 6; Fig 3, p. 6): prompt and target phonemes, <EOS>, the prompt's row-1
+// tokens, then new row-1 tokens written one at a time. Each new token may look
+// at every phoneme and at audio tokens to its left. Token values and step
+// probabilities are toy numbers; the running product is Eq 1.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram arw" role="region" aria-label={alt} data-arw>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 330" role="img" aria-labelledby="arw-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="arw-title">An autoregressive model writing row one of the token grid, one token at a time</title>
+    <g data-line></g>
+    <g data-bar></g>
+    <text data-r1 x="20" y="270" font-size="12.5" font-weight="700" fill="#2b2b30"></text>
+    <text data-r2 x="20" y="292" font-size="12" fill="#2b2b30"></text>
+    <text data-r3 x="20" y="314" font-size="11.5" fill="#5f5f66"></text>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Write</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-next>Next token</button>
+      <button type="button" class="fig-chip" data-back>Back</button>
+    </div></div>
+    <div><span class="fig-panel__name">Voice prompt in the line</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-pr="1" aria-pressed="true">Yes</button>
+      <button type="button" class="fig-chip" data-pr="0" aria-pressed="false">Removed</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { setupFigure, wait } from "../../lib/figure-motion";
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-arw]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const mk = (g: Element, tag: string, a: Record<string, string | number>, txt?: string) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, String(a[k])); if (txt !== undefined) e.textContent = txt; g.append(e); return e; };
+    // Toy line: prompt phonemes, target phonemes, EOS, prompt audio, new audio.
+    const PH = ["h", "ɛ", "l", "oʊ", "k", "æ", "t"], PROMPT = [412, 87, 87, 903];
+    const NEW = [{ v: 15, p: 0.5, alts: [0.5, 0.3, 0.2] }, { v: 640, p: 0.4, alts: [0.4, 0.35, 0.25] }, { v: 640, p: 0.8, alts: [0.8, 0.15, 0.05] }, { v: 221, p: 0.6, alts: [0.6, 0.3, 0.1] }, { v: 9, p: 0.7, alts: [0.7, 0.2, 0.1] }, { v: -1, p: 0.9, alts: [0.9, 0.06, 0.04] }];
+    let k = NEW.length, prompt = true;
+    function draw() {
+      const g = $("[data-line]"); g.replaceChildren();
+      type Cell = { t: string; kind: "ph" | "eos" | "pa" | "new" };
+      const cells: Cell[] = [...PH.map((t) => ({ t, kind: "ph" as const })), { t: "EOS", kind: "eos" }, ...(prompt ? PROMPT.map((v) => ({ t: String(v), kind: "pa" as const })) : []), ...NEW.slice(0, k).map((n) => ({ t: n.v < 0 ? "EOS" : String(n.v), kind: "new" as const }))];
+      const cw = Math.min(46, 740 / Math.max(cells.length + 1, 18));
+      const cur = cells.length; // the position being written next
+      mk(g, "text", { x: 20, y: 22, "font-size": 11.5, "font-weight": 700, fill: "#2b2b30" }, "One long line: phonemes, end marker, then row-1 audio tokens");
+      cells.forEach((c, i) => {
+        const x = 20 + i * cw, sees = c.kind !== "new" || true;
+        const col = c.kind === "ph" ? "#35588a" : c.kind === "eos" ? "#8a8a94" : c.kind === "pa" ? "#b8722c" : "#594578";
+        mk(g, "rect", { x, y: 36, width: cw - 3, height: 34, rx: 3, fill: col, "fill-opacity": sees ? 0.85 : 0.2 });
+        mk(g, "text", { x: x + (cw - 3) / 2, y: 57, "font-size": cw < 36 ? 9 : 10.5, "font-weight": 700, "text-anchor": "middle", fill: "#fff" }, c.t);
+        // Attention from the next position: may it see this cell?
+        mk(g, "line", { x1: x + (cw - 3) / 2, y1: 72, x2: 20 + cur * cw + (cw - 3) / 2, y2: 112, stroke: "#594578", "stroke-opacity": 0.3 });
+      });
+      if (k < NEW.length) {
+        const x = 20 + cur * cw;
+        mk(g, "rect", { x, y: 36, width: cw - 3, height: 34, rx: 3, fill: "none", stroke: "#a33b3b", "stroke-width": 2, "stroke-dasharray": "4 3" });
+        mk(g, "text", { x: x + (cw - 3) / 2, y: 128, "font-size": 10.5, "text-anchor": "middle", fill: "#a33b3b" }, "next");
+      }
+      mk(g, "text", { x: 20, y: 150, "font-size": 10.5, fill: "#5f5f66" }, "Lines: everything the next token may look at. Nothing to its right exists yet.");
+      [["phonemes", "#35588a"], ["end marker", "#8a8a94"], ["voice prompt, row 1", "#b8722c"], ["new row-1 tokens", "#594578"]].forEach(([n, c], i) => { mk(g, "rect", { x: 20 + i * 170, y: 160, width: 12, height: 12, fill: c }); mk(g, "text", { x: 38 + i * 170, y: 170, "font-size": 10.5, fill: "#2b2b30" }, n); });
+      // Probability bar for the token being written.
+      const gb = $("[data-bar]"); gb.replaceChildren();
+      if (k < NEW.length) {
+        const n = NEW[k], labels = [n.v < 0 ? "EOS" : String(n.v), "other A", "other B"];
+        mk(gb, "text", { x: 20, y: 200, "font-size": 11.5, "font-weight": 700, fill: "#2b2b30" }, "The model's guess for the next token (toy)");
+        n.alts.forEach((a, i) => { mk(gb, "rect", { x: 20 + i * 150, y: 210, width: a * 140, height: 18, fill: i === 0 ? "#594578" : "#b9b9c2" }); mk(gb, "text", { x: 20 + i * 150, y: 244, "font-size": 10.5, fill: "#2b2b30" }, `${labels[i]}: ${a}`); });
+      }
+      const ps = NEW.slice(0, k).map((n) => n.p), prod = ps.reduce((a, b) => a * b, 1), logs = ps.reduce((a, b) => a + Math.log(b), 0);
+      $("[data-r1]").textContent = k ? `Row so far: ${ps.join(" × ")} = ${prod.toPrecision(3)}` : "Row so far: nothing written yet.";
+      $("[data-r2]").textContent = k ? `In logs: ${ps.map((p) => `ln ${p}`).join(" + ")} = ${logs.toFixed(3)}` : "";
+      $("[data-r3]").textContent = k === NEW.length ? "The model wrote EOS: it decided the length itself." : prompt ? "With the voice prompt in the line, the model continues in that voice." : "Without the voice prompt, similarity fell from 0.585 to 0.236 (Table 5, p. 10).";
+    }
+    root.querySelectorAll<HTMLButtonElement>("[data-pr]").forEach((b) => b.addEventListener("click", () => { prompt = b.dataset.pr === "1"; root.querySelectorAll("[data-pr]").forEach((o) => o.setAttribute("aria-pressed", String(o === b))); draw(); }));
+    $("[data-next]").addEventListener("click", () => { k = k >= NEW.length ? 0 : k + 1; draw(); });
+    $("[data-back]").addEventListener("click", () => { k = Math.max(0, k - 1); draw(); });
+    draw();
+    setupFigure(root, () => { k = 0; draw(); }, async (alive) => { for (let i = 1; i <= NEW.length; i++) { await wait(1); if (!alive()) return; k = i; draw(); } });
+  });
+</script>

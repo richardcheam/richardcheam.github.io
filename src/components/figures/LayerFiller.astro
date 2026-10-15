@@ -1,0 +1,75 @@
+---
+// VALL-E review, Figure 6: the non-autoregressive model fills rows 2 to 8,
+// one whole row per pass (Fig 3 caption, p. 6). The input for a frame is the
+// sum of the embeddings of the rows already filled (Eq 4 and 5, p. 7), and
+// AdaLN tells the shared network which row it is on. Vectors, token values
+// and the AdaLN scale and shift are toy numbers.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram lf" role="region" aria-label={alt} data-lf>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 360" role="img" aria-labelledby="lf-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="lf-title">Rows two to eight of the token grid filled one whole row per pass, with the summed input for one frame</title>
+    <text x="20" y="20" font-size="11.5" font-weight="700" fill="#2b2b30">The grid: row 1 from the AR model, then one pass per row</text>
+    <g data-grid></g>
+    <text x="440" y="20" font-size="11.5" font-weight="700" fill="#2b2b30">Input for the outlined frame: rows so far, added</text>
+    <rect x="440" y="30" width="320" height="200" fill="none" stroke="#ececf1" />
+    <g data-vec></g>
+    <text data-r1 x="20" y="270" font-size="12.5" font-weight="700" fill="#2b2b30"></text>
+    <text data-r2 x="20" y="292" font-size="12" fill="#2b2b30"></text>
+    <text data-r3 x="20" y="314" font-size="12" fill="#2b2b30"></text>
+    <text data-r4 x="20" y="338" font-size="11.5" fill="#5f5f66"></text>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Passes</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-pass>Next pass</button>
+      <button type="button" class="fig-chip" data-reset>Start over</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { setupFigure, wait } from "../../lib/figure-motion";
+  import { gauss } from "../../lib/flow-math";
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-lf]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const mk = (g: Element, tag: string, a: Record<string, string | number>, txt?: string) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, String(a[k])); if (txt !== undefined) e.textContent = txt; g.append(e); return e; };
+    const COLS = 16, g = gauss(9);
+    // Toy embedding for each row's token at the outlined frame; earlier rows are bigger.
+    const vec = Array.from({ length: 8 }, (_, r) => [g() * (1.6 / (r + 1)) + (r === 0 ? 1 : 0), g() * (1.6 / (r + 1))]);
+    vec[0] = [1, 0]; vec[1] = [0.5, -1];
+    let filled = 8, col = 6;
+    function draw() {
+      const gr = $("[data-grid]"); gr.replaceChildren();
+      for (let r = 0; r < 8; r++) {
+        mk(gr, "text", { x: 52, y: 44 + r * 26, "font-size": 10, "text-anchor": "end", fill: "#5f5f66" }, `row ${r + 1}`);
+        for (let c = 0; c < COLS; c++) mk(gr, "rect", { x: 58 + c * 22, y: 30 + r * 26, width: 20, height: 22, rx: 2, fill: r < filled ? (r === 0 ? "#594578" : "#8a7aa8") : "#f2f2f5", stroke: c === col ? "#a33b3b" : "none", "stroke-width": 2, style: "cursor: pointer", "data-c": c });
+      }
+      gr.querySelectorAll<SVGRectElement>("[data-c]").forEach((e) => e.addEventListener("click", () => { col = +e.dataset.c!; draw(); }));
+      // Vector sum for the row being predicted next (rows 1 .. filled).
+      const gv = $("[data-vec]"); gv.replaceChildren();
+      const X = (v: number) => 560 + v * 60, Y = (v: number) => 140 - v * 60;
+      mk(gv, "line", { x1: 450, x2: 750, y1: Y(0), y2: Y(0), stroke: "#f2f2f5" }); mk(gv, "line", { x1: X(0), x2: X(0), y1: 36, y2: 224, stroke: "#f2f2f5" });
+      const k = Math.min(filled, 7);
+      let p = [0, 0];
+      for (let r = 0; r < k; r++) {
+        const q = [p[0] + vec[r][0], p[1] + vec[r][1]];
+        mk(gv, "line", { x1: X(p[0]), y1: Y(p[1]), x2: X(q[0]), y2: Y(q[1]), stroke: r === 0 ? "#594578" : "#8a7aa8", "stroke-width": 2.5 });
+        mk(gv, "circle", { cx: X(q[0]), cy: Y(q[1]), r: 2.5, fill: "#8a7aa8" });
+        p = q;
+      }
+      mk(gv, "circle", { cx: X(p[0]), cy: Y(p[1]), r: 5, fill: "#a33b3b" });
+      mk(gv, "text", { x: X(p[0]) + 8, y: Y(p[1]) - 6, "font-size": 10.5, "font-weight": 700, fill: "#a33b3b" }, `(${p[0].toFixed(2)}, ${p[1].toFixed(2)})`);
+      const next = filled + 1, a = 1 + next / 4, b = (next - 5) / 4;
+      $("[data-r1]").textContent = filled >= 8 ? "All 8 rows filled: 1 AR row plus 7 NAR passes." : `Predicting row ${next}: input = sum of the embeddings of rows 1 to ${filled}${filled === 2 ? ": (1, 0) + (0.5, −1) = (1.5, −1)" : ""}.`;
+      $("[data-r2]").textContent = filled >= 8 ? "" : `Row number ${next} enters through AdaLN: a = ${a.toFixed(2)}, b = ${b.toFixed(2)} (toy).`;
+      $("[data-r3]").textContent = filled >= 8 ? "" : `For h = (1, 3): LayerNorm gives (−1, 1), then ${a.toFixed(2)} × (−1, 1) + ${b.toFixed(2)} = (${(-a + b).toFixed(2)}, ${(a + b).toFixed(2)}).`;
+      $("[data-r4]").textContent = "Every frame of a row is chosen at once (greedy), so one pass fills the whole row. Click any column to inspect it.";
+    }
+    $("[data-pass]").addEventListener("click", () => { filled = filled >= 8 ? 1 : filled + 1; draw(); });
+    $("[data-reset]").addEventListener("click", () => { filled = 1; draw(); });
+    draw();
+    setupFigure(root, () => { filled = 1; draw(); }, async (alive) => { for (let i = 2; i <= 8; i++) { await wait(0.9); if (!alive()) return; filled = i; draw(); } });
+  });
+</script>

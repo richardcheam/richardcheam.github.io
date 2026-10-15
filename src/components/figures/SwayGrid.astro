@@ -1,0 +1,75 @@
+---
+// F5-TTS review, Figure 4: Sway Sampling (Eq 7, p. 5). Even steps u_k = k/n
+// are bent to t_k = u_k + s (cos(pi u_k / 2) - 1 + u_k). s < 0 crowds the
+// steps near t = 0. The curve stays increasing for -1 <= s <= 2/(pi - 2).
+// The density of t is 1 / f'(u), drawn against t.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram swg" role="region" aria-label={alt} data-swg>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 360" role="img" aria-labelledby="swg-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="swg-title">Evenly spaced time steps bent towards the start of the flow</title>
+    <g data-lines></g>
+    <g data-plots></g>
+    <text data-r1 x="20" y="318" font-size="12.5" font-weight="700" fill="#2b2b30"></text>
+    <text data-r2 x="20" y="340" font-size="12" fill="#2b2b30"></text>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Sway s<strong data-vs></strong></span><input class="scrub" data-s type="range" min="-1" max="1.75" step="0.05" value="-1" /></label>
+    <div><span class="fig-panel__name">Steps</span><div class="fig-chips">
+      {[4, 8, 16, 32].map((n) => <button type="button" class="fig-chip" data-n={n} aria-pressed={n === 16 ? "true" : "false"}>{n}</button>)}
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { setupFigure, tween } from "../../lib/figure-motion";
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-swg]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const sIn = $<HTMLInputElement>("[data-s]");
+    const mk = (g: Element, tag: string, a: Record<string, string | number>, txt?: string) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, String(a[k])); if (txt !== undefined) e.textContent = txt; g.append(e); return e; };
+    const f = (u: number, s: number) => u + s * (Math.cos((Math.PI / 2) * u) - 1 + u);
+    const df = (u: number, s: number) => 1 + s * (1 - (Math.PI / 2) * Math.sin((Math.PI / 2) * u));
+    let n = 16, sShow = -1;
+    function draw() {
+      const s = sShow, X = (t: number) => 60 + t * 680;
+      const gl = $("[data-lines]"); gl.replaceChildren();
+      mk(gl, "text", { x: 20, y: 22, "font-size": 11, "font-weight": 700, fill: "#2b2b30" }, "even");
+      mk(gl, "text", { x: 20, y: 102, "font-size": 11, "font-weight": 700, fill: "#594578" }, "sway");
+      mk(gl, "line", { x1: X(0), x2: X(1), y1: 18, y2: 18, stroke: "#2b2b30" }); mk(gl, "line", { x1: X(0), x2: X(1), y1: 98, y2: 98, stroke: "#594578" });
+      mk(gl, "rect", { x: X(0), y: 92, width: X(0.3) - X(0), height: 12, fill: "#a33b3b", "fill-opacity": 0.08 });
+      let below = 0;
+      for (let k = 0; k <= n; k++) {
+        const u = k / n, t = f(u, s); if (t < 0.3) below++;
+        mk(gl, "line", { x1: X(u), y1: 22, x2: X(t), y2: 94, stroke: "#b9b9c2", "stroke-width": 0.8 });
+        mk(gl, "line", { x1: X(u), x2: X(u), y1: 12, y2: 24, stroke: "#2b2b30", "stroke-width": 1.5 });
+        mk(gl, "line", { x1: X(t), x2: X(t), y1: 92, y2: 104, stroke: t < 0.3 ? "#a33b3b" : "#594578", "stroke-width": 1.8 });
+      }
+      [0, 0.3, 0.5, 1].forEach((v) => mk(gl, "text", { x: X(v), y: 120, "font-size": 10, "text-anchor": "middle", fill: v === 0.3 ? "#a33b3b" : "#5f5f66" }, String(v)));
+      // Curve and density.
+      const gp = $("[data-plots]"); gp.replaceChildren();
+      const PX = (u: number, x0: number) => x0 + u * 300, PY = (v: number, top: number, max: number) => top + 150 - (v / max) * 150;
+      mk(gp, "text", { x: 60, y: 146, "font-size": 11, "font-weight": 700, fill: "#2b2b30" }, "t = f(u; s)");
+      mk(gp, "rect", { x: 60, y: 152, width: 300, height: 150, fill: "none", stroke: "#ececf1" });
+      mk(gp, "line", { x1: PX(0, 60), y1: PY(0, 152, 1), x2: PX(1, 60), y2: PY(1, 152, 1), stroke: "#d5d5dc", "stroke-dasharray": "3 3" });
+      let d = "", dens = "", inc = true, mx = 0;
+      const pts: [number, number][] = [];
+      for (let i = 0; i <= 200; i++) { const u = i / 200, t = f(u, s), g = df(u, s); if (g <= 0) inc = false; d += `${i ? "L" : "M"}${PX(u, 60).toFixed(1)} ${PY(Math.max(0, Math.min(1, t)), 152, 1).toFixed(1)}`; if (g > 0) { pts.push([t, 1 / g]); mx = Math.max(mx, 1 / g); } }
+      mk(gp, "path", { d, fill: "none", stroke: "#594578", "stroke-width": 2.5 });
+      mk(gp, "text", { x: 440, y: 146, "font-size": 11, "font-weight": 700, fill: "#2b2b30" }, "how crowded the steps are, along t");
+      mk(gp, "rect", { x: 440, y: 152, width: 300, height: 150, fill: "none", stroke: "#ececf1" });
+      const cap = Math.min(mx, 6);
+      pts.forEach(([t, p], i) => { dens += `${i ? "L" : "M"}${PX(t, 440).toFixed(1)} ${PY(Math.min(p, cap), 152, cap * 1.05).toFixed(1)}`; });
+      mk(gp, "path", { d: dens, fill: "none", stroke: "#a33b3b", "stroke-width": 2 });
+      const t1 = f(1 / n, s), mid = f(0.5, s);
+      $("[data-r1]").textContent = `${below} of ${n + 1} steps land below t = 0.3 (even grid: ${Array.from({ length: n + 1 }, (_, k) => k / n).filter((u) => u < 0.3).length}).  First step: ${t1.toFixed(4)} (even: ${(1 / n).toFixed(4)}).`;
+      $("[data-r2]").textContent = inc ? `The middle of the even grid, u = 0.5, lands at t = ${mid.toFixed(3)}.` : "Past 2/(π − 2) ≈ 1.75 the curve would turn back on itself: not allowed.";
+      $("[data-vs]").textContent = s.toFixed(2); sIn.style.setProperty("--p", `${((s + 1) / 2.75) * 100}%`);
+    }
+    sIn.addEventListener("input", () => { sShow = +sIn.value; draw(); });
+    root.querySelectorAll<HTMLButtonElement>("[data-n]").forEach((b) => b.addEventListener("click", () => { n = +b.dataset.n!; root.querySelectorAll("[data-n]").forEach((o) => o.setAttribute("aria-pressed", String(o === b))); draw(); }));
+    draw();
+    setupFigure(root, () => { sShow = 0; draw(); }, async (alive) => { await tween(2, (e) => { if (alive()) { sShow = -e; sIn.value = String(sShow); draw(); } }); });
+  });
+</script>

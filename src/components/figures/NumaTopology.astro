@@ -1,0 +1,36 @@
+---
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" tabindex="0" role="region" aria-label={alt} data-numa>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 52 780 178" role="img" aria-labelledby="numa-topology-title numa-topology-desc" class="blog-diagram-svg" font-family="Inter, sans-serif">
+  <title id="numa-topology-title">The two Grace Hopper locality pairs</title><desc id="numa-topology-desc">Each Grace memory domain is paired with a Hopper GPU and its HBM. Worker execution, allocation preference and actual KV page residency are different observations.</desc>
+  <g fill="none" stroke="#5f5f66" stroke-width="2"><rect data-pair="0" x="30" y="80" width="335" height="128" /><rect data-pair="1" x="415" y="80" width="335" height="128" /><line data-link="0" x1="192" y1="122" x2="220" y2="122" /><line data-link="1" x1="577" y1="122" x2="605" y2="122" /></g>
+  <g fill="#111111" font-size="17"><text data-pt="0" x="50" y="130">Grace 0</text><text data-pt="0" x="233" y="130">Hopper 0</text><text data-pt="1" x="435" y="130">Grace 1</text><text data-pt="1" x="618" y="130">Hopper 1</text></g>
+  <g fill="#5f5f66" font-size="14"><text data-pt="0" x="50" y="162">CPU + host RAM</text><text data-pt="0" x="233" y="162">HBM</text><text data-pt="1" x="435" y="162">CPU + host RAM</text><text data-pt="1" x="618" y="162">HBM</text></g>
+  </svg>
+<button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+<p class="blog-figure-reading">Configured placement ≠ measured residency or transfer path</p>
+<p class="blog-figure-reading">Pairing is documented; KV-buffer page locations and path were not established.</p>
+
+<script>
+  import { alongPath, animate, drawStroke, dur, hideStroke, setupFigure, wait } from "../../lib/figure-motion";
+
+  // Each locality pair is drawn as a unit: its boundary, then the Grace-Hopper
+  // link inside it. Nothing crosses between pairs; that path was not measured.
+  document.querySelectorAll<HTMLElement>("[data-numa]").forEach((root) => {
+    const pair = (k: number) => root.querySelector<SVGRectElement>(`[data-pair="${k}"]`)!;
+    const link = (k: number) => root.querySelector<SVGLineElement>(`[data-link="${k}"]`)!;
+    const texts = (k: number) => Array.from(root.querySelectorAll<SVGTextElement>(`[data-pt="${k}"]`));
+    setupFigure(root, () => {
+      [0, 1].forEach((k) => { hideStroke(pair(k)); hideStroke(link(k)); texts(k).forEach((t) => (t.style.opacity = "0")); });
+    }, async (alive) => {
+      for (const k of [0, 1]) {
+        if (!alive()) return;
+        await drawStroke(pair(k), 0.9);
+        texts(k).forEach((t, i) => animate(t, { opacity: [0, 1] }, { duration: dur(0.3), delay: dur(i * 0.08) }));
+        await drawStroke(link(k), 0.35);
+      }
+    });
+  });
+</script>

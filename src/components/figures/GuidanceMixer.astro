@@ -1,0 +1,45 @@
+---
+// DSM review, Figure 5: classifier-free guidance on logits (Eq 8, p. 6).
+// guided = unconditioned + alpha (conditioned - unconditioned), then softmax.
+// Six toy tokens; alpha from 1 (plain conditioned) to 4; the paper's default
+// is 2.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram gmx" role="region" aria-label={alt} data-gmx>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 320" role="img" aria-labelledby="gmx-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="gmx-title">Guidance stretching the gap between conditioned and unconditioned scores</title>
+    <g data-g></g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Guidance strength α<strong data-va></strong></span><input class="scrub" data-a type="range" min="1" max="4" step="0.5" value="2" /></label>
+  </div>
+</div>
+
+<script>
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-gmx]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const aIn = $<HTMLInputElement>("[data-a]");
+    const mk = (g: Element, tag: string, a: Record<string, string | number>, txt?: string) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, String(a[k])); if (txt !== undefined) e.textContent = txt; g.append(e); return e; };
+    const U = [1, 1, 0.5, 0, 0, -0.5], C = [3, 1.5, 0.5, 0, -0.5, -1];
+    const softmax = (z: number[]) => { const m = Math.max(...z), e = z.map((v) => Math.exp(v - m)), s = e.reduce((a, b) => a + b, 0); return e.map((v) => v / s); };
+    function draw() {
+      const a = +aIn.value, G = U.map((u, i) => u + a * (C[i] - u)), g = $("[data-g]"); g.replaceChildren();
+      const Y = (v: number) => 140 - v * 15;
+      mk(g, "text", { x: 20, y: 20, "font-size": 11.5, "font-weight": 700, fill: "#2b2b30" }, "Scores (logits) for six candidate tokens");
+      mk(g, "line", { x1: 20, x2: 400, y1: Y(0), y2: Y(0), stroke: "#2b2b30" });
+      [["no text, no voice", U, "#b9b9c2"], ["with text and voice", C, "#35588a"], [`guided, α = ${a}`, G, "#a33b3b"]].forEach(([n, v, c], k) => {
+        (v as number[]).forEach((x, i) => { const bx = 30 + i * 62 + k * 18, y = Y(Math.max(0, x)); mk(g, "rect", { x: bx, y, width: 16, height: Math.abs(Y(x) - Y(0)), fill: c as string, "fill-opacity": 0.85 }); });
+        mk(g, "rect", { x: 20 + k * 130, y: 262, width: 12, height: 12, fill: c as string }); mk(g, "text", { x: 36 + k * 130, y: 272, "font-size": 10.5, fill: "#2b2b30" }, n as string);
+      });
+      const P = softmax(G), P1 = softmax(C);
+      mk(g, "text", { x: 440, y: 20, "font-size": 11.5, "font-weight": 700, fill: "#2b2b30" }, "Probabilities after softmax");
+      P.forEach((p, i) => { const y = 36 + i * 32; mk(g, "text", { x: 440, y: y + 14, "font-size": 11, fill: "#2b2b30" }, `token ${i + 1}`); mk(g, "rect", { x: 500, y, width: p * 240, height: 20, fill: "#a33b3b", "fill-opacity": 0.85 }); mk(g, "text", { x: 506 + p * 240, y: y + 14, "font-size": 10.5, fill: "#2b2b30" }, p.toFixed(3)); });
+      mk(g, "text", { x: 440, y: 246, "font-size": 12, "font-weight": 700, fill: "#2b2b30" }, `Top token: ${P1[0].toFixed(3)} at α = 1 → ${P[0].toFixed(3)} at α = ${a}`);
+      mk(g, "text", { x: 20, y: 298, "font-size": 12, fill: "#2b2b30" }, `Token 1: ${U[0]} + ${a} × (${C[0]} − ${U[0]}) = ${G[0]}.   Toy scores; the formula is Eq 8 (p. 6).`);
+      $("[data-va]").textContent = String(a); aIn.style.setProperty("--p", `${((a - 1) / 3) * 100}%`);
+    }
+    aIn.addEventListener("input", draw);
+    draw();
+  });
+</script>

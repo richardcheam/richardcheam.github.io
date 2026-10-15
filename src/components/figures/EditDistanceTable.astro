@@ -1,0 +1,138 @@
+---
+// The Levenshtein table behind WER, filled one cell at a time. Each cell shows
+// which of its three neighbours won; the backtrace then reads the alignment
+// off the table. Readers can type their own reference and hypothesis.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram ed" role="region" aria-label={alt} data-ed>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 380" role="img" aria-labelledby="ed-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="ed-title">Edit-distance table between a reference and an ASR hypothesis</title>
+    <g data-grid></g>
+    <g data-path></g>
+    <g transform="translate(470 40)">
+      <text font-size="11" letter-spacing="1" fill="#5f5f66">ALIGNMENT</text>
+      <g data-align transform="translate(0 30)"></g>
+      <text y="150" font-size="11" letter-spacing="1" fill="#5f5f66">COUNT</text>
+      <text data-count y="176" font-size="13" fill="#2b2b30" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"></text>
+      <text data-wer y="226" font-size="30" font-weight="700" fill="#594578" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"></text>
+      <text data-werlabel y="248" font-size="10.5" fill="#5f5f66"></text>
+    </g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Reference (what the TTS was asked to say)</span><input class="fig-field" data-ref value="a cat sat" maxlength="48" /></label>
+    <label><span class="fig-panel__name">Hypothesis (what the ASR heard)</span><input class="fig-field" data-hyp value="the cat" maxlength="48" /></label>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { animate, dur, setupFigure, wait } from "../../lib/figure-motion";
+  import { editDistance } from "../../lib/eval-math";
+
+  const NS = "http://www.w3.org/2000/svg";
+  const INK = { match: "#4F5D3A", sub: "#8a6a1f", del: "#a33b3b", ins: "#594578" } as const;
+  const NAME = { match: "match", sub: "S", del: "D", ins: "I" } as const;
+  const el = (tag: string, attrs: Record<string, string | number>, text?: string) => {
+    const e = document.createElementNS(NS, tag);
+    Object.entries(attrs).forEach(([k, v]) => e.setAttribute(k, String(v)));
+    if (text !== undefined) e.textContent = text;
+    return e;
+  };
+  const words = (s: string) => s.trim().split(/\s+/).filter(Boolean).slice(0, 6);
+
+  document.querySelectorAll<HTMLElement>("[data-ed]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const gridG = $<SVGGElement>("[data-grid]"), pathG = $<SVGGElement>("[data-path]"), alignG = $<SVGGElement>("[data-align]");
+    const refIn = $<HTMLInputElement>("[data-ref]"), hypIn = $<HTMLInputElement>("[data-hyp]");
+    let cells: SVGTextElement[][] = [], boxes: SVGRectElement[][] = [];
+    let model = editDistance([], []), ref: string[] = [], hyp: string[] = [];
+    let C = 46, X0 = 90, Y0 = 70;
+
+    function build() {
+      ref = words(refIn.value); hyp = words(hypIn.value);
+      model = editDistance(ref, hyp);
+      const n = Math.max(ref.length, hyp.length) + 1;
+      C = Math.min(52, Math.floor(300 / n));
+      X0 = 90; Y0 = 70;
+      gridG.replaceChildren(); pathG.replaceChildren();
+      const fs = Math.max(9, Math.min(12, C / 4));
+      ["∅", ...hyp].forEach((w, j) => gridG.append(el("text", { x: X0 + j * C + C / 2, y: Y0 - 10, "text-anchor": "middle", "font-size": fs, fill: "#5f5f66" }, w)));
+      ["∅", ...ref].forEach((w, i) => gridG.append(el("text", { x: X0 - 8, y: Y0 + i * C + C / 2 + 4, "text-anchor": "end", "font-size": fs, fill: "#5f5f66" }, w)));
+      gridG.append(el("text", { x: X0 + ((hyp.length + 1) * C) / 2, y: Y0 - 32, "text-anchor": "middle", "font-size": 10.5, fill: "#2b2b30" }, "hypothesis →"));
+      gridG.append(el("text", { x: 24, y: Y0 + ((ref.length + 1) * C) / 2, "text-anchor": "middle", "font-size": 10.5, fill: "#2b2b30", transform: `rotate(-90 24 ${Y0 + ((ref.length + 1) * C) / 2})` }, "reference ↓"));
+      cells = []; boxes = [];
+      model.D.forEach((row, i) => {
+        cells.push([]); boxes.push([]);
+        row.forEach((v, j) => {
+          const b = el("rect", { x: X0 + j * C + 1, y: Y0 + i * C + 1, width: C - 2, height: C - 2, rx: 3, fill: "#f6f6f8", stroke: "#ececf1" }) as SVGRectElement;
+          const t = el("text", { x: X0 + j * C + C / 2, y: Y0 + i * C + C / 2 + 5, "text-anchor": "middle", "font-size": Math.min(16, C / 2.8), "font-weight": 600, fill: "#2b2b30", "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace" }, String(v)) as SVGTextElement;
+          gridG.append(b, t); boxes[i].push(b); cells[i].push(t);
+        });
+      });
+    }
+
+    function showAlignment() {
+      alignG.replaceChildren();
+      const colW = Math.min(64, 290 / Math.max(1, model.path.length));
+      model.path.forEach((s, k) => {
+        const x = k * colW, ink = INK[s.op];
+        alignG.append(
+          el("text", { x: x + colW / 2, y: 0, "text-anchor": "middle", "font-size": 11, fill: "#2b2b30" }, s.ref ?? "–"),
+          el("text", { x: x + colW / 2, y: 22, "text-anchor": "middle", "font-size": 11, fill: "#2b2b30" }, s.hyp ?? "–"),
+          el("rect", { x: x + 3, y: 32, width: colW - 6, height: 18, rx: 3, fill: ink, "fill-opacity": 0.14 }),
+          el("text", { x: x + colW / 2, y: 45, "text-anchor": "middle", "font-size": 10, "font-weight": 600, fill: ink }, NAME[s.op]),
+        );
+      });
+      alignG.append(el("text", { x: -4, y: 0, "text-anchor": "end", "font-size": 9.5, fill: "#5f5f66" }, "ref"), el("text", { x: -4, y: 22, "text-anchor": "end", "font-size": 9.5, fill: "#5f5f66" }, "hyp"));
+      const { sub, del, ins } = model.count, N = Math.max(1, ref.length);
+      $("[data-count]").textContent = `S ${sub} + D ${del} + I ${ins} = ${model.dist}`;
+      $("[data-wer]").textContent = `WER ${((model.dist / N) * 100).toFixed(1)}%`;
+      $("[data-werlabel]").textContent = `${model.dist} edits ÷ ${ref.length} reference words`;
+    }
+
+    function drawPath(shown: number) {
+      pathG.replaceChildren();
+      const pts = [[0, 0], ...model.path.map((s) => [s.i, s.j])].slice(0, shown + 1);
+      if (pts.length > 1) {
+        const d = pts.map(([i, j], k) => `${k ? "L" : "M"}${X0 + j * C + C / 2} ${Y0 + i * C + C / 2}`).join(" ");
+        pathG.append(el("path", { d, fill: "none", stroke: "#594578", "stroke-width": 3, "stroke-opacity": 0.35, "stroke-linecap": "round", "stroke-linejoin": "round" }));
+      }
+      model.path.slice(0, shown).forEach((s) => boxes[s.i][s.j].setAttribute("stroke", INK[s.op]));
+    }
+
+    const hideAll = () => {
+      cells.forEach((r, i) => r.forEach((t, j) => (t.style.opacity = i === 0 || j === 0 ? "1" : "0")));
+      $("[data-count]").textContent = ""; $("[data-wer]").textContent = ""; $("[data-werlabel]").textContent = ""; alignG.replaceChildren();
+    };
+    const finish = () => { cells.flat().forEach((t) => (t.style.opacity = "1")); drawPath(model.path.length); showAlignment(); };
+
+    const rebuild = () => { build(); finish(); };
+    refIn.addEventListener("input", rebuild); hypIn.addEventListener("input", rebuild);
+
+    build();
+    setupFigure(
+      root,
+      () => { build(); hideAll(); },
+      async (alive) => {
+        // Fill row by row; flash the winning neighbour for each new cell.
+        for (let i = 1; i < cells.length; i++)
+          for (let j = 1; j < cells[i].length; j++) {
+            if (!alive()) return;
+            const D = model.D, same = ref[i - 1] === hyp[j - 1];
+            const from = D[i][j] === D[i - 1][j - 1] + (same ? 0 : 1) ? boxes[i - 1][j - 1] : D[i][j] === D[i - 1][j] + 1 ? boxes[i - 1][j] : boxes[i][j - 1];
+            from.setAttribute("fill", "#e9e4f1");
+            animate(cells[i][j], { opacity: [0, 1] }, { duration: dur(0.25) });
+            await wait(0.32);
+            from.setAttribute("fill", "#f6f6f8");
+          }
+        for (let k = 1; k <= model.path.length; k++) {
+          if (!alive()) return;
+          drawPath(k);
+          await wait(0.35);
+        }
+        if (!alive()) return;
+        showAlignment();
+      },
+    );
+  });
+</script>

@@ -1,0 +1,182 @@
+---
+// How one synthetic training example is built (Sec 4.1 to 4.2). A script turn
+// is written as lead / body / tail with a reference of at most fifty words
+// (Table 14 example, abridged). TTS voices it on two channels; forced
+// alignment puts <ret> on the token before the lead; the reference arrival d'
+// is sampled with Eq 3. Durations are illustrative; d_lead = 3 s.
+import { svgMath } from "../../lib/svg-math";
+const { alt } = Astro.props;
+const T0 = -2.2, T1 = 8.0, X0 = 130, PX = 62;
+const x = (t: number) => X0 + (t - T0) * PX;
+const DLEAD = 3.0, BODY = [3.0, 6.3], TAIL = [6.3, 7.7];
+const parts = [
+  { key: "lead", label: "lead", t0: 0, t1: DLEAD, color: "#594578", text: "\"That's a big question a lot of people are asking.\"", note: "needs no outside knowledge" },
+  { key: "body", label: "body", t0: BODY[0], t1: BODY[1], color: "#4F5D3A", text: "\"Copyright is a big issue with AI art...\"", note: "grounded in the reference" },
+  { key: "tail", label: "tail", t0: TAIL[0], t1: TAIL[1], color: "#5f5f66", text: "\"It's more likely to be a tool for artists, for now.\"", note: "optional" },
+];
+function wave(t0: number, t1: number, y: number, seed: number, amp = 8) {
+  let d = "";
+  const n = Math.round((t1 - t0) * 16);
+  for (let i = 0; i <= n; i++) {
+    const t = t0 + ((t1 - t0) * i) / n;
+    const a = (2 + amp * Math.abs(Math.sin(seed * 3 + i * 1.3))) * (0.4 + 0.6 * Math.sin((Math.PI * i) / n) ** 0.3);
+    d += `${i ? "L" : "M"}${x(t).toFixed(1)} ${(y + (i % 2 ? a : -a)).toFixed(1)} `;
+  }
+  return d.trim();
+}
+---
+<div class="blog-diagram te" role="region" aria-label={alt} data-te data-cfg={JSON.stringify({ T0, X0, PX, DLEAD })}>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 404" role="img" aria-labelledby="te-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="te-title">Building a MoshiRAG training example</title>
+
+    <!-- 1. the script -->
+    <text x="14" y="20" font-size="11" letter-spacing="1" fill="#5f5f66">1 · SCRIPT, WRITTEN BY THREE LLM ROLES</text>
+    <g data-script font-size="11.5">
+      <g data-line="ref">
+        <rect x="14" y="30" width="752" height="26" rx="4" fill="#4F5D3A" fill-opacity="0.07" stroke="#4F5D3A" stroke-opacity="0.4" stroke-dasharray="3 3" />
+        <text x="24" y="47" fill="#4F5D3A"><tspan font-weight="600">reference</tspan> (reference LLM, at most 50 words): a short passage on AI art and copyright</text>
+      </g>
+      {parts.map((p, k) => (
+        <g data-line={p.key}>
+          <text x="24" y={76 + k * 20} fill={p.color} font-weight="600">{p.label}</text>
+          <text x="66" y={76 + k * 20} fill="#2b2b30">{p.text}</text>
+          <text x="766" y={76 + k * 20} fill="#5f5f66" font-size="9.5" text-anchor="end">{p.note}</text>
+        </g>
+      ))}
+    </g>
+
+    <!-- 2. the streams -->
+    <text x="14" y="150" font-size="11" letter-spacing="1" fill="#5f5f66">2 · VOICED BY A TWO-CHANNEL TTS, ALIGNED TO 80 MS STEPS</text>
+    <g font-size="11.5" fill="#2b2b30">
+      <text x="14" y="188">user audio</text>
+      <text x="14" y="232">Moshi text</text>
+      <text x="14" y="278">Moshi audio</text>
+    </g>
+    <g data-streams>
+      <path d={wave(-2.0, -0.15, 184, 0.7)} fill="none" stroke="#5f5f66" stroke-width="1.4" />
+      {parts.map((p, k) => (
+        <g data-part={p.key}>
+          <rect x={x(p.t0) + 1} y="220" width={(p.t1 - p.t0) * PX - 2} height="18" rx="3" fill={p.color} fill-opacity="0.12" />
+          <text x={x(p.t0) + 6} y="233" font-size="10" fill={p.color}>{p.label}</text>
+          <path d={wave(p.t0 + 0.05, p.t1 - 0.05, 274, 1.1 + k)} fill="none" stroke={p.color} stroke-width="1.4" />
+        </g>
+      ))}
+      <g data-ret>
+        <rect x={x(0) - 38} y="200" width="36" height="16" rx="3" fill="#2b2b30" />
+        <text x={x(0) - 20} y="212" font-size="10" fill="#fff" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">&lt;ret&gt;</text>
+        <path d={`M${x(0) - 4} 216 L${x(0) - 1} 222`} stroke="#2b2b30" />
+      </g>
+    </g>
+
+    <!-- 3. sampled arrival -->
+    <text x="14" y="316" font-size="11" letter-spacing="1" fill="#5f5f66" stroke="#fff" stroke-width="5" paint-order="stroke">3 · WHEN THE REFERENCE "ARRIVES", SAMPLED WITH EQ 3</text>
+    <g data-eq3>
+      <rect x={x(1.0)} y="326" width={(DLEAD - 2) * PX} height="22" fill="#594578" fill-opacity="0.12" stroke="#594578" stroke-opacity="0.5" />
+      <rect x={x(0)} y="326" width={DLEAD * PX} height="22" fill="none" stroke="#d5d5dc" />
+      <text x={x(0.5)} y="341" font-size="9.5" text-anchor="middle" fill="#5f5f66">1 s</text>
+      <text x={x(DLEAD - 0.5)} y="341" font-size="9.5" text-anchor="middle" fill="#5f5f66">1 s</text>
+      <text x={x(DLEAD) + 8} y="335" font-size="10" fill="#594578" set:html={svgMath("usually d′ ~ U(1.0, d_{lead} − 1.0)", 10)} />
+      <text x={x(DLEAD) + 8} y="349" font-size="10" fill="#5f5f66" set:html={svgMath("1 in 5, or if d_{lead} < 2 s:  d′ ~ U(0, d_{lead})", 10)} />
+      <g data-ticks></g>
+      <path data-arrival d={`M${x(1.6)} 324 V206`} stroke="#4F5D3A" stroke-width="1.6" stroke-dasharray="3 2" />
+      <text data-arrival-lab x={x(1.6) + 4} y="210" font-size="10" fill="#4F5D3A" stroke="#fff" stroke-width="4" paint-order="stroke" font-weight="600" set:html={svgMath("d′ = 1.6 s", 10)} />
+    </g>
+    <g font-size="9.5" fill="#5f5f66" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">
+      {[-2, 0, 2, 4, 6, 8].map((t) => <text x={x(t)} y="368" text-anchor="middle">{t > 0 ? `+${t}` : t} s</text>)}
+    </g>
+    <line x1={x(T0)} y1="356" x2={x(T1)} y2="356" stroke="#d5d5dc" />
+    <text data-tally x="14" y="394" font-size="11" fill="#2b2b30"></text>
+  </svg>
+  <div class="te__ctl">
+    <button type="button" class="te__btn" data-sample>Sample d′</button>
+    <button type="button" class="te__btn" data-sample100>Sample 100</button>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<style>
+  .te__ctl { display: flex; gap: 0.5rem; margin-top: 0.4rem; }
+  .te__btn { min-height: 32px; padding: 0 0.8rem; border: 1px solid #594578; border-radius: 4px; background: transparent; color: var(--text); font: inherit; font-size: 0.8rem; cursor: pointer; }
+  .te__btn:hover { background: rgba(89, 69, 120, 0.08); }
+</style>
+
+<script>
+  import { animate, dur, setupFigure, wait } from "../../lib/figure-motion";
+  import { svgMath } from "../../lib/svg-math";
+
+  document.querySelectorAll<HTMLElement>("[data-te]").forEach((root) => {
+    const c = JSON.parse(root.dataset.cfg!);
+    const x = (t: number) => c.X0 + (t - c.T0) * c.PX;
+    const NS = "http://www.w3.org/2000/svg";
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const lines = Array.from(root.querySelectorAll<SVGGElement>("[data-line]"));
+    const partsEls = Array.from(root.querySelectorAll<SVGGElement>("[data-part]"));
+    const userWave = $<SVGPathElement>("[data-streams] > path");
+    const ret = $<SVGGElement>("[data-ret]");
+    const eq3 = $<SVGGElement>("[data-eq3]");
+    const ticks = $<SVGGElement>("[data-ticks]");
+    const arrival = $<SVGPathElement>("[data-arrival]");
+    const arrivalLab = $<SVGTextElement>("[data-arrival-lab]");
+    const tally = $<SVGTextElement>("[data-tally]");
+    let n = 0, wide = 0;
+
+    // Eq 3 of the paper.
+    const sample = () => {
+      const p = Math.random();
+      const fallback = c.DLEAD < 2 || p < 0.2;
+      const d = fallback ? Math.random() * c.DLEAD : 1.0 + Math.random() * (c.DLEAD - 2.0);
+      return { d, fallback };
+    };
+    const drop = (d: number, fallback: boolean, animateIt: boolean) => {
+      const t = document.createElementNS(NS, "line");
+      t.setAttribute("x1", String(x(d))); t.setAttribute("x2", String(x(d)));
+      t.setAttribute("y1", "328"); t.setAttribute("y2", "346");
+      t.setAttribute("stroke", fallback ? "#a33b3b" : "#594578");
+      t.setAttribute("stroke-opacity", "0.55");
+      ticks.append(t);
+      if (animateIt) animate(t, { opacity: [0, 1] }, { duration: dur(0.25) });
+      n++; if (fallback) wide++;
+      arrival.setAttribute("d", `M${x(d)} 324 V206`);
+      arrivalLab.setAttribute("x", String(x(d) + 4));
+      arrivalLab.innerHTML = svgMath(`d′ = ${d.toFixed(2)} s${fallback ? "  (wide branch)" : ""}`, 10);
+      tally.textContent = `${n} samples · ${wide} from the wide branch (red), the rest keep a 1 s margin on both sides of the lead`;
+    };
+    const clear = () => { ticks.replaceChildren(); n = 0; wide = 0; tally.textContent = ""; };
+
+    $("[data-sample]").addEventListener("click", () => { const s = sample(); drop(s.d, s.fallback, true); });
+    $("[data-sample100]").addEventListener("click", () => { for (let k = 0; k < 100; k++) { const s = sample(); drop(s.d, s.fallback, false); } });
+
+    setupFigure(
+      root,
+      () => {
+        clear();
+        lines.forEach((l) => (l.style.opacity = "0"));
+        partsEls.forEach((p) => (p.style.opacity = "0"));
+        userWave.style.opacity = "0"; ret.style.opacity = "0"; eq3.style.opacity = "0";
+        arrival.style.opacity = "0"; arrivalLab.style.opacity = "0";
+      },
+      async (alive) => {
+        // Script lines appear in the order the LLM roles write them.
+        for (const l of [lines[1], lines[0], lines[2], lines[3]]) {
+          if (!alive()) return;
+          await animate(l, { opacity: [0, 1], transform: ["translateY(4px)", "translateY(0px)"] }, { duration: dur(0.35) });
+        }
+        await wait(0.2);
+        animate(userWave, { opacity: [0, 1] }, { duration: dur(0.4) });
+        for (const p of partsEls) {
+          if (!alive()) return;
+          await animate(p, { opacity: [0, 1], transform: ["translateY(-24px)", "translateY(0px)"] }, { duration: dur(0.45), ease: [0.22, 1, 0.36, 1] });
+        }
+        if (!alive()) return;
+        await animate(ret, { opacity: [0, 1], transform: ["translateY(-8px)", "translateY(0px)"] }, { duration: dur(0.35) });
+        await animate(eq3, { opacity: [0, 1] }, { duration: dur(0.4) });
+        for (let k = 0; k < 24; k++) {
+          if (!alive()) return;
+          const s = sample(); drop(s.d, s.fallback, true);
+          await wait(0.07);
+        }
+        arrival.style.opacity = "1"; arrivalLab.style.opacity = "1";
+      },
+    );
+  });
+</script>

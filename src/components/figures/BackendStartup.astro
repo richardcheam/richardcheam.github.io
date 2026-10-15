@@ -1,0 +1,45 @@
+---
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" tabindex="0" role="region" aria-label={alt} data-bs>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 52 780 158" role="img" aria-labelledby="backend-startup-title backend-startup-desc" class="blog-diagram-svg" font-family="Inter, sans-serif">
+  <title id="backend-startup-title">Startup phases and rank-specific tuning records</title><desc id="backend-startup-desc">Backend representation is prepared before graph and KV reservations. A genuine tuning cache needs 42 records for each of two expert-parallel ranks, not a copy with edited keys.</desc>
+  <line x1="24" y1="55" x2="756" y2="55" stroke="#d5d5dc" />
+  <g fill="#111111" font-size="17"><text data-phase="0" x="30" y="96">Checkpoint</text><text data-phase="1" x="223" y="96">Backend prep</text><text data-phase="2" x="506" y="96">Later: graph / KV</text></g>
+  <defs><marker id="bs-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M2 1L8 5L2 9" fill="none" stroke="#5f5f66" stroke-width="1.6" /></marker></defs>
+  <path data-step="0" d="M128 90 H211" stroke="#5f5f66" stroke-width="1.6" marker-end="url(#bs-arrow)" /><path data-step="1" d="M345 90 H494" stroke="#5f5f66" stroke-width="1.6" marker-end="url(#bs-arrow)" />
+  <rect data-rank="0" x="30" y="145" width="338" height="38" fill="#ece8f7" /><rect data-rank="1" x="412" y="145" width="338" height="38" fill="#ece8f7" />
+  <g fill="#111111" font-size="17"><text data-rank-label="0" x="47" y="170">EP rank 0 · 42 records</text><text data-rank-label="1" x="429" y="170">EP rank 1 · 42 records</text></g>
+  </svg>
+<button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+<p class="blog-figure-reading">One rank&#x27;s cache cannot certify the other rank&#x27;s tactics.</p>
+
+<script>
+  import { alongPath, animate, drawStroke, dur, hideStroke, setupFigure, wait } from "../../lib/figure-motion";
+
+  // Startup advances phase by phase; tuning records then fill per rank, each
+  // rank its own bar, so neither rank's cache stands in for the other's.
+  document.querySelectorAll<HTMLElement>("[data-bs]").forEach((root) => {
+    const q = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const phase = (k: number) => q<SVGTextElement>(`[data-phase="${k}"]`);
+    const step = (k: number) => q<SVGPathElement>(`[data-step="${k}"]`);
+    const rank = (k: number) => q<SVGRectElement>(`[data-rank="${k}"]`);
+    const label = (k: number) => q<SVGTextElement>(`[data-rank-label="${k}"]`);
+    setupFigure(root, () => {
+      [0, 1, 2].forEach((k) => (phase(k).style.opacity = "0"));
+      [0, 1].forEach((k) => { hideStroke(step(k)); step(k).removeAttribute("marker-end"); rank(k).style.transformBox = "fill-box"; rank(k).style.transformOrigin = "0% 50%"; rank(k).style.transform = "scaleX(0)"; label(k).style.opacity = "0"; });
+    }, async (alive) => {
+      for (let k = 0; k < 3; k++) {
+        if (!alive()) return;
+        await animate(phase(k), { opacity: [0, 1] }, { duration: dur(0.35) });
+        if (k < 2) { await drawStroke(step(k), 0.45, "linear"); step(k).setAttribute("marker-end", "url(#bs-arrow)"); }
+      }
+      await wait(0.2);
+      await Promise.all([0, 1].map(async (k) => {
+        await animate(rank(k), { transform: ["scaleX(0)", "scaleX(1)"] }, { duration: dur(0.9), delay: dur(k * 0.35), ease: [0.22, 1, 0.36, 1] });
+        await animate(label(k), { opacity: [0, 1] }, { duration: dur(0.3) });
+      }));
+    });
+  });
+</script>

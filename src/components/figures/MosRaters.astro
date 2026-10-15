@@ -1,0 +1,114 @@
+---
+// A simulated listening test. Two systems whose true quality differs by 0.2.
+// Every rater has a personal offset (some never give 5) plus per-clip noise,
+// and scores are rounded to the 1-5 scale. The CI is a t interval over the
+// raters' per-system averages. Removing each rater's offset tightens it.
+const { alt } = Astro.props;
+const X0 = 70, W = 440;
+---
+<div class="blog-diagram mr" role="region" aria-label={alt} data-mr data-cfg={JSON.stringify({ X0, W })}>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 330" role="img" aria-labelledby="mr-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="mr-title">MOS with confidence intervals for two systems as raters are added</title>
+    <g stroke="#ececf1">{[1, 2, 3, 4, 5].map((v) => <line x1={X0 + ((v - 1) / 4) * W} x2={X0 + ((v - 1) / 4) * W} y1="40" y2="250" />)}</g>
+    <g font-size="10" fill="#5f5f66" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">{[1, 2, 3, 4, 5].map((v) => <text x={X0 + ((v - 1) / 4) * W} y="268" text-anchor="middle">{v}</text>)}</g>
+    <text x={X0 + W / 2} y="290" font-size="10.5" text-anchor="middle" fill="#2b2b30">MOS, 1 bad … 5 excellent</text>
+    <g data-hist></g>
+    {[{ k: "a", label: "System A", y: 200, c: "#4F5D3A" }, { k: "b", label: "System B", y: 234, c: "#594578" }].map((s) => (
+      <g data-row={s.k}>
+        <text x={X0 - 10} y={s.y + 4} font-size="11" text-anchor="end" fill={s.c}>{s.label}</text>
+        <line data-ci x1="0" x2="0" y1={s.y} y2={s.y} stroke={s.c} stroke-width="2" />
+        <line data-l x1="0" x2="0" y1={s.y - 6} y2={s.y + 6} stroke={s.c} stroke-width="2" />
+        <line data-r x1="0" x2="0" y1={s.y - 6} y2={s.y + 6} stroke={s.c} stroke-width="2" />
+        <circle data-m cy={s.y} r="5" fill={s.c} />
+      </g>
+    ))}
+    <g transform="translate(560 60)">
+      <text font-size="11" letter-spacing="1" fill="#5f5f66">95% CONFIDENCE</text>
+      <text data-a y="30" font-size="13" fill="#4F5D3A" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"></text>
+      <text data-b y="54" font-size="13" fill="#594578" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"></text>
+      <text data-verdict y="94" font-size="12" font-weight="600" fill="#2b2b30"></text>
+      <text data-count y="116" font-size="10.5" fill="#5f5f66"></text>
+      <text y="150" font-size="10.5" fill="#5f5f66">true difference: B is 0.20 better</text>
+    </g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Raters (10 clips each per system)<strong data-vn></strong></span><input class="scrub" data-n type="range" min="3" max="60" step="1" value="12" style="--n: 19; --p: 15.8%" /></label>
+    <div><span class="fig-panel__name">Rater offsets</span><div class="fig-chips"><button type="button" class="fig-chip" data-z aria-pressed="false">Remove each rater's offset</button><button type="button" class="fig-chip" data-new>New raters</button></div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { setupFigure, wait } from "../../lib/figure-motion";
+  import { gauss, rng } from "../../lib/eval-math";
+
+  const NS = "http://www.w3.org/2000/svg", CLIPS = 10, TRUE = { a: 3.9, b: 4.1 };
+  // Two-sided 95% t quantiles, then the normal value for large n.
+  const tq = (df: number) => ([12.71, 4.30, 3.18, 2.78, 2.57, 2.45, 2.36, 2.31, 2.26, 2.23][df - 1] ?? (df < 30 ? 2.1 : 2.0));
+
+  document.querySelectorAll<HTMLElement>("[data-mr]").forEach((root) => {
+    const c = JSON.parse(root.dataset.cfg!);
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const nIn = $<HTMLInputElement>("[data-n]"), zBtn = $<HTMLButtonElement>("[data-z]");
+    const sx = (v: number) => c.X0 + ((v - 1) / 4) * c.W;
+    let seed = 5, pool: { off: number; a: number[]; b: number[] }[] = [];
+    function draw() {
+      const r = rng(seed);
+      pool = Array.from({ length: 60 }, () => {
+        const off = 0.55 * gauss(r);
+        const rate = (q: number) => Array.from({ length: CLIPS }, () => Math.min(5, Math.max(1, Math.round(q + off + 0.7 * gauss(r)))));
+        return { off, a: rate(TRUE.a), b: rate(TRUE.b) };
+      });
+    }
+    const mean = (xs: number[]) => xs.reduce((s, x) => s + x, 0) / xs.length;
+
+    function frame(n: number) {
+      const z = zBtn.getAttribute("aria-pressed") === "true";
+      const raters = pool.slice(0, n);
+      const grand = mean(raters.flatMap((p) => [...p.a, ...p.b]));
+      // Offset removal: shift each rater so their own average equals the grand average.
+      const per = raters.map((p) => {
+        const shift = z ? grand - mean([...p.a, ...p.b]) : 0;
+        return { a: mean(p.a) + shift, b: mean(p.b) + shift };
+      });
+      const stat = (k: "a" | "b") => {
+        const xs = per.map((p) => p[k]), m = mean(xs);
+        const sd = Math.sqrt(xs.reduce((s, x) => s + (x - m) ** 2, 0) / Math.max(1, xs.length - 1));
+        return { m, h: (tq(xs.length - 1) * sd) / Math.sqrt(xs.length) };
+      };
+      const A = stat("a"), B = stat("b");
+      ([["a", A], ["b", B]] as const).forEach(([k, s]) => {
+        const g = $(`[data-row="${k}"]`);
+        g.querySelector("[data-m]")!.setAttribute("cx", String(sx(s.m)));
+        const ci = g.querySelector("[data-ci]")!; ci.setAttribute("x1", String(sx(s.m - s.h))); ci.setAttribute("x2", String(sx(s.m + s.h)));
+        ["l", "r"].forEach((e, i) => { const t = g.querySelector(`[data-${e}]`)!; const x = sx(i ? s.m + s.h : s.m - s.h); t.setAttribute("x1", String(x)); t.setAttribute("x2", String(x)); });
+        $(`[data-${k}]`).textContent = `${k.toUpperCase()}  ${s.m.toFixed(2)} ± ${s.h.toFixed(2)}`;
+      });
+      const apart = A.m + A.h < B.m - B.h || B.m + B.h < A.m - A.h;
+      $("[data-verdict]").textContent = apart ? "Intervals separate." : "Intervals overlap: no verdict.";
+      $("[data-count]").textContent = `${n * CLIPS * 2} ratings from ${n} raters`;
+      // Rating histogram above the axis, one column per score.
+      const hist = $("[data-hist]"); hist.replaceChildren();
+      (["a", "b"] as const).forEach((k, j) => [1, 2, 3, 4, 5].forEach((v) => {
+        const cnt = raters.flatMap((p) => p[k]).filter((x) => x === v).length, h = (cnt / (n * CLIPS)) * 140;
+        const rect = document.createElementNS(NS, "rect");
+        Object.entries({ x: sx(v) - 14 + j * 14, y: 180 - h, width: 12, height: h, fill: j ? "#594578" : "#4F5D3A", "fill-opacity": 0.35 }).forEach(([a, b]) => rect.setAttribute(a, String(b)));
+        hist.append(rect);
+      }));
+      $("[data-vn]").textContent = String(n);
+      nIn.style.setProperty("--p", `${((n - 3) / 57) * 100}%`);
+    }
+    nIn.addEventListener("input", () => frame(+nIn.value));
+    zBtn.addEventListener("click", () => { zBtn.setAttribute("aria-pressed", String(zBtn.getAttribute("aria-pressed") !== "true")); frame(+nIn.value); });
+    $("[data-new]").addEventListener("click", () => { seed = (seed * 31 + 7) >>> 0; draw(); frame(+nIn.value); });
+    draw();
+    setupFigure(root, () => frame(3), async (alive) => {
+      // Recruit raters one by one up to the slider value.
+      for (let n = 3; n <= +nIn.value; n++) {
+        if (!alive()) return;
+        frame(n);
+        await wait(0.18);
+      }
+    });
+  });
+</script>

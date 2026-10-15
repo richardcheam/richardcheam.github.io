@@ -1,0 +1,115 @@
+---
+// RVQ post, Figure 2: k-means and EMA codebook updates on 2-D points from four
+// seeded blobs. Each step assigns every point to its nearest entry, then moves
+// each entry to its pile's average (k-means) or a fraction (1 - gamma) of the
+// way there (EMA, with smoothed counts and sums). "Corner" starts every entry
+// in the top-left to force dead codes.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram km" role="region" aria-label={alt} data-km>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 360" role="img" aria-labelledby="km-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="km-title">Codebook entries moving to the middle of the points they win</title>
+    <rect x="20" y="20" width="440" height="320" fill="none" stroke="#ececf1" />
+    <g data-cells></g>
+    <g data-pts></g>
+    <g data-ents></g>
+    <text x="490" y="40" font-size="11.5" font-weight="700" fill="#2b2b30">Step</text>
+    <text data-it x="490" y="66" font-size="20" font-weight="700" fill="#594578" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"></text>
+    <text data-phase x="560" y="62" font-size="12" fill="#5f5f66"></text>
+    <text x="490" y="104" font-size="11.5" font-weight="700" fill="#2b2b30">Total squared error</text>
+    <text data-err x="490" y="128" font-size="16" fill="#2b2b30" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"></text>
+    <text x="490" y="166" font-size="11.5" font-weight="700" fill="#2b2b30">Entries in use</text>
+    <text data-use x="490" y="190" font-size="16" fill="#2b2b30" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"></text>
+    <text x="490" y="228" font-size="11.5" font-weight="700" fill="#2b2b30">Perplexity (worth this many)</text>
+    <text data-ppl x="490" y="252" font-size="16" fill="#2b2b30" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"></text>
+    <text data-n1 x="490" y="296" font-size="11.5" fill="#5f5f66"></text>
+    <text data-n2 x="490" y="314" font-size="11.5" fill="#5f5f66"></text>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Run</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-step>Step slowly</button>
+      <button type="button" class="fig-chip" data-run>Run 20 steps</button>
+      <button type="button" class="fig-chip" data-reset>Reset</button>
+    </div></div>
+    <div><span class="fig-panel__name">Start entries</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-init="data" aria-pressed="true">On data points</button>
+      <button type="button" class="fig-chip" data-init="random" aria-pressed="false">Random</button>
+      <button type="button" class="fig-chip" data-init="corner" aria-pressed="false">Corner</button>
+    </div></div>
+    <div><span class="fig-panel__name">Update</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-mode="km" aria-pressed="true">k-means</button>
+      <button type="button" class="fig-chip" data-mode="ema" aria-pressed="false">EMA, γ = 0.9</button>
+    </div></div>
+    <label><span class="fig-panel__name">Entries K<strong data-vk></strong></span><input class="scrub" data-k type="range" min="2" max="8" step="1" value="4" /></label>
+    <label><span class="fig-panel__name">Points<strong data-vn></strong></span><input class="scrub" data-n type="range" min="20" max="200" step="10" value="60" /></label>
+  </div>
+</div>
+
+<script>
+  import { setupFigure, tween, wait } from "../../lib/figure-motion";
+  import { rng, gauss } from "../../lib/flow-math";
+  import { nearest, health, PALETTE, type P2 } from "../../lib/vq-math";
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-km]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const kIn = $<HTMLInputElement>("[data-k]"), nIn = $<HTMLInputElement>("[data-n]");
+    const X = (v: number) => 240 + v * 40, Y = (v: number) => 180 - v * 40;
+    const blobs: P2[] = [[-3, 2], [2.5, 2.2], [-2, -2.2], [3, -1.5]];
+    let pts: P2[] = [], ents: P2[] = [], N: number[] = [], M: P2[] = [], it = 0, init = "data", mode = "km", assign: number[] = [], phase = "";
+    const mk = (g: Element, tag: string, a: Record<string, string | number>) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, String(a[k])); g.append(e); return e; };
+    function reset() {
+      const g = gauss(3), u = rng(4), n = +nIn.value, K = +kIn.value;
+      pts = Array.from({ length: n }, (_, i) => { const b = blobs[i % 4]; return [b[0] + 0.7 * g(), b[1] + 0.6 * g()] as P2; });
+      ents = Array.from({ length: K }, (_, j) => init === "corner" ? [-5 + 0.25 * j, 3.8 - 0.2 * j] as P2 : init === "random" ? [-5 + 10 * u(), -4 + 8 * u()] as P2 : pts[Math.floor((j * n) / K + 1) % n].slice() as P2);
+      N = ents.map(() => 1); M = ents.map((e) => [e[0], e[1]] as P2);
+      it = 0; phase = ""; assign = pts.map((p) => nearest(p, ents).k);
+    }
+    function draw() {
+      const gc = $("[data-cells]"); gc.replaceChildren();
+      for (let i = 0; i < 44; i++) for (let j = 0; j < 32; j++) {
+        const p: P2 = [(20 + i * 10 + 5 - 240) / 40, (180 - (20 + j * 10 + 5)) / 40];
+        mk(gc, "rect", { x: 20 + i * 10, y: 20 + j * 10, width: 10, height: 10, fill: PALETTE[nearest(p, ents).k], "fill-opacity": 0.07 });
+      }
+      const gp = $("[data-pts]"); gp.replaceChildren();
+      pts.forEach((p, i) => mk(gp, "circle", { cx: X(p[0]), cy: Y(p[1]), r: 3.2, fill: PALETTE[assign[i]], "fill-opacity": 0.8 }));
+      const ge = $("[data-ents]"); ge.replaceChildren();
+      ents.forEach((e, j) => { mk(ge, "path", { d: `M${X(e[0])} ${Y(e[1]) - 9} l9 9 l-9 9 l-9 -9 z`, fill: PALETTE[j], stroke: "#fff", "stroke-width": 2 }); });
+      const counts = ents.map((_, j) => assign.filter((a) => a === j).length), h = health(counts);
+      const err = pts.reduce((s, p, i) => s + (p[0] - ents[assign[i]][0]) ** 2 + (p[1] - ents[assign[i]][1]) ** 2, 0);
+      $("[data-it]").textContent = String(it); $("[data-phase]").textContent = phase;
+      $("[data-err]").textContent = err.toFixed(1);
+      $("[data-use]").textContent = `${h.used} of ${ents.length}`;
+      $("[data-ppl]").textContent = h.ppl.toFixed(2);
+      $("[data-n1]").textContent = h.used < ents.length ? "A diamond with no points never moves:" : "Diamonds are entries; dots take the colour";
+      $("[data-n2]").textContent = h.used < ents.length ? "a dead code." : "of the entry they chose.";
+      [kIn, nIn].forEach((i) => i.style.setProperty("--p", `${((+i.value - +i.min) / (+i.max - +i.min)) * 100}%`));
+      $("[data-vk]").textContent = kIn.value; $("[data-vn]").textContent = nIn.value;
+    }
+    async function step(slow: boolean, alive = () => true) {
+      phase = "1. assign"; assign = pts.map((p) => nearest(p, ents).k); draw();
+      if (slow) await wait(0.7);
+      if (!alive()) return;
+      phase = "2. update";
+      const from = ents.map((e) => [e[0], e[1]] as P2), to = ents.map((e, j) => {
+        const pile = pts.filter((_, i) => assign[i] === j), n = pile.length;
+        const s: P2 = pile.reduce((a, p) => [a[0] + p[0], a[1] + p[1]] as P2, [0, 0] as P2);
+        if (mode === "km") return n ? [s[0] / n, s[1] / n] as P2 : e;
+        N[j] = 0.9 * N[j] + 0.1 * n; M[j] = [0.9 * M[j][0] + 0.1 * s[0], 0.9 * M[j][1] + 0.1 * s[1]];
+        return [M[j][0] / N[j], M[j][1] / N[j]] as P2;
+      });
+      await tween(slow ? 0.8 : 0.12, (e) => { if (!alive()) return; ents = from.map((f, j) => [f[0] + (to[j][0] - f[0]) * e, f[1] + (to[j][1] - f[1]) * e] as P2); draw(); });
+      ents = to; it++; phase = ""; assign = pts.map((p) => nearest(p, ents).k); draw();
+    }
+    let token = 0;
+    $("[data-step]").addEventListener("click", () => { const my = ++token; step(true, () => my === token); });
+    $("[data-run]").addEventListener("click", async () => { const my = ++token; for (let i = 0; i < 20; i++) { if (my !== token) return; await step(false, () => my === token); } });
+    $("[data-reset]").addEventListener("click", () => { token++; reset(); draw(); });
+    const chips = (attr: string, set: (v: string) => void) => root.querySelectorAll<HTMLButtonElement>(`[data-${attr}]`).forEach((b) => b.addEventListener("click", () => {
+      set(b.getAttribute(`data-${attr}`)!); root.querySelectorAll(`[data-${attr}]`).forEach((o) => o.setAttribute("aria-pressed", String(o === b))); token++; reset(); draw();
+    }));
+    chips("init", (v) => (init = v)); chips("mode", (v) => (mode = v));
+    [kIn, nIn].forEach((i) => i.addEventListener("input", () => { token++; reset(); draw(); }));
+    reset(); draw();
+    setupFigure(root, () => { reset(); draw(); }, async (alive) => { for (let i = 0; i < 4; i++) { if (!alive()) return; await step(i < 2, alive); } });
+  });
+</script>

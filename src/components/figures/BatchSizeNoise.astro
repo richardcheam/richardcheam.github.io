@@ -1,0 +1,60 @@
+---
+// Foundations, normalisation post: 10,000 seeded values (mean 5.043, std
+// 2.012) split into batches of 2 or 32. Batch size 2: first ten means 6.84,
+// 6.59, 2.90, 1.83, 5.21, ... and one batch with std 0.01. Batch size 32:
+// first ten means between 4.77 and 5.73. Spread of 200 batch means: 1.518
+// against 0.375. Data in src/data/foundations/batch-size-noise.json.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-bsn>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 260" role="img" aria-labelledby="bsn-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="bsn-title">A dataset with batches drawn from it; each batch mean drops a tick, scattering widely for small batches</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Batch size</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-b="2" aria-pressed="true">2</button>
+      <button type="button" class="fig-chip" data-b="32" aria-pressed="false">32</button>
+    </div></div>
+    <div><span class="fig-panel__name">Draw</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-one>Draw one batch</button>
+      <button type="button" class="fig-chip" data-fifty>Draw 50</button>
+      <button type="button" class="fig-chip" data-reset>Start over</button>
+    </div></div>
+  </div>
+</div>
+
+<script>
+  import { fmt } from "../../lib/tiny-net";
+  import { INK, MUTED, JADE, NEG, GOLD } from "../../lib/net-diagram";
+  import { frame, txt } from "../../lib/plot";
+  import D from "../../data/foundations/batch-size-noise.json";
+  document.querySelectorAll<HTMLElement>("[data-bsn]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    let B: "2" | "32" = "2", n = 0;
+    function draw() {
+      const F = frame({ l: 40, t: 40, w: 680, h: 120, x0: -3, x1: 13, y0: 0, y1: Math.max(...D.hist) });
+      let s = txt(40, 22, `10,000 values (true mean ${fmt(D.popMean, 2)}, standard deviation ${fmt(D.popStd, 2)}); batches of ${B}`, `font-size="12" font-weight="700" fill="${INK}"`);
+      const bw = 680 / D.hist.length;
+      D.hist.forEach((c, i) => (s += `<rect x="${40 + i * bw}" y="${F.Y(c)}" width="${bw - 1}" height="${160 - F.Y(c)}" fill="${JADE}" fill-opacity="0.22"/>`));
+      for (let v = -2; v <= 12; v += 2) s += txt(F.X(v), 176, String(v), `font-size="10.5" text-anchor="middle" fill="${MUTED}"`);
+      s += `<line x1="${F.X(D.popMean)}" x2="${F.X(D.popMean)}" y1="36" y2="160" stroke="${INK}" stroke-dasharray="4 3"/>`;
+      const d = D[B];
+      // The current batch's points, and a tick for every batch mean so far.
+      if (n) d.values[n - 1].forEach((v) => (s += `<circle cx="${F.X(v)}" cy="150" r="3.5" fill="${GOLD}"/>`));
+      for (let i = 0; i < n; i++) s += `<line x1="${F.X(d.means[i])}" x2="${F.X(d.means[i])}" y1="188" y2="206" stroke="${i === n - 1 ? NEG : INK}" stroke-opacity="${i === n - 1 ? 1 : 0.35}" stroke-width="${i === n - 1 ? 3 : 1.5}"/>`;
+      s += txt(40, 200, "batch means:", `font-size="10.5" fill="${MUTED}"`);
+      if (n) {
+        const m = d.means[n - 1], sd = d.stds[n - 1], ms = d.means.slice(0, n), lo = Math.min(...ms), hi = Math.max(...ms);
+        s += txt(40, 230, `Batch ${n}: mean ${fmt(m, 2)}, standard deviation ${fmt(sd, 2)}${sd < 0.05 ? " (normalising would blow these values up by about " + fmt(1 / sd, 0) + " times)" : ""}`, `font-size="12" font-weight="700" fill="${sd < 0.05 ? NEG : INK}"`);
+        s += txt(40, 250, `${n} batch${n === 1 ? "" : "es"} so far: means from ${fmt(lo, 2)} to ${fmt(hi, 2)}${n >= 50 ? `; over all 200 batches the means spread by ${fmt(d.spread, 3)}` : ""}`, `font-size="11.5" fill="${MUTED}"`);
+      } else s += txt(40, 230, "Press Draw one batch: each batch mean is a guess at the true mean (dashed line).", `font-size="12" fill="${MUTED}"`);
+      $("[data-draw]").innerHTML = s;
+    }
+    $("[data-one]").addEventListener("click", () => { n = Math.min(200, n + 1); draw(); });
+    $("[data-fifty]").addEventListener("click", () => { n = Math.min(200, n + 50); draw(); });
+    $("[data-reset]").addEventListener("click", () => { n = 0; draw(); });
+    root.querySelectorAll<HTMLButtonElement>("[data-b]").forEach((b) => b.addEventListener("click", () => { B = b.dataset.b as "2" | "32"; n = 0; root.querySelectorAll("[data-b]").forEach((o) => o.setAttribute("aria-pressed", String(o === b))); draw(); }));
+    draw();
+  });
+</script>

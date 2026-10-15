@@ -1,0 +1,74 @@
+---
+// Foundations, neurons post: two linear layers collapse into one; a ReLU
+// between them adds a corner. Defaults a = 2, b = 1, c = 3, d = −1: the
+// stack is 6x + 2 (x = 1 gives 8); with ReLU, x = −1 gives −1 instead of −4.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-collapse>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 320" role="img" aria-labelledby="lc-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="lc-title">Two stacked layers without an activation equal one layer; with ReLU between them the line bends</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Layer A: × a <strong data-v="a"></strong></span><input class="scrub" data-k="a" type="range" min="-3" max="3" step="0.5" value="2" /></label>
+    <label><span class="fig-panel__name">Layer A: + b <strong data-v="b"></strong></span><input class="scrub" data-k="b" type="range" min="-3" max="3" step="0.5" value="1" /></label>
+    <label><span class="fig-panel__name">Layer B: × c <strong data-v="c"></strong></span><input class="scrub" data-k="c" type="range" min="-3" max="3" step="0.5" value="3" /></label>
+    <label><span class="fig-panel__name">Layer B: + d <strong data-v="d"></strong></span><input class="scrub" data-k="d" type="range" min="-3" max="3" step="0.5" value="-1" /></label>
+    <label><span class="fig-panel__name">Input x <strong data-v="x"></strong></span><input class="scrub" data-k="x" type="range" min="-3" max="3" step="0.5" value="1" /></label>
+    <div><span class="fig-panel__name">Between the layers</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-relu="0" aria-pressed="true">Nothing</button>
+      <button type="button" class="fig-chip" data-relu="1" aria-pressed="false">ReLU</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt, par } from "../../lib/tiny-net";
+  import { INK, MUTED, JADE, NEG, GOLD, TINT } from "../../lib/net-diagram";
+  document.querySelectorAll<HTMLElement>("[data-collapse]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const p: Record<string, number> = { a: 2, b: 1, c: 3, d: -1, x: 1 };
+    let relu = false, overlay = false;
+    const set = (k: string, v: number) => { p[k] = v; $<HTMLInputElement>(`[data-k="${k}"]`).value = String(v); };
+    const setRelu = (on: boolean) => { relu = on; root.querySelectorAll("[data-relu]").forEach((o) => o.setAttribute("aria-pressed", String((o as HTMLElement).dataset.relu === (on ? "1" : "0")))); };
+    const f = (x: number, r = relu) => { const pre = p.a * x + p.b, u = r ? Math.max(0, pre) : pre; return { pre, u, y: p.c * u + p.d }; };
+    const steps = () => {
+      const v = f(p.x), sl = p.c * p.a, ic = p.c * p.b + p.d;
+      return [
+        { say: "Layer A multiplies the input by a and adds b. There is no activation yet.", math: `u = ${fmt(p.a)} × ${par(p.x)} + ${par(p.b)} = ${fmt(v.pre)}`, enter: () => { setRelu(false); overlay = false; } },
+        { say: "Layer B multiplies u by c and adds d.", math: `y = ${fmt(p.c)} × ${par(v.u)} + ${par(p.d)} = ${fmt(v.y)}`, enter: () => { setRelu(false); overlay = false; } },
+        { say: "Expand the two layers into one formula: it is again just one multiply and one add. The single layer's line (dashed) sits exactly on the two-layer line.", math: `y = c × (a x + b) + d = (${fmt(p.c)} × ${par(p.a)}) x + (${fmt(p.c)} × ${par(p.b)} + ${par(p.d)}) = ${fmt(sl)}x + ${par(ic)}`, enter: () => { setRelu(false); overlay = true; } },
+        { say: "Put a ReLU between the layers and move x to −1. Layer A's output is negative, ReLU turns it into 0, and the line bends: no single layer can make this corner.", math: `u = ReLU(${fmt(p.a)} × (−1) + ${par(p.b)}) = ReLU(${fmt(p.a * -1 + p.b)}) = ${fmt(Math.max(0, -p.a + p.b))}\ny = ${fmt(p.c)} × ${fmt(Math.max(0, -p.a + p.b))} + ${par(p.d)} = ${fmt(f(-1, true).y)}, while the single layer gives ${fmt(sl * -1 + ic)}`, enter: () => { setRelu(true); overlay = true; set("x", -1); } },
+      ];
+    };
+    const X = (v: number) => 420 + ((v + 3) / 6) * 300;
+    function draw() {
+      const v = f(p.x), sl = p.c * p.a, ic = p.c * p.b + p.d;
+      const ys = Array.from({ length: 61 }, (_, i) => f(-3 + i * 0.1).y);
+      const lo = Math.min(-2, ...ys, sl * -3 + ic, sl * 3 + ic), hi = Math.max(2, ...ys, sl * -3 + ic, sl * 3 + ic);
+      const Y = (u: number) => 290 - ((u - lo) / (hi - lo)) * 250;
+      // Boxes: x → A → (ReLU) → B → y.
+      const box = (y: number, title: string, body: string, on: boolean) => `<rect x="40" y="${y}" width="250" height="56" rx="8" fill="${on ? TINT : "#fff"}" stroke="${on ? JADE : INK}" stroke-width="${on ? 2.5 : 1.3}"/><text x="56" y="${y + 22}" font-size="11.5" fill="${MUTED}">${title}</text><text x="56" y="${y + 44}" font-size="14" font-weight="700" fill="${INK}">${body}</text>`;
+      let s = `<text x="40" y="34" font-size="12.5" fill="${INK}">x = <tspan font-weight="700">${fmt(p.x)}</tspan></text>`;
+      s += box(48, "Layer A: × a, + b", `u = ${fmt(p.a)}x + ${par(p.b)} = ${fmt(v.pre)}`, false);
+      s += `<rect x="40" y="118" width="250" height="36" rx="8" fill="${relu ? "#FBF3E0" : "#f6f7f7"}" stroke="${relu ? GOLD : "#d5d9d8"}" stroke-dasharray="${relu ? "" : "4 3"}"/><text x="165" y="141" font-size="12.5" font-weight="${relu ? 700 : 400}" text-anchor="middle" fill="${relu ? INK : MUTED}">${relu ? `ReLU: ${fmt(v.pre)} → ${fmt(v.u)}` : "nothing in between"}</text>`;
+      s += box(166, "Layer B: × c, + d", `y = ${fmt(p.c)} × ${par(v.u)} + ${par(p.d)} = ${fmt(v.y)}`, false);
+      if (overlay) s += `<text x="40" y="256" font-size="12" fill="${MUTED}">One layer would be:</text><text x="40" y="276" font-size="14" font-weight="700" fill="${relu ? NEG : JADE}">y = ${fmt(sl)}x + ${par(ic)}${relu ? `  (gives ${fmt(sl * p.x + ic)} here)` : ""}</text>`;
+      // Plot.
+      s += `<line x1="${X(-3)}" x2="${X(3)}" y1="${Y(0)}" y2="${Y(0)}" stroke="#cfd5d4"/><line x1="${X(0)}" x2="${X(0)}" y1="40" y2="290" stroke="#cfd5d4"/>`;
+      for (let u = -3; u <= 3; u++) s += `<text x="${X(u)}" y="306" font-size="10.5" text-anchor="middle" fill="${MUTED}">${fmt(u)}</text>`;
+      s += `<text x="${X(3)}" y="30" font-size="11" text-anchor="end" fill="${MUTED}">output y against input x</text>`;
+      s += `<polyline fill="none" stroke="${JADE}" stroke-width="3" points="${ys.map((u, i) => `${X(-3 + i * 0.1).toFixed(1)},${Y(u).toFixed(1)}`).join(" ")}"/>`;
+      if (overlay) s += `<line x1="${X(-3)}" y1="${Y(sl * -3 + ic)}" x2="${X(3)}" y2="${Y(sl * 3 + ic)}" stroke="${relu ? NEG : INK}" stroke-width="1.6" stroke-dasharray="6 4"/>`;
+      if (relu && p.a !== 0) { const cx = -p.b / p.a; if (cx > -3 && cx < 3) s += `<circle cx="${X(cx)}" cy="${Y(f(cx).y)}" r="5" fill="none" stroke="${GOLD}" stroke-width="2"/><text x="${X(cx) + 8}" y="${Y(f(cx).y) + 16}" font-size="11" fill="${GOLD}" font-weight="700">corner at x = ${fmt(cx)}</text>`; }
+      s += `<circle cx="${X(p.x)}" cy="${Y(v.y)}" r="6" fill="${INK}" stroke="#fff" stroke-width="2"/>`;
+      $("[data-draw]").innerHTML = s;
+      root.querySelectorAll<HTMLElement>("[data-v]").forEach((el) => (el.textContent = fmt(p[el.dataset.v!])));
+    }
+    const redraw = stepper(root, steps, draw, { delay: 2.4 });
+    root.querySelectorAll<HTMLInputElement>("[data-k]").forEach((inp) => inp.addEventListener("input", () => { p[inp.dataset.k!] = +inp.value; redraw(); }));
+    root.querySelectorAll<HTMLButtonElement>("[data-relu]").forEach((b) => b.addEventListener("click", () => { setRelu(b.dataset.relu === "1"); redraw(); }));
+  });
+</script>

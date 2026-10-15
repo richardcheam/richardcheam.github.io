@@ -1,0 +1,69 @@
+---
+// Foundations, embeddings post: dot product and cosine similarity of two
+// draggable 2-D arrows. A = (3, 4), B = (4, 3): dot 24, lengths 5 and 5,
+// cosine 0.96, angle 16.3°. A = (6, 8): dot 48, cosine 0.96.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-cosine>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 320" role="img" aria-labelledby="cd2-title" class="blog-diagram-svg" font-family="Inter, sans-serif" style="touch-action: none">
+    <title id="cd2-title">Two arrows from the origin with their dot product, lengths, cosine and angle</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Presets</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-pre="3,4,4,3">Start: (3, 4) and (4, 3)</button>
+      <button type="button" class="fig-chip" data-pre="6,8,4,3">A twice as long</button>
+      <button type="button" class="fig-chip" data-pre="3,4,-4,3">Right angle</button>
+      <button type="button" class="fig-chip" data-pre="3,4,-3,-4">Opposite</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt, par } from "../../lib/tiny-net";
+  import { INK, MUTED, JADE, NEG, GOLD } from "../../lib/net-diagram";
+  import { frame, txt, arrow } from "../../lib/plot";
+  const BX = { l: 30, t: 20, w: 280, h: 280, x0: -6, x1: 10, y0: -6, y1: 10 };
+  document.querySelectorAll<HTMLElement>("[data-cosine]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    let A = [3, 4], B = [4, 3];
+    const calc = () => { const d = A[0] * B[0] + A[1] * B[1], la = Math.hypot(...A), lb = Math.hypot(...B), c = la && lb ? d / (la * lb) : NaN; return { d, la, lb, c, ang: (Math.acos(Math.max(-1, Math.min(1, c))) * 180) / Math.PI }; };
+    const steps = () => {
+      const c = calc();
+      return [
+        { say: "Dot product: multiply the two arrows slot by slot and add.", math: `a · b = ${par(A[0])} × ${par(B[0])} + ${par(A[1])} × ${par(B[1])} = ${fmt(c.d, 3)}` },
+        { say: "Length of each arrow: Pythagoras.", math: `|a| = √(${par(A[0])}² + ${par(A[1])}²) = ${fmt(c.la, 3)},   |b| = √(${par(B[0])}² + ${par(B[1])}²) = ${fmt(c.lb, 3)}` },
+        { say: "Divide the dot product by both lengths. Length cancels out; only direction is left.", math: Number.isNaN(c.c) ? "undefined: one arrow has zero length" : `cos = ${fmt(c.d, 3)} / (${fmt(c.la, 3)} × ${fmt(c.lb, 3)}) = ${fmt(c.c, 3)}` },
+        { say: "The cosine is the cosine of the angle between the arrows: 1 for the same direction, 0 for a right angle, −1 for opposite.", math: Number.isNaN(c.c) ? "no angle" : `angle = ${fmt(c.ang, 1)}°` },
+      ];
+    };
+    function draw(k: number) {
+      const F = frame(BX), c = calc();
+      let s = F.grid([-4, 0, 4, 8], [-4, 0, 4, 8], 0);
+      const col = Number.isNaN(c.c) ? MUTED : c.c > 0.3 ? JADE : c.c < -0.3 ? NEG : MUTED;
+      if (k >= 3 && !Number.isNaN(c.c)) {
+        const a1 = Math.atan2(A[1], A[0]), a2 = Math.atan2(B[1], B[0]), R = 40;
+        let d = a2 - a1; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI;
+        const ex = F.X(0) + R * Math.cos(a1 + d), ey = F.Y(0) - R * Math.sin(a1 + d);
+        s += `<path d="M${F.X(0) + R * Math.cos(a1)} ${F.Y(0) - R * Math.sin(a1)} A${R} ${R} 0 0 ${d > 0 ? 0 : 1} ${ex} ${ey}" fill="none" stroke="${col}" stroke-width="3"/>`;
+      }
+      s += arrow(F.X(0), F.Y(0), F.X(A[0]), F.Y(A[1]), "#3E6E9E", 3) + arrow(F.X(0), F.Y(0), F.X(B[0]), F.Y(B[1]), GOLD, 3);
+      s += `<circle data-h="A" cx="${F.X(A[0])}" cy="${F.Y(A[1])}" r="10" fill="#3E6E9E" fill-opacity="0.25" style="cursor: grab"/><circle data-h="B" cx="${F.X(B[0])}" cy="${F.Y(B[1])}" r="10" fill="${GOLD}" fill-opacity="0.25" style="cursor: grab"/>`;
+      s += txt(F.X(A[0]) + 12, F.Y(A[1]) - 6, `a (${fmt(A[0])}, ${fmt(A[1])})`, `font-size="12" font-weight="700" fill="#3E6E9E"`) + txt(F.X(B[0]) + 12, F.Y(B[1]) + 14, `b (${fmt(B[0])}, ${fmt(B[1])})`, `font-size="12" font-weight="700" fill="${GOLD}"`);
+      const rows: [string, string, boolean][] = [["dot product a · b", fmt(c.d, 3), k >= 0], ["length |a|", fmt(c.la, 3), k >= 1], ["length |b|", fmt(c.lb, 3), k >= 1], ["cosine", Number.isNaN(c.c) ? "undefined" : fmt(c.c, 3), k >= 2], ["angle", Number.isNaN(c.c) ? "none" : `${fmt(c.ang, 1)}°`, k >= 3]];
+      rows.forEach(([n, v, on], i) => (s += txt(370, 60 + i * 34, n, `font-size="12.5" fill="${MUTED}"`) + txt(560, 60 + i * 34, on ? v : "…", `font-size="15" font-weight="700" fill="${i === 3 && on ? col : INK}"`)));
+      s += txt(370, 248, "Drag either arrow tip. Stretching an arrow along its", `font-size="11.5" fill="${MUTED}"`) + txt(370, 266, "own direction changes the dot product, not the cosine.", `font-size="11.5" fill="${MUTED}"`);
+      $("[data-draw]").innerHTML = s;
+    }
+    const redraw = stepper(root, steps, draw, { delay: 1.6 });
+    const svg = root.querySelector("svg")!;
+    let drag: "A" | "B" | null = null;
+    const toData = (e: PointerEvent) => { const r = svg.getBoundingClientRect(), px = ((e.clientX - r.left) / r.width) * 760, py = ((e.clientY - r.top) / r.height) * 320; return [Math.round((BX.x0 + ((px - BX.l) / BX.w) * 16) * 2) / 2, Math.round((BX.y1 - ((py - BX.t) / BX.h) * 16) * 2) / 2]; };
+    svg.addEventListener("pointerdown", (e) => { const h = (e.target as Element).getAttribute("data-h"); if (h) { drag = h as "A" | "B"; svg.setPointerCapture(e.pointerId); } });
+    svg.addEventListener("pointermove", (e) => { if (!drag) return; const [x, y] = toData(e); const p = [Math.max(-6, Math.min(10, x)), Math.max(-6, Math.min(10, y))]; if (drag === "A") A = p; else B = p; redraw(); });
+    svg.addEventListener("pointerup", () => (drag = null));
+    root.querySelectorAll<HTMLButtonElement>("[data-pre]").forEach((b) => b.addEventListener("click", () => { const v = b.dataset.pre!.split(",").map(Number); A = v.slice(0, 2); B = v.slice(2); redraw(); }));
+  });
+</script>

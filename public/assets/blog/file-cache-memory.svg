@@ -1,0 +1,4 @@
+---
+layout: null
+---
+{% include blog-figures/file-cache-memory.html standalone=true %}

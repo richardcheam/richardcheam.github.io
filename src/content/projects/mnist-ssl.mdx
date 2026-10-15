@@ -1,0 +1,28 @@
+---
+title: "SSL and Semi-supervised Learning on MNIST"
+area: "Computer Vision"
+date: "December 2024"
+order: 6
+headline: "With only 100 labelled images out of 60,000, self-supervised SimCLR features and a linear classifier reached 98.55% accuracy."
+question: "With only 100 of 60,000 MNIST images labelled, how close can a classifier get, and which way of using the unlabelled images works best?"
+approach: "Pseudo-labelling a CNN against SimCLR self-supervised pretraining with a small classifier on top, under the same splits, seeds and evaluation."
+stack: "PyTorch · CNN · SimCLR"
+links:
+  - { label: "GitHub", url: "https://github.com/richardcheam" }
+numbers:
+  - { value: "98.55%", label: "SimCLR features + linear classifier" }
+  - { value: "98.44%", label: "SimCLR features + small MLP head" }
+  - { value: "97.18%", label: "CNN with pseudo-labelling" }
+---
+
+## What I did
+
+Two approaches, compared under the same splits, seeds and evaluation:
+
+- **Semi-supervised:** train a CNN on the 100 labels, let it label the rest (pseudo-labelling), keep its confident guesses, and retrain, refreshing the labels as it improves.
+- **Self-supervised:** pretrain with SimCLR, which learns features by making two augmented views of the same image agree, using no labels at all. Then train only a small classifier on top with the 100 labels.
+
+## What I found
+
+- **Self-supervised features won.** A plain linear classifier on SimCLR features reached 98.55%, above pseudo-labelling at 97.18%. A small MLP head on the same features gave 98.44%, so extra capacity on top did not help.
+- **The remaining errors are mostly genuinely ambiguous digits**, found by inspecting low-confidence predictions.

@@ -1,0 +1,78 @@
+---
+// RVQ post, Figure 6: l2-normalized lookup (as in DAC). Points and four
+// entries slide along rays onto the unit circle. The far entry (0, 10) wins
+// nothing by ruler distance but owns a whole arc by direction. For unit
+// vectors, squared distance = 2 - 2 u.v.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram cc" role="region" aria-label={alt} data-cc>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 380" role="img" aria-labelledby="cc-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="cc-title">Normalizing points and entries onto a circle so that nearest means most similar direction</title>
+    <rect x="20" y="10" width="360" height="360" fill="none" stroke="#ececf1" />
+    <circle data-ring cx="200" cy="190" r="110" fill="none" stroke="#d5d5dc" stroke-dasharray="4 3" />
+    <g data-pts></g>
+    <g data-ents></g>
+    <text data-mode x="410" y="34" font-size="13" font-weight="700" fill="#594578"></text>
+    <text x="410" y="66" font-size="11.5" font-weight="700" fill="#2b2b30">Points won by each entry</text>
+    <g data-use></g>
+    <text x="410" y="222" font-size="11.5" font-weight="700" fill="#2b2b30">The outlined point z = (3, 4) against entry 4</text>
+    <text data-r1 x="410" y="246" font-size="12" fill="#2b2b30"></text>
+    <text data-r2 x="410" y="268" font-size="12" fill="#2b2b30"></text>
+    <text data-r3 x="410" y="290" font-size="12" fill="#2b2b30"></text>
+    <text data-r4 x="410" y="330" font-size="11.5" fill="#5f5f66"></text>
+    <text data-r5 x="410" y="348" font-size="11.5" fill="#5f5f66"></text>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Lookup</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-norm="0" aria-pressed="true">By ruler distance</button>
+      <button type="button" class="fig-chip" data-norm="1" aria-pressed="false">By direction (normalized)</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { setupFigure, tween, wait } from "../../lib/figure-motion";
+  import { gauss } from "../../lib/flow-math";
+  import { PALETTE, type P2 } from "../../lib/vq-math";
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-cc]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const mk = (g: Element, tag: string, a: Record<string, string | number>, txt?: string) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, String(a[k])); if (txt !== undefined) e.textContent = txt; g.append(e); return e; };
+    const g = gauss(8), U = 16, R = 110 / U;
+    const cl: [P2, number][] = [[[3.4, 3.6], 0.6], [[-4, 1], 0.6], [[1.2, -3.2], 0.6], [[0.3, 1.8], 0.35]];
+    const pts: P2[] = [[3, 4]];
+    cl.forEach(([c, s]) => { for (let i = 0; i < 12; i++) pts.push([c[0] + s * g(), c[1] + s * g()]); });
+    const ents: P2[] = [[4, 4.5], [-4.5, 1], [1.5, -3.5], [0, 10]];
+    const unit = (p: P2): P2 => { const n = Math.hypot(p[0], p[1]); return [p[0] / n, p[1] / n]; };
+    // Position at morph m: from the raw point to the same direction at radius R.
+    const at = (p: P2, m: number): P2 => { const u = unit(p); return [p[0] + (u[0] * R - p[0]) * m, p[1] + (u[1] * R - p[1]) * m]; };
+    const win = (p: P2, norm: boolean) => { let k = 0, d = Infinity; ents.forEach((e, j) => { const a = norm ? unit(p) : p, b = norm ? unit(e) : e, q = (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2; if (q < d) { d = q; k = j; } }); return k; };
+    let m = 0;
+    function draw() {
+      const norm = m > 0.5, X = (v: number) => 200 + v * U, Y = (v: number) => 190 - v * U;
+      $<SVGElement>("[data-ring]").style.opacity = String(m);
+      const gp = $("[data-pts]"); gp.replaceChildren();
+      pts.forEach((p, i) => { const q = at(p, m); mk(gp, "circle", { cx: X(q[0]), cy: Y(q[1]), r: i === 0 ? 5 : 3.2, fill: PALETTE[win(p, norm)], "fill-opacity": 0.85, stroke: i === 0 ? "#2b2b30" : "none", "stroke-width": 2 }); });
+      const ge = $("[data-ents]"); ge.replaceChildren();
+      ents.forEach((e, j) => { const q = at(e, m); mk(ge, "path", { d: `M${X(q[0])} ${Y(q[1]) - 9} l9 9 l-9 9 l-9 -9 z`, fill: PALETTE[j], stroke: "#fff", "stroke-width": 2 }); mk(ge, "text", { x: X(q[0]) + 12, y: Y(q[1]) + 4, "font-size": 10.5, "font-weight": 700, fill: PALETTE[j] }, String(j + 1)); });
+      const gu = $("[data-use]"); gu.replaceChildren();
+      ents.forEach((_, j) => {
+        const n = pts.filter((p) => win(p, norm) === j).length, y = 84 + j * 28;
+        mk(gu, "text", { x: 410, y: y + 13, "font-size": 11, "font-weight": 700, fill: PALETTE[j] }, `entry ${j + 1}`);
+        mk(gu, "rect", { x: 470, y, width: Math.max(1, n * 11), height: 18, fill: PALETTE[j], "fill-opacity": 0.85 });
+        mk(gu, "text", { x: 476 + n * 11, y: y + 13, "font-size": 11, fill: "#2b2b30", "font-weight": n === 0 ? 700 : 400 }, n === 0 ? "0: dead" : String(n));
+      });
+      $("[data-mode]").textContent = norm ? "By direction: everything on one circle" : "By ruler distance";
+      $("[data-r1]").textContent = "Ruler: (3 − 0)² + (4 − 10)² = 9 + 36 = 45";
+      $("[data-r2]").textContent = "Normalized: u = (0.6, 0.8), v = (0, 1), u · v = 0.8";
+      $("[data-r3]").textContent = "Squared distance on the circle: 2 − 2 × 0.8 = 0.40";
+      $("[data-r4]").textContent = norm ? "Entry 4 now owns the points that point its way." : "Entry 4 is far out, so no point is closest to it.";
+      $("[data-r5]").textContent = norm ? "No far corners left for an entry to hide in." : "Switch to “by direction” to see it come alive.";
+    }
+    async function go(to: number) { const from = m; root.querySelectorAll("[data-norm]").forEach((b) => b.setAttribute("aria-pressed", String(+b.getAttribute("data-norm")! === to))); await tween(1.2, (e) => { m = from + (to - from) * e; draw(); }); }
+    root.querySelectorAll<HTMLButtonElement>("[data-norm]").forEach((b) => b.addEventListener("click", () => go(+b.dataset.norm!)));
+    draw();
+    setupFigure(root, () => { m = 0; draw(); }, async (alive) => { await wait(1.2); if (alive()) await go(1); });
+  });
+</script>

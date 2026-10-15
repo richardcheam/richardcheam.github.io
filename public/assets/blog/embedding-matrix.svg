@@ -1,0 +1,4 @@
+---
+layout: null
+---
+{% include blog-figures/embedding-matrix.html standalone=true %}

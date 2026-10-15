@@ -1,0 +1,66 @@
+---
+// Foundations, convolutions post: how many inputs one top output depends on.
+// k = 3: stride 1 gives 3, 5, 7; stride 2 gives 3, 7, 15; dilation 1, 2, 4
+// at stride 1 also gives 3, 7, 15 with every layer at full length.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-rfield>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 250" role="img" aria-labelledby="rf-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="rf-title">A stack of layers with the inputs one top output depends on lit up</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Layers</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-m="s1" aria-pressed="true">Stride 1</button>
+      <button type="button" class="fig-chip" data-m="s2" aria-pressed="false">Stride 2</button>
+      <button type="button" class="fig-chip" data-m="dil" aria-pressed="false">Dilation 1, 2, 4</button>
+    </div></div>
+    <label><span class="fig-panel__name">Kernel size k <strong data-vk></strong></span><input class="scrub" data-k type="range" min="2" max="5" step="1" value="3" /></label>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { INK, MUTED, GOLD, TINT, JADE } from "../../lib/net-diagram";
+  import { txt } from "../../lib/plot";
+  import { receptive } from "../../lib/conv";
+  const L = 32;
+  document.querySelectorAll<HTMLElement>("[data-rfield]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    let mode = "s1", k = 3;
+    const layers = () => [0, 1, 2].map((i) => ({ k, s: mode === "s2" ? 2 : 1, d: mode === "dil" ? 2 ** i : 1 }));
+    const steps = () => {
+      const ls = layers(), rf = receptive(ls);
+      let r = 1, J = 1;
+      return ls.map((l, i) => { const prev = { r, J }; r = rf[i].r; J = rf[i].J; return { say: i === 0 ? "One output of layer 1 reads k neighbouring inputs." : `Layer ${i + 1}: each of its outputs reads ${k} outputs of layer ${i}, and those are ${prev.J * l.d} input${prev.J * l.d === 1 ? "" : "s"} apart.`, math: `r${i + 1} = ${prev.r} + ${l.d > 1 ? `${l.d} × ` : ""}(${k} − 1) × ${prev.J} = ${r}${l.s > 1 ? `,   jump = ${prev.J} × ${l.s} = ${J}` : ""}` }; });
+    };
+    // Positions at each level that output 0 of layer `top` depends on.
+    function deps(top: number) {
+      const ls = layers(), lens = [L]; ls.forEach((l, i) => lens.push(Math.floor((lens[i] - l.d * (l.k - 1) - 1) / l.s) + 1));
+      const sets: Set<number>[] = Array.from({ length: 4 }, () => new Set<number>());
+      sets[top].add(0);
+      for (let i = top - 1; i >= 0; i--) { const l = ls[i]; sets[i + 1].forEach((p) => { for (let j = 0; j < l.k; j++) sets[i].add(p * l.s + j * l.d); }); }
+      return { sets, lens };
+    }
+    function draw(kk: number) {
+      const top = Math.max(1, Math.min(3, kk + 1)), { sets, lens } = deps(top), cw = 680 / L;
+      let s = "";
+      [3, 2, 1, 0].forEach((lvl, row) => {
+        const y = 30 + row * 50, len = lens[lvl], live = kk >= 0 && lvl <= top;
+        s += txt(30, y + 18, lvl ? `layer ${lvl}` : "input", `font-size="11" fill="${live || lvl === 0 ? MUTED : "#C9CFCE"}"`);
+        for (let i = 0; i < len; i++) {
+          const pos = mode === "s2" ? i * 2 ** lvl : i, on = live && sets[lvl].has(i);
+          s += `<rect x="${80 + pos * cw}" y="${y}" width="${Math.max(3, cw - 2)}" height="26" rx="2" fill="${on ? (lvl ? TINT : GOLD) : "#fafafa"}" stroke="${on ? JADE : "#e3e7e6"}" stroke-opacity="${live || !kk ? 1 : 0.4}"/>`;
+        }
+      });
+      const rf = receptive(layers());
+      s += txt(80, 238, kk >= 0 ? `one output of layer ${top} depends on ${rf[top - 1].r} inputs (gold)` : "Step to add one layer at a time.", `font-size="13" font-weight="700" fill="${INK}"`);
+      $("[data-draw]").innerHTML = s;
+      $("[data-vk]").textContent = String(k);
+    }
+    const redraw = stepper(root, steps, draw, { delay: 2 });
+    $<HTMLInputElement>("[data-k]").addEventListener("input", (e) => { k = +(e.target as HTMLInputElement).value; redraw(); });
+    root.querySelectorAll<HTMLButtonElement>("[data-m]").forEach((b) => b.addEventListener("click", () => { mode = b.dataset.m!; root.querySelectorAll("[data-m]").forEach((o) => o.setAttribute("aria-pressed", String(o === b))); redraw(); }));
+  });
+</script>

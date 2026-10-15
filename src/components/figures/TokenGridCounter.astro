@@ -1,0 +1,59 @@
+---
+// VALL-E review, Figure 1: speech as a grid of EnCodec tokens (Sec 3, p. 5).
+// 24 kHz audio, one column every 320 samples (75 per second), 8 rows of
+// 1024-entry codes at 6 kbps. The grid drawn is the first second; counts
+// cover the whole clip. The waveform is synthetic.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram tgc" role="region" aria-label={alt} data-tgc>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 360" role="img" aria-labelledby="tgc-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="tgc-title">A waveform becoming one column of codec tokens every 320 samples</title>
+    <text x="20" y="20" font-size="11.5" font-weight="700" fill="#2b2b30">The first second of sound (24,000 samples)</text>
+    <path data-wave d="" fill="none" stroke="#2b2b30" stroke-width="0.8" />
+    <line data-head y1="28" y2="250" stroke="#a33b3b" stroke-width="1.5" />
+    <text x="20" y="104" font-size="11.5" font-weight="700" fill="#2b2b30">EnCodec tokens: one column per 320 samples, row 1 on top</text>
+    <g data-grid></g>
+    <text data-r1 x="20" y="290" font-size="13" font-weight="700" fill="#2b2b30"></text>
+    <text data-r2 x="20" y="312" font-size="12" fill="#2b2b30"></text>
+    <text data-r3 x="20" y="334" font-size="11.5" fill="#5f5f66"></text>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Clip length<strong data-vd></strong></span><input class="scrub" data-d type="range" min="1" max="20" step="1" value="10" /></label>
+    <div><span class="fig-panel__name">Quantizers</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-q="8" aria-pressed="true">8 (6 kbps)</button>
+      <button type="button" class="fig-chip" data-q="16" aria-pressed="false">16 (12 kbps)</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { setupFigure, tween } from "../../lib/figure-motion";
+  import { gauss } from "../../lib/flow-math";
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-tgc]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const dIn = $<HTMLInputElement>("[data-d]");
+    const mk = (g: Element, tag: string, a: Record<string, string | number>) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, String(a[k])); g.append(e); return e; };
+    const X = (s: number) => 20 + s * 740, g = gauss(4);
+    let d = "";
+    for (let i = 0; i <= 740; i++) { const t = i / 740, env = Math.max(0.05, Math.sin(Math.PI * ((t * 3.2) % 1)) ** 2); d += `${i ? "L" : "M"}${X(t).toFixed(1)} ${(60 + env * 26 * (Math.sin(2 * Math.PI * 150 * t) * 0.6 + 0.4 * g())).toFixed(1)}`; }
+    $("[data-wave]").setAttribute("d", d);
+    let Q = 8, shown = 75;
+    function draw() {
+      const gr = $("[data-grid]"); gr.replaceChildren();
+      const ch = Q === 8 ? 17 : 8.5, cw = 740 / 75;
+      for (let c = 0; c < 75; c++) for (let q = 0; q < Q; q++) mk(gr, "rect", { x: X(c / 75) + 0.5, y: 112 + q * ch, width: cw - 1.5, height: ch - 1.5, fill: c < shown ? (q === 0 ? "#594578" : "#8a7aa8") : "#f2f2f5", "fill-opacity": c < shown ? 1 - q * (0.5 / Q) : 1 });
+      const h = $("[data-head]"), x = X(Math.min(shown, 75) / 75); h.setAttribute("x1", String(x)); h.setAttribute("x2", String(x));
+      const dur = +dIn.value, T = 75 * dur;
+      $("[data-r1]").textContent = `${dur} s × 24,000 ÷ 320 = ${T.toLocaleString("en")} columns; × ${Q} rows = ${(T * Q).toLocaleString("en")} tokens`;
+      $("[data-r2]").textContent = `Each token names 1 of 1,024 entries (10 bits): 75 × ${Q} × 10 = ${(750 * Q).toLocaleString("en")} bits per second, ${Q === 8 ? "6" : "12"} kbps.`;
+      $("[data-r3]").textContent = dur === 3 ? "A 3-second voice prompt is 225 columns." : `Drawn: the first second only, 75 columns. A 3-second prompt would be 225.`;
+      $("[data-vd]").textContent = `${dur} s`; dIn.style.setProperty("--p", `${((dur - 1) / 19) * 100}%`);
+    }
+    dIn.addEventListener("input", draw);
+    root.querySelectorAll<HTMLButtonElement>("[data-q]").forEach((b) => b.addEventListener("click", () => { Q = +b.dataset.q!; root.querySelectorAll("[data-q]").forEach((o) => o.setAttribute("aria-pressed", String(o === b))); draw(); }));
+    draw();
+    setupFigure(root, () => { shown = 0; draw(); }, async (alive) => { await tween(3, (e) => { if (alive()) { shown = Math.round((1 - Math.cbrt(1 - e)) * 75); draw(); } }); });
+  });
+</script>

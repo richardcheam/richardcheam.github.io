@@ -1,0 +1,81 @@
+---
+// Foundations, neurons post: one neuron. Weighted sum, bias, activation, with
+// every input live. Defaults x = (1, 2), w = (0.5, 0.25), b = 0, ReLU: z = 1,
+// a = 1; sigmoid gives 0.731, tanh 0.762; b = −2 with ReLU gives z = −1, a = 0.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-neuron>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 270" role="img" aria-labelledby="sn-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="sn-title">A single neuron: two inputs, two weights, a bias and an activation</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Input x₁ <strong data-v="x1"></strong></span><input class="scrub" data-k="x1" type="range" min="-2" max="2" step="0.25" value="1" /></label>
+    <label><span class="fig-panel__name">Input x₂ <strong data-v="x2"></strong></span><input class="scrub" data-k="x2" type="range" min="-2" max="2" step="0.25" value="2" /></label>
+    <label><span class="fig-panel__name">Weight w₁ <strong data-v="w1"></strong></span><input class="scrub" data-k="w1" type="range" min="-2" max="2" step="0.25" value="0.5" /></label>
+    <label><span class="fig-panel__name">Weight w₂ <strong data-v="w2"></strong></span><input class="scrub" data-k="w2" type="range" min="-2" max="2" step="0.25" value="0.25" /></label>
+    <label><span class="fig-panel__name">Bias b <strong data-v="b"></strong></span><input class="scrub" data-k="b" type="range" min="-2" max="2" step="0.25" value="0" /></label>
+    <div><span class="fig-panel__name">Activation</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-act="relu" aria-pressed="true">ReLU</button>
+      <button type="button" class="fig-chip" data-act="sigmoid" aria-pressed="false">Sigmoid</button>
+      <button type="button" class="fig-chip" data-act="tanh" aria-pressed="false">Tanh</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt, par } from "../../lib/tiny-net";
+  import { INK, MUTED, JADE, NEG, GOLD, TINT } from "../../lib/net-diagram";
+  type A = "relu" | "sigmoid" | "tanh";
+  const F: Record<A, (z: number) => number> = { relu: (z) => Math.max(0, z), sigmoid: (z) => 1 / (1 + Math.exp(-z)), tanh: Math.tanh };
+  const NAME: Record<A, string> = { relu: "ReLU", sigmoid: "sigmoid", tanh: "tanh" };
+  document.querySelectorAll<HTMLElement>("[data-neuron]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const p: Record<string, number> = { x1: 1, x2: 2, w1: 0.5, w2: 0.25, b: 0 };
+    let act: A = "relu";
+    const calc = () => { const p1 = p.w1 * p.x1, p2 = p.w2 * p.x2, z = p1 + p2 + p.b; return { p1, p2, z, a: F[act](z) }; };
+    const d3 = (v: number) => (Number.isInteger(v) ? fmt(v) : fmt(v, 3));
+    const steps = () => {
+      const c = calc();
+      return [
+        { say: "Multiply the first input by its weight. The weight says how much this input matters, and in which direction.", math: `w₁ × x₁ = ${fmt(p.w1)} × ${par(p.x1)} = ${fmt(c.p1)}` },
+        { say: "Do the same for the second input.", math: `w₂ × x₂ = ${fmt(p.w2)} × ${par(p.x2)} = ${fmt(c.p2)}` },
+        { say: "Add the two products and the bias. This total is z, the neuron's raw score.", math: `z = ${fmt(c.p1)} + ${par(c.p2)} + ${par(p.b)} = ${fmt(c.z)}` },
+        { say: `Bend the score with the activation. ${act === "relu" ? "ReLU keeps positive numbers and turns negative ones into 0." : act === "sigmoid" ? "Sigmoid squashes any number into the range 0 to 1." : "Tanh squashes any number into the range −1 to 1."}`, math: `a = ${NAME[act]}(${fmt(c.z)}) = ${d3(c.a)}` },
+      ];
+    };
+    function draw(k: number) {
+      const c = calc(), lit = (i: number) => k === i;
+      const edge = (x1: number, y1: number, w: number, on: boolean) => `<line x1="${x1}" y1="${y1}" x2="352" y2="135" stroke="${w >= 0 ? JADE : NEG}" stroke-width="${(1.5 + Math.abs(w) * 3).toFixed(1)}"/>${on ? `<line x1="${x1}" y1="${y1}" x2="352" y2="135" stroke="${GOLD}" stroke-width="12" stroke-opacity="0.2" stroke-linecap="round"/>` : ""}`;
+      const node = (x: number, y: number, r: number, name: string, val: string, on: boolean) => `<circle cx="${x}" cy="${y}" r="${r}" fill="${on ? TINT : "#fff"}" stroke="${on ? JADE : INK}" stroke-width="${on ? 3 : 1.5}"/><text x="${x}" y="${y - 6}" font-size="11" text-anchor="middle" fill="${MUTED}">${name}</text><text x="${x}" y="${y + 12}" font-size="15" font-weight="700" text-anchor="middle" fill="${INK}">${val}</text>`;
+      let s = edge(128, 70, p.w1, lit(0)) + edge(128, 200, p.w2, lit(1));
+      s += `<text x="240" y="88" font-size="12.5" font-weight="${lit(0) ? 700 : 600}" text-anchor="middle" fill="${INK}" paint-order="stroke" stroke="#fff" stroke-width="4">w₁ = ${fmt(p.w1)}</text>`;
+      s += `<text x="240" y="196" font-size="12.5" font-weight="${lit(1) ? 700 : 600}" text-anchor="middle" fill="${INK}" paint-order="stroke" stroke="#fff" stroke-width="4">w₂ = ${fmt(p.w2)}</text>`;
+      s += node(100, 70, 28, "x₁", fmt(p.x1), lit(0)) + node(100, 200, 28, "x₂", fmt(p.x2), lit(1));
+      // The neuron: the sum half and the activation half.
+      s += `<rect x="352" y="95" width="80" height="80" rx="10" fill="${lit(2) ? TINT : "#fff"}" stroke="${lit(2) ? JADE : INK}" stroke-width="${lit(2) ? 3 : 1.5}"/>`;
+      s += `<text x="392" y="125" font-size="11" text-anchor="middle" fill="${MUTED}">sum + b</text><text x="392" y="148" font-size="15" font-weight="700" text-anchor="middle" fill="${INK}">${k >= 2 ? fmt(c.z) : "?"}</text>`;
+      s += `<text x="392" y="196" font-size="12" text-anchor="middle" font-weight="${lit(2) ? 700 : 400}" fill="${INK}">b = ${fmt(p.b)}</text>`;
+      s += `<line x1="432" y1="135" x2="470" y2="135" stroke="${INK}"/>`;
+      s += `<rect x="470" y="95" width="90" height="80" rx="10" fill="${lit(3) ? TINT : "#fff"}" stroke="${lit(3) ? JADE : INK}" stroke-width="${lit(3) ? 3 : 1.5}"/>`;
+      // A tiny sketch of the activation's shape.
+      const sk = Array.from({ length: 31 }, (_, i) => { const z = -3 + i * 0.2, v = F[act](z); return `${(485 + i * 2).toFixed(1)},${(160 - (act === "relu" ? v / 3 : act === "sigmoid" ? v : (v + 1) / 2) * 22).toFixed(1)}`; }).join(" ");
+      s += `<polyline points="${sk}" fill="none" stroke="${JADE}" stroke-width="1.6"/><text x="515" y="114" font-size="11" text-anchor="middle" fill="${MUTED}">${NAME[act]}</text>`;
+      s += `<line x1="560" y1="135" x2="610" y2="135" stroke="${INK}" marker-end="url(#sn-arrow)"/>`;
+      s += `<defs><marker id="sn-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="${INK}"/></marker></defs>`;
+      s += node(650, 135, 34, "output a", k >= 3 ? d3(c.a) : "?", lit(3));
+      s += `<text x="380" y="245" font-size="12" text-anchor="middle" fill="${MUTED}">Line thickness shows the size of a weight; green is positive, red is negative.</text>`;
+      $("[data-draw]").innerHTML = s;
+      root.querySelectorAll<HTMLElement>("[data-v]").forEach((el) => (el.textContent = fmt(p[el.dataset.v!])));
+    }
+    const redraw = stepper(root, steps, draw, { delay: 1.5 });
+    root.querySelectorAll<HTMLInputElement>("[data-k]").forEach((inp) => inp.addEventListener("input", () => { p[inp.dataset.k!] = +inp.value; redraw(); }));
+    root.querySelectorAll<HTMLButtonElement>("[data-act]").forEach((b) => b.addEventListener("click", () => {
+      act = b.dataset.act as A;
+      root.querySelectorAll("[data-act]").forEach((o) => o.setAttribute("aria-pressed", String(o === b)));
+      redraw();
+    }));
+  });
+</script>

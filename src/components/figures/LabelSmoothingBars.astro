@@ -1,0 +1,62 @@
+---
+// Foundations, regularisation post: label smoothing on post 2's logits
+// (2, 1, 0), true class cat. ε = 0.1: target (0.933, 0.033, 0.033), gradient
+// p − y = (−0.268, 0.211, 0.057) against (−0.335, 0.245, 0.090) for the
+// hard target.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-smooth>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 230" role="img" aria-labelledby="ls-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="ls-title">Hard and smoothed targets beside the network's probabilities, with the resulting pushes</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Smoothing ε <strong data-ve></strong></span><input class="scrub" data-e type="range" min="0" max="0.3" step="0.01" value="0.1" /></label>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt } from "../../lib/tiny-net";
+  import { INK, MUTED, JADE, NEG, GOLD } from "../../lib/net-diagram";
+  import { txt } from "../../lib/plot";
+  const NAMES = ["cat", "dog", "bird"], Z = [2, 1, 0];
+  const EZ = Z.map(Math.exp), P = EZ.map((v) => v / EZ.reduce((a, b) => a + b, 0)), HARD = [1, 0, 0];
+  const f3 = (v: number) => fmt(v, 3);
+  document.querySelectorAll<HTMLElement>("[data-smooth]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    let eps = 0.1;
+    const soft = () => HARD.map((y) => (1 - eps) * y + eps / 3);
+    const steps = () => {
+      const y = soft();
+      return [
+        { say: "The hard target says cat with total certainty: 1, 0, 0. Cross-entropy can only match it with infinitely large logits.", math: "hard target = (1, 0, 0)" },
+        { say: "Smooth it: keep 1 − ε of the hard target and share ε equally among all three classes.", math: y.map((v, k) => `${NAMES[k]}: (1 − ${fmt(eps)}) × ${HARD[k]} + ${fmt(eps)} / 3 = ${f3(v)}`).join("\n") },
+        { say: "The push on each logit is still p − y, now against the smoothed target. The push on cat is gentler, and it reverses once p(cat) passes the target.", math: P.map((p, k) => `${NAMES[k]}: ${f3(p)} − ${f3(y[k])} = ${f3(p - y[k])}   (hard: ${f3(p - HARD[k])})`).join("\n") },
+      ];
+    };
+    function draw(k: number) {
+      const y = soft();
+      let s = txt(40, 20, "Logits (2, 1, 0), so the network says p = (0.665, 0.245, 0.090)", `font-size="12" font-weight="700" fill="${INK}"`);
+      const cols: [string, number[], string, number][] = [["hard target", HARD, "#9aa3a1", -1], ["smoothed target", y, GOLD, 1], ["network p", P, JADE, -1]];
+      NAMES.forEach((nm, r) => {
+        const yy = 60 + r * 52;
+        s += txt(40, yy + 14, nm, `font-size="12.5" font-weight="${r === 0 ? 700 : 400}" fill="${INK}"`);
+        cols.forEach(([, vals, col, from], c) => {
+          if (from > k) return;
+          const x = 100 + c * 150;
+          s += `<rect x="${x}" y="${yy}" width="${vals[r] * 110}" height="20" fill="${col}" fill-opacity="0.85"/>` + txt(x + vals[r] * 110 + 6, yy + 15, f3(vals[r]), `font-size="12" font-weight="700" fill="${INK}"`);
+        });
+        if (k >= 2) { const g = P[r] - y[r]; s += `<line x1="640" x2="640" y1="${yy - 4}" y2="${yy + 24}" stroke="#cfd5d4"/><rect x="${Math.min(640, 640 + g * 150)}" y="${yy}" width="${Math.abs(g * 150)}" height="20" fill="${g < 0 ? JADE : NEG}"/>` + txt(745, yy + 15, f3(g), `font-size="12" font-weight="700" text-anchor="end" fill="${INK}"`); }
+      });
+      cols.forEach(([h, , , from], c) => { if (from <= k) s += txt(100 + c * 150, 48, h, `font-size="11" font-weight="700" fill="${MUTED}"`); });
+      if (k >= 2) s += txt(580, 48, "push p − y", `font-size="11" font-weight="700" fill="${MUTED}"`);
+      s += txt(40, 222, `ε = ${fmt(eps)}: loss against the smoothed target ${f3(-y.reduce((a, v, r) => a + v * Math.log(P[r]), 0))} (hard target ${f3(-Math.log(P[0]))})`, `font-size="11.5" fill="${MUTED}"`);
+      $("[data-draw]").innerHTML = s;
+      $("[data-ve]").textContent = fmt(eps, 2);
+    }
+    const redraw = stepper(root, steps, draw, { delay: 2.2 });
+    $<HTMLInputElement>("[data-e]").addEventListener("input", (e) => { eps = +(e.target as HTMLInputElement).value; redraw(); });
+  });
+</script>

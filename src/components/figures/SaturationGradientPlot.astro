@@ -1,0 +1,42 @@
+---
+// Foundations, GANs post: generator losses log(1 − D) (saturating) and
+// −log D (non-saturating) against D = D(G(z)). Their pushes on the
+// detective's logit are D and 1 − D: at 0.01 they are 0.01 and 0.99.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-satur>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 270" role="img" aria-labelledby="sg2-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="sg2-title">Two generator loss curves, one flat where the forger is losing, one steep</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">D(G(z)): how real the detective thinks the fake is <strong data-vd></strong></span><input class="scrub" data-d type="range" min="0.01" max="0.99" step="0.01" value="0.01" /></label>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt } from "../../lib/tiny-net";
+  import { INK, MUTED, GOLD, NEG, JADE } from "../../lib/net-diagram";
+  import { frame, txt } from "../../lib/plot";
+  document.querySelectorAll<HTMLElement>("[data-satur]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    let d = 0.01;
+    const setD = (v: number) => { d = v; $<HTMLInputElement>("[data-d]").value = String(v); };
+    const steps = () => [0.01, 0.1, 0.5, 0.9].map((v) => ({ say: v === 0.01 ? "The forger is hopeless: the detective calls its fake 1% real. The saturating curve is almost flat here; the non-saturating one is steep." : v === 0.5 ? "An even match: both push equally." : v === 0.9 ? "The forger is winning: now the saturating loss pushes harder, when help is least needed." : "Still losing badly.", math: `saturating push = D = ${fmt(v)};  non-saturating push = 1 − D = ${fmt(1 - v)};  ratio ${fmt((1 - v) / v, 2)}`, enter: () => setD(v) }));
+    function draw() {
+      const F = frame({ l: 50, t: 30, w: 420, h: 200, x0: 0, x1: 1, y0: -3, y1: 4.7 });
+      let s = F.grid([0, 0.25, 0.5, 0.75, 1], [-2, 0, 2, 4], 2) + F.curve((x) => Math.log(1 - x), `stroke="${NEG}" stroke-width="2.5"`, 300, 0.001, 0.97) + F.curve((x) => -Math.log(x), `stroke="${JADE}" stroke-width="2.5"`, 300, 0.01, 0.999);
+      s += txt(50, 18, "generator loss against D(G(z))", `font-size="12" font-weight="700" fill="${INK}"`);
+      s += `<line x1="${F.X(d)}" x2="${F.X(d)}" y1="30" y2="230" stroke="${GOLD}" stroke-dasharray="4 3"/><circle cx="${F.X(d)}" cy="${F.clampY(Math.log(1 - d))}" r="5" fill="${NEG}"/><circle cx="${F.X(d)}" cy="${F.clampY(-Math.log(d))}" r="5" fill="${JADE}"/>`;
+      s += `<rect x="510" y="50" width="12" height="4" fill="${NEG}"/>` + txt(530, 56, "saturating: log(1 − D)", `font-size="12" font-weight="700" fill="${INK}"`) + txt(530, 76, `loss ${fmt(Math.log(1 - d), 4)}, push ${fmt(d, 2)}`, `font-size="12" fill="${INK}"`);
+      s += `<rect x="510" y="110" width="12" height="4" fill="${JADE}"/>` + txt(530, 116, "non-saturating: −log D", `font-size="12" font-weight="700" fill="${INK}"`) + txt(530, 136, `loss ${fmt(-Math.log(d), 4)}, push ${fmt(1 - d, 2)}`, `font-size="12" fill="${INK}"`);
+      s += txt(510, 180, "push = how hard the loss tells the", `font-size="11" fill="${MUTED}"`) + txt(510, 196, "detective's logit on the fake to rise", `font-size="11" fill="${MUTED}"`);
+      $("[data-draw]").innerHTML = s;
+      $("[data-vd]").textContent = fmt(d, 2);
+    }
+    const redraw = stepper(root, steps, draw, { delay: 2 });
+    $<HTMLInputElement>("[data-d]").addEventListener("input", (e) => { d = +(e.target as HTMLInputElement).value; redraw(); });
+  });
+</script>

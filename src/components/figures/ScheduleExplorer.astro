@@ -1,0 +1,56 @@
+---
+// Foundations, optimisers post: step decay (× 0.1 at 50 and 75), cosine and
+// 10-step warm-up then cosine, peak 0.1 over 100 steps. At step 25: 0.1,
+// 0.0854, 0.0933. At step 75: 0.001, 0.0146, 0.0179.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-sched>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 280" role="img" aria-labelledby="sc-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="sc-title">Three learning-rate schedules over 100 steps with their values at a chosen step</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Step t <strong data-v="t"></strong></span><input class="scrub" data-k="t" type="range" min="0" max="100" step="1" value="25" /></label>
+    <label><span class="fig-panel__name">Warm-up steps W <strong data-v="W"></strong></span><input class="scrub" data-k="W" type="range" min="1" max="40" step="1" value="10" /></label>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt, par } from "../../lib/tiny-net";
+  import { INK, MUTED, NEG, GOLD } from "../../lib/net-diagram";
+  import { frame, txt } from "../../lib/plot";
+  import { schedules } from "../../lib/optimisers";
+  const PEAK = 0.1, T = 100, COL = { step: "#22302E", cos: "#3E6E9E", warm: GOLD };
+  document.querySelectorAll<HTMLElement>("[data-sched]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const p: Record<string, number> = { t: 25, W: 10 };
+    const setT = (v: number) => { p.t = v; $<HTMLInputElement>('[data-k="t"]').value = String(v); };
+    const vals = (t: number) => ({ step: schedules.step(t, PEAK), cos: schedules.cosine(t, PEAK, T), warm: schedules.warmup(t, PEAK, T, p.W) });
+    const work = (t: number) => {
+      const W = p.W, c = Math.cos((Math.PI * t) / T), v = vals(t);
+      const drops = (t >= 50 ? 1 : 0) + (t >= 75 ? 1 : 0);
+      const warm = t < W ? `warm-up: 0.1 × ${t} / ${W} = ${fmt(v.warm, 5)}` : `warm-up then cosine: 0.05 × (1 + cos(π × ${t - W} / ${T - W})) = 0.05 × (1 + ${par(Math.cos((Math.PI * (t - W)) / (T - W)), 4)}) = ${fmt(v.warm, 5)}`;
+      return `step decay: 0.1 × 0.1^${drops} = ${fmt(v.step, 5)}\ncosine: 0.05 × (1 + cos(π × ${t} / 100)) = 0.05 × (1 + ${par(c, 4)}) = ${fmt(v.cos, 5)}\n${warm}`;
+    };
+    const visit = [[0, "At the start, step decay and cosine are at the peak; warm-up starts from zero."], [5, "Warm-up climbs in a straight line, a tenth of the peak per step."], [10, "Warm-up reaches the peak and hands over to its own cosine."], [25, "A quarter of the way: cosine has barely dropped."], [50, "Halfway: step decay drops ten times; cosine is exactly half the peak."], [75, "Step decay drops again; cosine falls steeply here."], [100, "The end: cosine schedules reach zero; step decay holds its last value."]] as const;
+    const steps = () => visit.map(([t, say]) => ({ say, math: work(t), enter: () => setT(t) }));
+    function draw() {
+      const F = frame({ l: 50, t: 30, w: 420, h: 200, x0: 0, x1: 100, y0: 0, y1: 0.105 });
+      let s = F.grid([0, 25, 50, 75, 100], [0, 0.05, 0.1], 2) + txt(50, 18, "Learning rate η against step t (peak 0.1, 100 steps)", `font-size="12" font-weight="700" fill="${INK}"`);
+      s += F.curve((t) => schedules.step(t, PEAK), `stroke="${COL.step}" stroke-width="2.2"`, 400) + F.curve((t) => schedules.cosine(t, PEAK, T), `stroke="${COL.cos}" stroke-width="2.2"`, 200) + F.curve((t) => schedules.warmup(t, PEAK, T, p.W), `stroke="${COL.warm}" stroke-width="2.6"`, 300);
+      s += `<line x1="${F.X(p.t)}" x2="${F.X(p.t)}" y1="30" y2="230" stroke="${NEG}" stroke-dasharray="4 3"/>`;
+      const v = vals(p.t);
+      ([["step", "Step decay (× 0.1 at 50 and 75)"], ["cos", "Cosine"], ["warm", `Warm-up ${p.W} steps, then cosine`]] as const).forEach(([k, label], i) => {
+        s += `<circle cx="${F.X(p.t)}" cy="${F.Y(v[k])}" r="5" fill="${COL[k]}" stroke="#fff" stroke-width="1.5"/>`;
+        const y = 60 + i * 52;
+        s += `<rect x="500" y="${y - 10}" width="14" height="4" fill="${COL[k]}"/>` + txt(522, y - 4, label, `font-size="12" font-weight="700" fill="${INK}"`) + txt(522, y + 16, `η at step ${p.t} = ${fmt(v[k], 5)}`, `font-size="12.5" fill="${INK}"`);
+      });
+      $("[data-draw]").innerHTML = s;
+      root.querySelectorAll<HTMLElement>("[data-v]").forEach((el) => (el.textContent = fmt(p[el.dataset.v!])));
+    }
+    const redraw = stepper(root, steps, draw, { delay: 2.2 });
+    root.querySelectorAll<HTMLInputElement>("[data-k]").forEach((inp) => inp.addEventListener("input", () => { p[inp.dataset.k!] = +inp.value; redraw(); }));
+  });
+</script>

@@ -1,0 +1,7 @@
+---
+import Base from "../../layouts/Base.astro";
+import html from "../../page-content/cv.html?raw";
+---
+<Base title="About Me" heading>
+  <Fragment set:html={html} />
+</Base>

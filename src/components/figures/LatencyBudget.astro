@@ -1,0 +1,113 @@
+---
+// Time to first audio for a cascade as a stacked bar, one scrubber per stage.
+// Defaults are an illustrative budget (silence wait = the Realtime API's
+// documented 500 ms default); reference marks are published figures.
+const { alt } = Astro.props;
+const stages = [
+  { key: "silence", label: "Silence wait (end of turn)", min: 100, max: 1000, step: 50, value: 500, color: "#c9c9d1" },
+  { key: "asr", label: "Transcript finalised", min: 0, max: 400, step: 25, value: 200, color: "#9d92b3" },
+  { key: "llm", label: "LLM first token + network", min: 100, max: 2000, step: 50, value: 500, color: "#594578" },
+  { key: "tts", label: "TTS first audio chunk", min: 50, max: 600, step: 25, value: 200, color: "#4F5D3A" },
+];
+const X0 = 20, W = 740, MAX_MS = 2600;
+const px = (ms: number) => (ms / MAX_MS) * W;
+let acc = 0;
+const segs = stages.map((s) => { const r = { ...s, x: X0 + px(acc), w: px(s.value) }; acc += s.value; return r; });
+const total = acc;
+const marks = [
+  { ms: 200, label: "Moshi, 200 ms" },
+  { ms: 320, label: "GPT-4o avg, 320 ms" },
+];
+---
+<div class="blog-diagram lb" role="region" aria-label={alt} data-lb data-stages={JSON.stringify(stages)}>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 150" role="img" aria-labelledby="lb-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="lb-title">Stacked latency budget of a cascaded voice assistant</title>
+    <g font-size="10" fill="#5f5f66" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">
+      {[0, 500, 1000, 1500, 2000, 2500].map((ms) => (
+        <g>
+          <line x1={X0 + px(ms)} y1="104" x2={X0 + px(ms)} y2="109" stroke="#c9c9d1" />
+          <text x={X0 + px(ms)} y="122" text-anchor={ms === 0 ? "start" : "middle"}>{ms === 0 ? "0" : `${ms / 1000} s`}</text>
+        </g>
+      ))}
+    </g>
+    <line x1={X0} y1="104" x2={X0 + W} y2="104" stroke="#d5d5dc" />
+    <g data-bars>
+      {segs.map((s) => <rect data-seg={s.key} x={s.x} y="58" width={s.w} height="40" fill={s.color} fill-opacity={s.key === "silence" ? 1 : 0.85} />)}
+    </g>
+    <text data-total x={X0 + px(total) + 8} y="83" font-size="15" font-weight="700" fill="#2b2b30">{(total / 1000).toFixed(2)} s</text>
+    <g font-size="10.5">
+      {marks.map((m, i) => (
+        <g>
+          <line x1={X0 + px(m.ms)} y1={i ? 34 : 20} x2={X0 + px(m.ms)} y2="104" stroke="#a33b3b" stroke-dasharray="3 3" />
+          <text x={X0 + px(m.ms) + 4} y={i ? 38 : 24} fill="#a33b3b">{m.label}</text>
+        </g>
+      ))}
+    </g>
+    <text x={X0} y="142" font-size="11" fill="#5f5f66">Stages run in series: each starts when the previous one finishes.</text>
+  </svg>
+  <div class="lb__controls">
+    {stages.map((s) => (
+      <label class="lb__stage">
+        <span class="lb__name"><span class="lb__swatch" style={`background:${s.color}`}></span>{s.label}<strong data-val={s.key}>{s.value} ms</strong></span>
+        <input class="scrub" data-input={s.key} type="range" min={s.min} max={s.max} step={s.step} value={s.value} style={`--n: ${Math.round((s.max - s.min) / s.step / (s.max - s.min > 1000 ? 4 : 2))}; --p: ${((s.value - s.min) / (s.max - s.min)) * 100}%`} />
+      </label>
+    ))}
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<style>
+  .lb__controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.4rem 2rem; margin-top: 0.4rem; }
+  .lb__stage { display: block; font-size: 0.85rem; color: var(--text-secondary); }
+  .lb__name { display: flex; align-items: center; gap: 0.5rem; }
+  .lb__name strong { margin-left: auto; color: var(--text); font-family: var(--font-mono); font-size: 0.8rem; }
+  .lb__swatch { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+  @media (max-width: 760px) { .lb__controls { grid-template-columns: 1fr; } }
+</style>
+
+<script>
+  import { animate, dur, setupFigure } from "../../lib/figure-motion";
+
+  const X0 = 20, W = 740, MAX_MS = 2600;
+  const px = (ms: number) => (ms / MAX_MS) * W;
+
+  document.querySelectorAll<HTMLElement>("[data-lb]").forEach((root) => {
+    const stages: { key: string; min: number; max: number }[] = JSON.parse(root.dataset.stages!);
+    const input = (k: string) => root.querySelector<HTMLInputElement>(`[data-input="${k}"]`)!;
+    const seg = (k: string) => root.querySelector<SVGRectElement>(`[data-seg="${k}"]`)!;
+    const total = root.querySelector<SVGTextElement>("[data-total]")!;
+
+    // Lay the bar out from the current scrubber values.
+    function layout() {
+      let acc = 0;
+      for (const s of stages) {
+        const v = +input(s.key).value;
+        seg(s.key).setAttribute("x", String(X0 + px(acc)));
+        seg(s.key).setAttribute("width", String(px(v)));
+        root.querySelector(`[data-val="${s.key}"]`)!.textContent = `${v} ms`;
+        input(s.key).style.setProperty("--p", `${((v - s.min) / (s.max - s.min)) * 100}%`);
+        acc += v;
+      }
+      total.setAttribute("x", String(X0 + px(acc) + 8));
+      total.textContent = `${(acc / 1000).toFixed(2)} s`;
+    }
+    stages.forEach((s) => input(s.key).addEventListener("input", layout));
+
+    // On view: the stages stack up one after another, in the order they run.
+    setupFigure(
+      root,
+      () => {
+        layout();
+        stages.forEach((s) => { const r = seg(s.key); r.style.transformBox = "fill-box"; r.style.transformOrigin = "0% 50%"; r.style.transform = "scaleX(0)"; });
+        total.style.opacity = "0";
+      },
+      async (alive) => {
+        for (const s of stages) {
+          if (!alive()) return;
+          await animate(seg(s.key), { transform: ["scaleX(0)", "scaleX(1)"] }, { duration: dur(0.25 + (+input(s.key).value / 1000) * 0.5), ease: "linear" });
+        }
+        animate(total, { opacity: [0, 1] }, { duration: dur(0.3) });
+      },
+    );
+  });
+</script>

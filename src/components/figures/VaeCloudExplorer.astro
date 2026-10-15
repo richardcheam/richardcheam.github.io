@@ -1,0 +1,58 @@
+---
+// Foundations, autoencoders post: one cloud, two pulls. Decoder x̂ = z,
+// target 1: average reconstruction (μ − 1)² + σ², KL ½(μ² + σ² − ln σ² − 1).
+// μ 0.8, σ 0.5, β 1: 0.29 + 0.638 = 0.928. Best at β: μ = 2/(2 + β),
+// σ² = β/(2 + β); β 1 gives 0.667, 0.577, total 0.882.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-cloud>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 270" role="img" aria-labelledby="vc-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="vc-title">An encoder cloud with sampled points, its reconstruction loss, KL and total</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Centre μ <strong data-v="mu"></strong></span><input class="scrub" data-k="mu" type="range" min="-1" max="2" step="0.01" value="0.8" /></label>
+    <label><span class="fig-panel__name">Spread σ <strong data-v="sg"></strong></span><input class="scrub" data-k="sg" type="range" min="0.01" max="1.5" step="0.01" value="0.5" /></label>
+    <label><span class="fig-panel__name">β <strong data-v="be"></strong></span><input class="scrub" data-k="be" type="range" min="0" max="20" step="0.1" value="1" /></label>
+    <div><span class="fig-panel__name">Optimum</span><div class="fig-chips"><button type="button" class="fig-chip" data-best>Jump to best</button></div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt, mulberry } from "../../lib/tiny-net";
+  import { INK, MUTED, GOLD, JADE, NEG } from "../../lib/net-diagram";
+  import { frame, txt } from "../../lib/plot";
+  const r = mulberry(5), EPS = Array.from({ length: 20 }, () => Math.sqrt(-2 * Math.log(1 - r())) * Math.cos(2 * Math.PI * r()));
+  document.querySelectorAll<HTMLElement>("[data-cloud]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const p: Record<string, number> = { mu: 0.8, sg: 0.5, be: 1 };
+    const sync = () => root.querySelectorAll<HTMLInputElement>("[data-k]").forEach((i) => (i.value = String(p[i.dataset.k!])));
+    const best = () => { p.mu = 2 / (2 + p.be); p.sg = Math.max(0.01, Math.sqrt(p.be / (2 + p.be))); sync(); };
+    const calc = () => { const rec = (p.mu - 1) ** 2 + p.sg ** 2, kl = 0.5 * (p.mu ** 2 + p.sg ** 2 - Math.log(p.sg ** 2) - 1); return { rec, kl, tot: rec + p.be * kl }; };
+    const steps = () => [
+      { say: "Reconstruction: the centre's miss squared, plus the extra error from wobbling around it.", math: (() => { const c = calc(); return `(${fmt(p.mu, 3)} − 1)² + ${fmt(p.sg, 3)}² = ${fmt(c.rec, 3)}`; })() },
+      { say: "KL: how far this cloud is from the standard normal.", math: (() => { const c = calc(); return `½(${fmt(p.mu ** 2, 3)} + ${fmt(p.sg ** 2, 3)} − ln ${fmt(p.sg ** 2, 3)} − 1) = ${fmt(c.kl, 3)}`; })() },
+      { say: "Total loss: reconstruction plus β times KL.", math: (() => { const c = calc(); return `${fmt(c.rec, 3)} + ${fmt(p.be)} × ${fmt(c.kl, 3)} = ${fmt(c.tot, 3)}`; })() },
+      ...[1, 4, 20].map((b) => ({ say: b === 1 ? "The best cloud at β = 1: pulled partly towards the target, partly towards the standard normal." : `β = ${b}: the cloud slides towards 0 and widens towards 1. The code says less and less about the input.`, math: `best μ = 2 / (2 + ${b}) = ${fmt(2 / (2 + b), 3)},  σ = √(${b} / ${2 + b}) = ${fmt(Math.sqrt(b / (2 + b)), 3)}`, enter: () => { p.be = b; best(); } })),
+    ];
+    function draw() {
+      const c = calc(), F = frame({ l: 40, t: 40, w: 420, h: 150, x0: -1.5, x1: 3, y0: 0, y1: 1 });
+      let s = F.grid([-1, 0, 1, 2, 3], [], 0);
+      s += F.curve((z) => Math.exp(-((z - p.mu) ** 2) / (2 * p.sg ** 2)), `stroke="${GOLD}" stroke-width="2.5"`, 300) + F.curve((z) => Math.exp(-(z * z) / 2), `stroke="#9aa3a1" stroke-width="1.5" stroke-dasharray="4 3"`, 200);
+      s += `<line x1="${F.X(1)}" x2="${F.X(1)}" y1="40" y2="190" stroke="${NEG}" stroke-width="2"/>` + txt(F.X(1) + 4, 52, "target 1", `font-size="10.5" fill="${NEG}"`);
+      EPS.forEach((e) => { const z = p.mu + p.sg * e; if (z > -1.5 && z < 3) s += `<circle cx="${F.X(z)}" cy="${200 + (e % 1) * 4}" r="3.5" fill="${JADE}" fill-opacity="0.7"/>`; });
+      s += txt(40, 24, "gold: the encoder's cloud; dashed grey: the standard normal; green dots: 20 samples", `font-size="11.5" fill="${INK}"`);
+      const rows: [string, number][] = [["reconstruction", c.rec], ["KL", c.kl], [`total (β = ${fmt(p.be)})`, c.tot]];
+      rows.forEach(([n, v], i) => (s += txt(500, 70 + i * 34, n, `font-size="12" fill="${MUTED}"`) + txt(650, 70 + i * 34, fmt(v, 3), `font-size="15" font-weight="700" fill="${i === 2 ? GOLD : INK}"`)));
+      const bm = 2 / (2 + p.be), bs = Math.sqrt(p.be / (2 + p.be));
+      s += txt(500, 190, `best here: μ ${fmt(bm, 3)}, σ ${fmt(bs, 3)}`, `font-size="11.5" fill="${MUTED}"`);
+      $("[data-draw]").innerHTML = s;
+      root.querySelectorAll<HTMLElement>("[data-v]").forEach((el) => (el.textContent = fmt(p[el.dataset.v!], 2)));
+    }
+    const redraw = stepper(root, steps, draw, { delay: 2 });
+    root.querySelectorAll<HTMLInputElement>("[data-k]").forEach((inp) => inp.addEventListener("input", () => { p[inp.dataset.k!] = +inp.value; redraw(); }));
+    $("[data-best]").addEventListener("click", () => { best(); redraw(); });
+  });
+</script>

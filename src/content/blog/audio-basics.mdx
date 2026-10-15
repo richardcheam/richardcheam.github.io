@@ -1,0 +1,318 @@
+---
+title: "What a computer hears: samples, frames and mel spectrograms"
+title_key: "What a computer hears"
+date: 2026-10-14
+category: "speech-ai"
+read_time: "25 min"
+series_order: 8.5
+series: speech-ai
+featured: false
+excerpt: "A microphone turns air into a long list of numbers. This post follows those numbers from a single sample to the mel spectrogram that speech models read, with every number small enough to check by hand."
+question: "What does a speech model actually receive when you speak into a microphone?"
+my_work: "A concept note. I worked every example by hand and built the figures from the standard formulas."
+result: "One second of speech at 24 kHz is 24,000 numbers. Slicing, the Fourier transform and the mel scale shrink it to about 8,000 numbers a model can read, and Mimi shrinks it further to 400."
+evidence_limit: "This explains standard signal processing. No experiments; all numbers are textbook values or simple arithmetic."
+lesson: "Every step from waveform to mel throws something away on purpose. Knowing what was thrown away tells you what a model can and cannot hear."
+---
+
+import SoundSlinky from "../../components/figures/SoundSlinky.astro";
+import SampleDots from "../../components/figures/SampleDots.astro";
+import AliasWheel from "../../components/figures/AliasWheel.astro";
+import BitRuler from "../../components/figures/BitRuler.astro";
+import FrameHop from "../../components/figures/FrameHop.astro";
+import PianoSpectrum from "../../components/figures/PianoSpectrum.astro";
+import Spectrogram from "../../components/figures/Spectrogram.astro";
+import MelBend from "../../components/figures/MelBend.astro";
+import VowelFormants from "../../components/figures/VowelFormants.astro";
+import ThreeRoads from "../../components/figures/ThreeRoads.astro";
+
+When you say "hello" to your phone, the phone never hears a word. It receives a long list of numbers. Everything a speech model does, from writing down what you said to answering in a new voice, starts from that list.
+
+This post builds that list from scratch. We start with air, end with a picture called a mel spectrogram, and check every number along the way with simple arithmetic. Later posts in this series ([Pocket TTS](/blog/pocket-tts-calm-explained/), [Mimi](/blog/mimi-codec-explained/)) assume everything here.
+
+
+## What sound is
+
+Stretch a slinky across a table and give one end a quick push. You will see a bunch of tight coils travel along it, then a stretched-out gap, then more tight coils. No single coil travels far. Each one just wiggles forward and back, and passes the push to its neighbour.
+
+Air does the same thing. When you speak, your vocal folds push the air in front of them, and that push travels outward as squeezed and stretched patches of air. When the patches reach your ear, they wiggle your eardrum forward and back. That wiggle is what you hear.
+
+If we draw how hard the air pushes at one spot over time, we get a wavy line. Up means the air is a little squeezed, down means it is a little stretched. This line is called a **waveform**.
+
+Two things about the line matter most:
+
+- **How tall the waves are.** Taller waves mean a louder sound.
+- **How often the waves repeat.** More repeats per second means a higher sound.
+
+We count repeats per second in **hertz**, written Hz. One hertz is one repeat each second. A thousand hertz is a **kilohertz**, written kHz.
+
+Worked example. The A above middle C on a piano repeats **440** times a second, so it is 440 Hz. One full wave lasts $1/440$ of a second, about **2.27 milliseconds** (thousandths of a second). The A one octave higher is **880 Hz**: twice the repeats, each wave half as long.
+
+People hear from about **20 Hz** (a deep rumble) to about **20,000 Hz**, or **20 kHz** (a thin whistle). The top end drops as we get older. A speaking voice sits much lower: a typical adult male voice buzzes at about **85 to 155 Hz**, a typical adult female voice at about **165 to 255 Hz**. That buzz rate is called the pitch; we look at it closely in [section 9](#pitch-and-the-shape-of-the-voice).
+
+<figure class="blog-figure blog-figure--wide">
+  <SoundSlinky alt="A row of vertical lines (air) pushed by a speaker cone; squeezed patches travel along it. Below, the pressure at one red line is drawn as a wave over 10 milliseconds. Sliders set the pitch and the loudness." />
+  <figcaption><strong>Figure 1. Air as a slinky.</strong> The motion is slowed down a great deal; the plot below is in real milliseconds. Pitch changes how close the squeezed patches are; loudness changes how tightly they bunch.</figcaption>
+</figure>
+
+
+## Recording: taking many snapshots
+
+A flipbook is a stack of drawings. Each page is a still picture, but flip them fast and you see motion. Your eye fills in the gaps between pages.
+
+A microphone and a computer record sound the same way. The microphone turns the air's push into a tiny electrical voltage that goes up and down with the waveform. The computer then measures that voltage again and again, very fast, and writes each measurement down as a number. Each measurement is one page of the flipbook. It is called a **sample**.
+
+How many samples we take each second is called the **sample rate**. It is measured in hertz too, because it counts something per second.
+
+Worked example. Mimi, the audio codec under Pocket TTS, records at **24,000 samples per second**, or **24 kHz**. So:
+
+- one second of speech is **24,000 numbers**;
+- one sample covers $1/24000$ of a second, about **0.042 milliseconds**;
+- a 440 Hz note gets $24000 / 440 \approx$ **54.5 samples** per wave, plenty to trace its shape.
+
+A recording, then, is just a very long list of heights. A ten-second voice message at 24 kHz is a list of **240,000** numbers. That list is what the computer "hears".
+
+<figure class="blog-figure blog-figure--wide">
+  <SampleDots alt="A 440 hertz wave over 5 milliseconds with dots at each sample. Chips set the sample rate from 2 to 44.1 kilohertz; the first 12 sample values are listed below as whole numbers." />
+  <figcaption><strong>Figure 2. A recording is a list of dots.</strong> Pick a sample rate and see how many dots land on 5 ms of a 440 Hz note. "Hide the true wave" leaves only what the computer stores.</figcaption>
+</figure>
+
+
+## How often is enough
+
+In films, a car's wheels sometimes seem to spin slowly backwards while the car speeds forward. The camera takes only about **24** pictures a second. If a spoke moves almost a full turn between two pictures, it lands just behind where the last spoke was, and your brain sees it creep backwards. The camera took snapshots too slowly to follow the real motion.
+
+Sound has the same trap. If a wave wiggles too fast for our sample rate, the samples land in a pattern that looks like a slower wave. The fast wave pretends to be a slow one. This is called **aliasing** (the wave takes on a false name, an alias).
+
+How fast must we sample? We need at least two samples in every wave: one near the top and one near the bottom. So the highest pitch we can record honestly is **half the sample rate**. That limit is called the **Nyquist frequency**, after Harry Nyquist, an engineer who studied this in the 1920s:
+
+$f_{\text{Nyquist}} = \frac{\text{sample rate}}{2}$
+
+Worked examples:
+
+- **CD audio** samples at **44,100 Hz** (44.1 kHz). Half of that is **22,050 Hz**, just above the 20 kHz top of human hearing. That is why CDs picked this rate.
+- **Mimi** samples at **24 kHz**, so it keeps everything up to **12 kHz**. That covers the voice, including the hiss of "s" and "f".
+- **Speech recognisers** such as Whisper use **16 kHz**, which keeps up to **8 kHz**. Most of what tells words apart lives below that, which is why old telephones (about 300 to 3,400 Hz) were still understandable.
+- A **15 kHz** whistle sampled at 24 kHz is above the 12 kHz limit. Its samples look exactly like a **9 kHz** tone, because $24 - 15 = 9$. The recording plays back the wrong note.
+
+To stop this, a recorder filters out everything above the Nyquist frequency before it takes samples. You lose the very high sounds, but you never get fake ones.
+
+<figure class="blog-figure blog-figure--wide">
+  <AliasWheel alt="Left: a wheel filmed at 24 pictures a second, whose spoke appears to turn backwards at 23 turns a second. Right: a tone sampled at 24 kilohertz; above 12 kilohertz the dots trace a false, lower tone drawn dashed in red." />
+  <figcaption><strong>Figure 3. Too slow to follow.</strong> Drag the tone above 12 kHz: the dots no longer follow the grey wave and draw a slower fake instead (dashed red).</figcaption>
+</figure>
+
+
+## How precise each sample is
+
+Measure a pencil with a ruler that has only centimetre marks and you might say "about 14 cm". With millimetre marks you can say "14.3 cm". The pencil did not change; your ruler got finer.
+
+Each sample is a measurement of height, so it needs a ruler too. A computer stores each height using a fixed number of **bits** (yes/no switches). The number of bits per sample is called the **bit depth**. Each extra bit doubles the number of marks on the ruler.
+
+Worked example:
+
+- **8 bits** give $2^8 =$ **256** possible heights.
+- **16 bits**, the standard for CDs and most speech data, give $2^{16} =$ **65,536** heights, from **−32,768** to **+32,767**.
+- **24 bits**, common in studios, give **16,777,216** heights.
+
+When a true height falls between two marks, it is rounded to the nearest one. That small rounding error sounds like a faint hiss. Each extra bit makes the hiss about half as loud, which is roughly **6 decibels** quieter (decibels measure loudness ratios; 6 dB is about a factor of two in wave height). So 16 bits give about $16 \times 6 \approx$ **96 dB** between the loudest sound and the hiss, more than a quiet room to a loud concert.
+
+Now we can count how much data a recording takes:
+
+- CD audio: **44,100** samples × **16** bits × **2** channels (left and right) = **1,411,200 bits per second**, about 1.4 million.
+- Mimi's input: **24,000** samples × **16** bits × **1** channel = **384,000 bits per second**, or 48,000 bytes (a byte is 8 bits). Ten seconds is 480,000 bytes, almost half a megabyte.
+
+Models usually turn these whole numbers into decimals between −1 and +1 by dividing by 32,768, but the ruler marks stay the same.
+
+<figure class="blog-figure blog-figure--wide">
+  <BitRuler alt="Samples of a wave rounded to the nearest mark of a ruler; the number of marks is two to the power of the bits slider. Red bars show the rounding error." />
+  <figcaption><strong>Figure 4. Bit depth is a ruler.</strong> Each dot snaps to the nearest mark; red bars are the rounding error. Listen plays a 440 Hz tone at the chosen depth so you can hear the hiss.</figcaption>
+</figure>
+
+
+## Slicing into frames
+
+Imagine reading a long book one letter at a time, never seeing a whole word. It would be slow and confusing. Grouping letters into words makes reading easier.
+
+A single sample tells us almost nothing: one height, for one 24,000th of a second. A sound like "s" or "a" only shows its character over many samples. So computers cut the long list into short, overlapping slices and look at one slice at a time. Each slice is called a **frame**. Its length is the **window**, and how far we slide forward to start the next slice is the **hop**.
+
+Why overlap? Speech changes smoothly. If slices sat end to end, a sound that started right at a cut would be split in two. Sliding by less than a full window means every moment lands near the middle of some frame.
+
+Here is the count, explained in words first: the number of samples in a frame is the sample rate times how long the frame lasts.
+
+$\text{samples per frame} = \text{sample rate} \times \text{frame length in seconds}$
+
+Worked examples:
+
+- A typical speech recogniser at **16 kHz** uses a **25 ms** window and a **10 ms** hop. Window: $16000 \times 0.025 =$ **400** samples. Hop: $16000 \times 0.010 =$ **160** samples. That gives **100 frames per second**, so ten seconds is **1,000 frames**.
+- **Mimi** at **24 kHz** uses frames of **80 ms** with no overlap at its output: $24000 \times 0.08 =$ **1,920** samples per frame, and $24000 / 1920 =$ **12.5 frames per second**. Ten seconds is **125 frames**. This is the "12.5 Hz" you will meet in the Pocket TTS and Mimi posts. Mimi does not cut its frames with a simple window like this; it learns how to squeeze each 80 ms into a few numbers ([section 10](#what-models-do-with-all-this)). The arithmetic is the same.
+
+One more detail. Chopping a wave abruptly at the slice edges creates false clicks. So each frame is multiplied by a gentle hump shape that fades in and out at the edges, usually a **Hann window** (named after Julius von Hann). That is the main reason for the overlap: the faded edges of one frame are covered by the middle of the next.
+
+<figure class="blog-figure blog-figure--wide">
+  <FrameHop alt="The waveform of the word see with overlapping hump-shaped frames drawn over it. One frame is highlighted and shown separately, faded at its edges. Sliders set the window and the hop." />
+  <figcaption><strong>Figure 5. Window and hop.</strong> The humps are Hann windows. Step moves the highlighted frame forward by one hop; the box on the right shows that slice after fading its edges.</figcaption>
+</figure>
+
+
+## Inside one frame: which piano keys are pressed
+
+Press one piano key and you hear one clean note. Press three keys together and you hear a chord. The air does not carry three separate waves; it carries one wiggly wave that is the sum of the three. Yet a trained ear can still pick out the three notes.
+
+This is true of every sound. Any wiggle, however messy, can be built by adding up pure, smooth tones (sine waves), each with its own pitch and loudness. A voice saying "ah" is a pile of pure tones. Jean-Baptiste Fourier, a French mathematician, showed this in the early 1800s.
+
+So for each frame we can ask: which pure tones, at what loudness, add up to this slice? It is like looking at the wiggle and answering "which piano keys are pressed, and how hard". The tool that answers this is the **Fourier transform**. Computers use a fast recipe for it called the **FFT**, the **fast Fourier transform**. The answer for one frame is a list of loudnesses, one per pitch. That list is called a **spectrum**.
+
+The FFT does not give every pitch. It gives evenly spaced "keys", and the spacing is set by how long the frame is: one key per $1/\text{window length}$ hertz. A longer slice can tell closer notes apart.
+
+Worked example. A frame of **400 samples** at **16 kHz** lasts **25 ms**. Its keys are $1 / 0.025 =$ **40 Hz** apart: 0, 40, 80, ... up to 8,000 Hz, which is **201** keys. Two tones at 200 Hz and 220 Hz fall into neighbouring keys and blur together. A **100 ms** frame has keys **10 Hz** apart and can tell them apart.
+
+Now a chord. Mix **262 Hz** (middle C), **330 Hz** (E) and **392 Hz** (G). The wiggle looks complicated. The spectrum shows three tall spikes, near 262, 330 and 392, and almost nothing else.
+
+<figure class="blog-figure blog-figure--wide">
+  <PianoSpectrum alt="A piano keyboard with C, E and G pressed, the wiggly wave they make together, and a bar chart of the frame's spectrum with three peaks at about 262, 330 and 392 hertz. A slider sets the frame length." />
+  <figcaption><strong>Figure 6. Which keys are pressed?</strong> Click keys to build a chord. A short frame has keys far apart and blurs close notes together; drag the frame length to 100 ms and the three notes separate.</figcaption>
+</figure>
+
+
+## The spectrogram: a picture of sound
+
+Take every frame's spectrum and stand it up as a thin vertical strip, with low pitches at the bottom and high pitches at the top. Colour each spot by loudness: dark for quiet, bright for loud. Now put the strips side by side, in time order, like the pages of the flipbook laid out on a table.
+
+The result is a picture. Time runs left to right, pitch runs bottom to top, and brightness shows loudness. It is called a **spectrogram**. Making one this way, with short overlapping windows and an FFT for each, is called the **short-time Fourier transform**, or **STFT**.
+
+You can read speech in it. Vowels show as stacks of bright horizontal stripes. "S" shows as a bright fuzzy cloud up high, above 4 kHz. Silence is dark. A stop like "t" is a thin vertical line, a quick burst at all pitches.
+
+Loudness in a spectrogram is usually shown in decibels, a scale that compresses big ratios. Our ears work that way too: a sound with ten times the power sounds only about twice as loud.
+
+There is a catch, and it comes from [section 6](#inside-one-frame-which-piano-keys-are-pressed). A long window gives finely spaced keys, so pitch is sharp, but a quick click gets smeared across the whole long window, so timing is blurry. A short window catches the click exactly but its keys are far apart, so pitch is blurry. You cannot have both at once.
+
+Worked example at **16 kHz**:
+
+| Window | Samples | Key spacing | A click is smeared over |
+|---|---|---|---|
+| 5 ms | 80 | 200 Hz | 5 ms |
+| 25 ms | 400 | 40 Hz | 25 ms |
+| 100 ms | 1,600 | 10 Hz | 100 ms |
+
+Speech systems settle near **25 ms**: short enough to follow sounds that change every few tens of milliseconds, long enough to see the voice's stripes. With a **10 ms** hop, one second becomes **100** strips of **201** numbers each, **20,100** numbers in all.
+
+<figure class="blog-figure blog-figure--wide">
+  <Spectrogram alt="The waveform of see two above its spectrogram, built left to right: a fuzzy cloud high up for s, stacked stripes for the vowels, a thin vertical line for t. A slider changes the window from 5 to 100 milliseconds; a switch shows the mel version." />
+  <figcaption><strong>Figure 7. A picture of sound.</strong> The sound is synthetic, built from the formants in <a href="#pitch-and-the-shape-of-the-voice">section 9</a>. Time runs left to right, pitch bottom to top, brightness is loudness. Try 5 ms and 100 ms to see the trade-off, and Mel to preview <a href="#mel-squeezing-the-top-to-match-the-ear">section 8</a>.</figcaption>
+</figure>
+
+
+## Mel: squeezing the top to match the ear
+
+Look at a piano. Each octave, from one C to the next, has the same 12 keys and the same width on the keyboard. But in hertz, octaves are wildly different sizes. The bottom octave of a piano spans about **27 to 55 Hz**, a gap of 28 Hz. The top octave spans about **2,093 to 4,186 Hz**, a gap of over 2,000 Hz. The keyboard squeezes high frequencies together because that is how we hear: a doubling of pitch always sounds like the same step.
+
+The spectrogram in [section 7](#the-spectrogram-a-picture-of-sound) does not do this. Its keys are evenly spaced in hertz, so it spends most of its rows on high pitches where our ears are least picky. Listen to the difference:
+
+- **100 Hz** to **200 Hz**: a huge jump, a full octave.
+- **8,000 Hz** to **8,100 Hz**: the same 100 Hz gap, but you can barely tell them apart.
+
+So we bend the pitch axis to match the ear: keep low pitches spread out, squeeze high ones together. The bent scale is called the **mel scale** (from "melody"), from listening experiments by Stevens, Volkmann and Newman in 1937. The usual formula, in words: take the frequency, divide by 700, add 1, take the base-10 logarithm, and multiply by 2,595.
+
+$m = 2595 \cdot \log_{10}\!\left(1 + \frac{f}{700}\right)$
+
+Below about 1,000 Hz it is nearly a straight line; above it, it grows more and more slowly. The numbers are chosen so that **1,000 Hz is 1,000 mel**.
+
+Worked example (check with a calculator):
+
+- 100 Hz → **150** mel; 200 Hz → **283** mel. Gap: **133** mel.
+- 8,000 Hz → **2,840** mel; 8,100 Hz → **2,853** mel. Gap: about **13** mel.
+
+The same 100 Hz step counts ten times more at the bottom than at the top, just as our ears say.
+
+To make a **mel spectrogram**, we place a set of overlapping triangle filters, evenly spaced on the mel scale, so they are narrow at low pitches and wide at high ones. Each triangle adds up the loudness of the FFT keys under it into one number. The usual count is **80** triangles, called **80 mel bands**. Then we take the logarithm, so the numbers follow loudness the way the ear does.
+
+Worked example. With a 25 ms window at 16 kHz, each frame's **201** FFT numbers become **80** mel numbers. At **100** frames per second, one second of speech becomes **80 × 100 = 8,000** numbers, compared with **16,000** raw samples. The picture is smaller and closer to what a listener cares about. (Some newer models use 128 bands; the idea is the same.)
+
+<figure class="blog-figure blog-figure--wide">
+  <MelBend alt="An even hertz ruler bends into the mel scale, squeezing the high end; pairs of tones 100 hertz apart are marked on both. Below, triangle filters evenly spaced in mel, narrow at low pitch and wide at high pitch, optionally summing one vowel frame into bands." />
+  <figcaption><strong>Figure 8. Bending the ruler to fit the ear.</strong> Pick a pair of tones 100 Hz apart and compare their gap in mel. Show one "ee" frame to watch 201 FFT values collapse into band values.</figcaption>
+</figure>
+
+
+## Pitch and the shape of the voice
+
+Sing one note as "ee", then the same note as "oo". The pitch did not change, yet anyone can tell the two apart. Two separate things are happening, and a spectrogram shows both.
+
+The first is the **buzz**. Your vocal folds open and close many times a second, like lips buzzing in a trumpet. That buzz rate is the pitch. Because the buzz is not a pure tone, it also makes copies at 2, 3, 4 and more times the base rate, called **harmonics**. The base rate is called the **fundamental frequency**, written **F0** ("F zero").
+
+The second is the **shape of your mouth and throat**. They act like a tube that makes some pitches ring louder and muffles others. Change the tongue and lips and you change which pitches ring. Those loud regions are called **formants**, numbered F1, F2 and up from the bottom. They decide the vowel.
+
+Think of a guitar string and the guitar's wooden body. The string sets the note (F0). The body decides which harmonics come out loud (formants). Swap the body and the same note sounds different.
+
+Worked example, for a voice buzzing at **F0 = 120 Hz**:
+
+- Harmonics sit at **120, 240, 360, 480, ...** Hz, a ladder of stripes 120 Hz apart in the spectrogram.
+- For "ee" (as in "heed"), a typical adult male voice has formants near **F1 ≈ 270 Hz** and **F2 ≈ 2,290 Hz**. The harmonics near those heights are bright.
+- For "oo" (as in "who'd"), formants sit near **F1 ≈ 300 Hz** and **F2 ≈ 870 Hz**.
+- Same ladder, different bright patches. Raise F0 to **240 Hz** and the rungs spread to 240, 480, 720, ..., but the bright patches stay roughly where they were, so it is still "ee".
+
+This split matters for models. In a mel spectrogram, the fine stripes (pitch) and the broad patches (vowel and voice character) are mixed together. The evaluation post measures F0 separately to check whether synthetic speech has the right melody ([speech evaluation metrics](/blog/speech-evaluation-metrics/)).
+
+<figure class="blog-figure blog-figure--wide">
+  <VowelFormants alt="A spectrum with harmonic lines at multiples of the pitch, under a smooth curve with peaks labelled F1 and F2. Buttons switch the vowel between ee, ah and oo, and a slider moves the pitch." />
+  <figcaption><strong>Figure 9. Same note, different vowel.</strong> Moving F0 slides the lines but leaves the curve alone; changing the vowel reshapes the curve but leaves the lines alone. Formants are Peterson and Barney's adult male averages. Listen plays a buzz through those formants.</figcaption>
+</figure>
+
+
+## What models do with all this
+
+We now have three ways to hand sound to a model: raw samples, a mel spectrogram, or something learned. Each family of speech models picks one.
+
+**Speech recognisers read mel.** Automatic speech recognition (**ASR**), turning speech into text, usually starts from a log-mel spectrogram. Whisper, for example, resamples audio to 16 kHz, uses 25 ms windows with a 10 ms hop and 80 mel bands (128 in its largest recent version). The mel picture already throws away what does not help with words, such as tiny phase details.
+
+**Older text-to-speech predicts mel, then a vocoder fills in the rest.** Text-to-speech (**TTS**) models like Tacotron 2 learned to draw a mel spectrogram from text. But a mel spectrogram is not sound: it has lost the exact timing of each wave (the phase) and squeezed the high pitches. A second network, called a **vocoder** (voice encoder), learns to turn the mel picture back into 24,000-ish samples a second. WaveNet and HiFi-GAN are well-known vocoders.
+
+**Mimi skips mel and learns its own frames.** Mimi is a neural audio **codec** (coder-decoder). Instead of a hand-made recipe of windows, FFTs and triangles, it learns its own way to squeeze sound. It takes **24 kHz** samples, and each **80 ms** chunk of **1,920** samples comes out as one frame of a few numbers, **12.5** frames a second. Its decoder learns to turn those frames straight back into samples, so no separate vocoder is needed.
+
+Worked example, one second of speech:
+
+| Form | Numbers per second |
+|---|---|
+| Raw samples at 24 kHz | **24,000** |
+| Linear spectrogram, 16 kHz, 25/10 ms | **20,100** |
+| 80-band mel, 100 frames/s | **8,000** |
+| Pocket TTS latents: 12.5 frames × 32 numbers | **400** |
+
+Each row keeps less, and each was chosen so that what it drops is something a listener would not miss. The trick in the next posts is how a model can generate those 400 numbers a second and still sound like a person.
+
+<figure class="blog-figure blog-figure--wide">
+  <ThreeRoads alt="Three pipelines: speech recognition reads a log-mel spectrogram; older TTS draws a mel spectrogram then a vocoder makes sound; codec TTS generates Mimi frames that the Mimi decoder turns into sound. Below, a log-scale bar chart: 24,000, 20,100, 8,000 and 400 numbers per second." />
+  <figcaption><strong>Figure 10. Three roads from sound to model.</strong> Bars use a log scale so that 400 stays visible next to 24,000.</figcaption>
+</figure>
+
+
+## Next reads
+
+You now know what the numbers are: samples at a sample rate, grouped into frames, turned into spectra, bent onto the mel scale, and squeezed. Two posts pick up from here:
+
+- [How Mimi works](/blog/mimi-codec-explained/): how a codec learns to turn **1,920** samples into one frame at **12.5 Hz**, and back.
+- [How Pocket TTS works](/blog/pocket-tts-calm-explained/): how a small model generates those frames, 32 numbers at a time, fast enough to run on a laptop.
+
+
+## Related
+
+- [Residual vector quantization](/blog/residual-vector-quantization/), the next post: from frames to tokens
+- [Whisper review](/paper-reviews/whisper/), a recogniser that reads the log-mel spectrograms built here
+
+## Sources
+
+- Oppenheim, A. V. and Schafer, R. W., *Discrete-Time Signal Processing*, 3rd ed., Pearson, 2010. Ch. 4 (sampling, Nyquist, aliasing, anti-alias filtering), Ch. 4.8 (quantization noise, about 6 dB per bit), Ch. 7.5 and Ch. 10 (windows, Hann window, short-time Fourier transform, time-frequency trade-off).
+- Shannon, C. E., "Communication in the Presence of Noise", *Proc. IRE* 37(1), 1949 (sampling theorem); Nyquist, H., "Certain Topics in Telegraph Transmission Theory", *Trans. AIEE* 47, 1928.
+- Rabiner, L. and Schafer, R., *Theory and Applications of Digital Speech Processing*, Pearson, 2011. Ch. 3 (speech production, F0, formants, source-filter model), Ch. 7 (short-time Fourier analysis, spectrograms).
+- Jurafsky, D. and Martin, J. H., *Speech and Language Processing*, 3rd ed. draft, ch. "Phonetics" (sampling, quantization, 16 kHz speech, spectrograms, formants) and ch. "Automatic Speech Recognition" (25 ms windows, 10 ms hop, mel filterbank).
+- Stevens, S. S., Volkmann, J. and Newman, E. B., "A Scale for the Measurement of the Psychological Magnitude Pitch", *JASA* 8(3), 1937 (mel scale). The formula $2595 \log_{10}(1 + f/700)$ is O'Shaughnessy, D., *Speech Communication: Human and Machine*, Addison-Wesley, 1987 (also 2nd ed. 2000, ch. 4).
+- Peterson, G. E. and Barney, H. L., "Control Methods Used in a Study of the Vowels", *JASA* 24(2), 1952, Table II (average male formants: /i/ 270, 2,290, 3,010 Hz; /u/ 300, 870, 2,240 Hz; /ɑ/ 730, 1,090, 2,440 Hz).
+- Titze, I. R., *Principles of Voice Production*, Prentice Hall, 1994 (typical speaking F0 ranges). Ranges of about 85 to 155 Hz and 165 to 255 Hz are a common textbook summary; they vary by speaker and language.
+- Fletcher, H. and Munson, W., and ISO 226:2003 (equal-loudness contours; the approximate 20 Hz to 20 kHz hearing range).
+- Red Book CD standard, IEC 60908 (44.1 kHz, 16-bit, stereo).
+- Radford, A. et al., "Robust Speech Recognition via Large-Scale Weak Supervision" (Whisper), 2022, Sec. 2.2 (16 kHz, 80-channel log-mel, 25 ms window, 10 ms stride); large-v3 model card for 128 mel bins.
+- Shen, J. et al., "Natural TTS Synthesis by Conditioning WaveNet on Mel Spectrogram Predictions" (Tacotron 2), ICASSP 2018, Sec. 2.1 (80-channel mel, 50 ms frame, 12.5 ms hop).
+- Kong, J., Kim, J. and Bae, J., "HiFi-GAN", NeurIPS 2020 (mel-to-waveform vocoder); van den Oord, A. et al., "WaveNet", 2016.
+- Défossez, A. et al., "Moshi: a speech-text foundation model for real-time dialogue", Kyutai, 2024, Sec. 3.3 (Mimi: 24 kHz input, 12.5 Hz frames, 1,920-sample hop).
+- Kyutai, CALM / Pocket TTS paper and released config (32-channel latents at 12.5 Hz), as cited in the Pocket TTS post.

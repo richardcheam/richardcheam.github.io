@@ -1,0 +1,57 @@
+---
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" tabindex="0" role="region" aria-label={alt} data-tiles>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 250" role="img" aria-labelledby="tiles-title tiles-desc" class="blog-diagram-svg" font-family="Inter, sans-serif">
+<title id="tiles-title">Quantized latent against a continuous latent</title><desc id="tiles-desc">Left: a smooth curve forced onto eight horizontal levels, drawn as a staircase of tiles. Right: the same curve kept as a continuous line.</desc>
+<text x="40" y="26" fill="#5f5f66" font-size="13" letter-spacing="1">MOSAIC · CODEBOOK OF 8 LEVELS</text>
+<text x="420" y="26" fill="#5f5f66" font-size="13" letter-spacing="1">PAINTING · 32-BIT FLOAT</text>
+<g stroke="#ececf1">
+<line x1="40" y1="45" x2="360" y2="45"/><line x1="40" y1="70" x2="360" y2="70"/><line x1="40" y1="95" x2="360" y2="95"/><line x1="40" y1="120" x2="360" y2="120"/><line x1="40" y1="145" x2="360" y2="145"/><line x1="40" y1="170" x2="360" y2="170"/><line x1="40" y1="195" x2="360" y2="195"/><line x1="40" y1="220" x2="360" y2="220"/>
+</g>
+<path data-curve-l d="M40 140 C80 70 120 60 160 110 S240 210 280 150 S340 80 360 100" fill="none" stroke="#d5d5dc" stroke-dasharray="4 4"/>
+<g data-tiles-g fill="#594578" fill-opacity="0.18" stroke="#594578" stroke-width="1">
+<rect x="40" y="132" width="20" height="25"/><rect x="60" y="107" width="20" height="25"/><rect x="80" y="82" width="20" height="25"/><rect x="100" y="82" width="20" height="25"/><rect x="120" y="82" width="20" height="25"/><rect x="140" y="82" width="20" height="25"/><rect x="160" y="107" width="20" height="25"/><rect x="180" y="132" width="20" height="25"/><rect x="200" y="157" width="20" height="25"/><rect x="220" y="182" width="20" height="25"/><rect x="240" y="182" width="20" height="25"/><rect x="260" y="157" width="20" height="25"/><rect x="280" y="132" width="20" height="25"/><rect x="300" y="107" width="20" height="25"/><rect x="320" y="82" width="20" height="25"/><rect x="340" y="82" width="20" height="25"/>
+</g>
+<text x="40" y="243" fill="#5f5f66" font-size="13">every frame snaps to the nearest level</text>
+<path data-curve-r d="M420 140 C460 70 500 60 540 110 S620 210 660 150 S720 80 740 100" fill="none" stroke="#4F5D3A" stroke-width="2.4"/>
+<g data-points fill="#4F5D3A"><circle cx="420" cy="140.0" r="3"/><circle cx="480" cy="80.0" r="3"/><circle cx="540" cy="110.0" r="3"/><circle cx="600" cy="171.2" r="3"/><circle cx="660" cy="150.0" r="3"/><circle cx="740" cy="100.0" r="3"/></g>
+<text x="420" y="243" fill="#5f5f66" font-size="13">each frame is any point on the line: no rounding step</text>
+</svg>
+<button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+<p class="blog-figure-reading">A codec token is an index into a finite table. A continuous latent is the value itself.</p>
+
+<script>
+  import { animate, dur, drawStroke, hideStroke, setupFigure, wait } from "../../lib/figure-motion";
+
+  // Both curves draw at the same pace; each tile drops onto its level as the
+  // left curve passes its frame, while the right keeps exact points on the line.
+  document.querySelectorAll<HTMLElement>("[data-tiles]").forEach((root) => {
+    const left = root.querySelector<SVGPathElement>("[data-curve-l]")!;
+    const right = root.querySelector<SVGPathElement>("[data-curve-r]")!;
+    const tiles = Array.from(root.querySelectorAll<SVGRectElement>("[data-tiles-g] rect"));
+    const points = Array.from(root.querySelectorAll<SVGCircleElement>("[data-points] circle"));
+    const T = 2.6;
+    const at = (x: number, x0: number) => ((x - x0) / 320) * T;
+    setupFigure(
+      root,
+      () => {
+        left.style.opacity = "0";
+        hideStroke(right);
+        for (const el of [...tiles, ...points]) { el.style.opacity = "0"; el.style.transform = ""; }
+      },
+      async (alive) => {
+        animate(left, { opacity: [0, 1] }, { duration: dur(0.6) });
+        drawStroke(right, T, "linear");
+        tiles.forEach((t) => {
+          t.style.transformBox = "fill-box";
+          animate(t, { opacity: [0, 1], transform: ["translateY(-10px)", "translateY(0px)"] }, { duration: dur(0.28), delay: dur(at(+t.getAttribute("x")! + 10, 40)), ease: [0.22, 1, 0.36, 1] });
+        });
+        points.forEach((c) => animate(c, { opacity: [0, 1] }, { duration: dur(0.2), delay: dur(at(+c.getAttribute("cx")!, 420)) }));
+        await wait(T);
+        if (!alive()) return;
+      },
+    );
+  });
+</script>

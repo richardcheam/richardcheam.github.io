@@ -1,0 +1,91 @@
+---
+// Toy 3 in the browser: the same metric correlates weakly with human scores
+// clip by clip and strongly system by system, because averaging cancels
+// per-clip noise. 5 systems x 40 clips; true quality 3.0-4.2.
+const { alt } = Astro.props;
+const X0 = 70, Y0 = 300, W = 380, H = 260;
+---
+<div class="blog-diagram sc" role="region" aria-label={alt} data-sc data-cfg={JSON.stringify({ X0, Y0, W, H })}>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 340" role="img" aria-labelledby="sc-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="sc-title">Metric versus human score per clip, collapsing to per-system averages</title>
+    <rect x={X0} y={Y0 - H} width={W} height={H} fill="none" stroke="#ececf1" />
+    <text x={X0 + W / 2} y={Y0 + 24} font-size="11" text-anchor="middle" fill="#2b2b30">human score →</text>
+    <text x={X0 - 16} y={Y0 - H / 2} font-size="11" text-anchor="middle" fill="#2b2b30" transform={`rotate(-90 ${X0 - 16} ${Y0 - H / 2})`}>metric →</text>
+    <g data-dots></g>
+    <g data-cents></g>
+    <g transform="translate(500 60)">
+      <text font-size="11" letter-spacing="1" fill="#5f5f66">SPEARMAN ρ WITH HUMANS</text>
+      <text y="34" font-size="11.5" fill="#2b2b30">clip level (n = 200)</text>
+      <text data-rc y="66" font-size="28" font-weight="700" fill="#2b2b30" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"></text>
+      <text y="106" font-size="11.5" fill="#594578">system level (n = 5)</text>
+      <text data-rs y="138" font-size="28" font-weight="700" fill="#594578" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"></text>
+      <text y="180" font-size="10.5" fill="#5f5f66">With 5 points, ρ can only take 21 values,</text>
+      <text y="195" font-size="10.5" fill="#5f5f66">and one swapped pair already gives 0.90.</text>
+    </g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Metric noise per clip<strong data-vn></strong></span><input class="scrub" data-noise type="range" min="0" max="1.5" step="0.1" value="0.8" style="--n: 15; --p: 53.3%" /></label>
+    <div><span class="fig-panel__name">View</span><div class="fig-chips"><button type="button" class="fig-chip" data-avg aria-pressed="false">Average per system</button><button type="button" class="fig-chip" data-new>New sample</button></div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { setupFigure, tween, wait } from "../../lib/figure-motion";
+  import { gauss, rng, spearman } from "../../lib/eval-math";
+
+  const NS = "http://www.w3.org/2000/svg", S = 5, K = 40;
+  const INK = ["#a33b3b", "#8a6a1f", "#4F5D3A", "#2f6f7e", "#594578"];
+  document.querySelectorAll<HTMLElement>("[data-sc]").forEach((root) => {
+    const c = JSON.parse(root.dataset.cfg!);
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const noise = $<HTMLInputElement>("[data-noise]"), avgBtn = $<HTMLButtonElement>("[data-avg]");
+    let seed = 3, base: { s: number; u: number; h: number; e: number }[] = [];
+    const draw = () => {
+      const r = rng(seed);
+      base = [];
+      for (let s = 0; s < S; s++) for (let k = 0; k < K; k++) base.push({ s, u: 0.4 * gauss(r), h: 0.5 * gauss(r), e: gauss(r) });
+    };
+    const q = (s: number) => 3.0 + s * 0.3;
+    const dotsG = $<SVGGElement>("[data-dots]"), centG = $<SVGGElement>("[data-cents]");
+    const mk = (g: SVGGElement, r: number, fill: string, op: number) => { const d = document.createElementNS(NS, "circle"); d.setAttribute("r", String(r)); d.setAttribute("fill", fill); d.setAttribute("fill-opacity", String(op)); g.append(d); return d; };
+    const dots = Array.from({ length: S * K }, (_, i) => mk(dotsG, 2.6, INK[Math.floor(i / K)], 0.6));
+    const cents = Array.from({ length: S }, (_, s) => { const d = mk(centG, 7, INK[s], 1); d.setAttribute("stroke", "#fff"); d.setAttribute("stroke-width", "2"); return d; });
+    const sx = (v: number) => c.X0 + ((v - 1.8) / 3.6) * c.W, sy = (v: number) => c.Y0 - ((v - 1.2) / 4.4) * c.H;
+
+    function frame(collapse: number) {
+      const sd = +noise.value;
+      const pts = base.map((b) => ({ s: b.s, hx: q(b.s) + b.u + b.h, my: q(b.s) + b.u + sd * b.e }));
+      const cen = Array.from({ length: S }, (_, s) => {
+        const g = pts.filter((p) => p.s === s);
+        return { hx: g.reduce((a, p) => a + p.hx, 0) / K, my: g.reduce((a, p) => a + p.my, 0) / K };
+      });
+      pts.forEach((p, i) => {
+        const t = cen[p.s];
+        dots[i].setAttribute("cx", String(sx(p.hx + (t.hx - p.hx) * collapse)));
+        dots[i].setAttribute("cy", String(sy(p.my + (t.my - p.my) * collapse)));
+        dots[i].setAttribute("fill-opacity", String(0.6 * (1 - collapse) + 0.05));
+      });
+      cen.forEach((t, s) => { cents[s].setAttribute("cx", String(sx(t.hx))); cents[s].setAttribute("cy", String(sy(t.my))); cents[s].style.opacity = String(collapse); });
+      $("[data-rc]").textContent = spearman(pts.map((p) => p.hx), pts.map((p) => p.my)).toFixed(2);
+      $("[data-rs]").textContent = spearman(cen.map((t) => t.hx), cen.map((t) => t.my)).toFixed(2);
+      $("[data-vn]").textContent = `σ = ${sd.toFixed(1)}`;
+      noise.style.setProperty("--p", `${(sd / 1.5) * 100}%`);
+    }
+    const cur = () => (avgBtn.getAttribute("aria-pressed") === "true" ? 1 : 0);
+    noise.addEventListener("input", () => frame(cur()));
+    avgBtn.addEventListener("click", async () => {
+      const on = cur() === 0;
+      avgBtn.setAttribute("aria-pressed", String(on));
+      await tween(0.8, (t) => frame(on ? t : 1 - t));
+    });
+    $("[data-new]").addEventListener("click", () => { seed = (seed * 31 + 7) >>> 0; draw(); frame(cur()); });
+    draw();
+    setupFigure(root, () => { avgBtn.setAttribute("aria-pressed", "false"); frame(0); }, async (alive) => {
+      await wait(1.2);
+      if (!alive()) return;
+      avgBtn.setAttribute("aria-pressed", "true");
+      await tween(1.2, (t) => alive() && frame(t));
+    });
+  });
+</script>

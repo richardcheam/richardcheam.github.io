@@ -1,0 +1,41 @@
+---
+// Foundations, attention post: the score table has T² cells. One head at
+// 2 bytes per number: T = 1,000 → 1,000,000 cells, 2 MB; 2,000 → 8 MB;
+// 10,000 → 200 MB; 100,000 → 20 GB.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-cost>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 240" role="img" aria-labelledby="ac-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="ac-title">The attention score table growing as the square of the sequence length</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Sequence length T <strong data-vt></strong></span><input class="scrub" data-t type="range" min="1" max="5" step="0.01" value="3" /></label>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { INK, MUTED, GOLD, JADE, NEG } from "../../lib/net-diagram";
+  import { txt } from "../../lib/plot";
+  const bytes = (b: number) => (b >= 1e9 ? `${+(b / 1e9).toFixed(1)} GB` : b >= 1e6 ? `${+(b / 1e6).toFixed(1)} MB` : b >= 1e3 ? `${+(b / 1e3).toFixed(1)} KB` : `${b} bytes`);
+  document.querySelectorAll<HTMLElement>("[data-cost]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    let T = 1000;
+    const setT = (v: number) => { T = v; $<HTMLInputElement>("[data-t]").value = String(Math.log10(v)); };
+    const steps = () => [10, 100, 1000, 2000, 10000, 100000].map((v, i) => ({ say: v === 2000 ? "Double the length from 1,000 to 2,000: the table becomes four times bigger." : v === 100000 ? "A hundred thousand positions: 20 GB for one head's table in one layer, if stored at once." : `T = ${v.toLocaleString("en")}.`, math: `cells = ${v.toLocaleString("en")}² = ${(v * v).toLocaleString("en")};  memory = 2 bytes × cells = ${bytes(2 * v * v)}`, enter: () => setT(v) }));
+    function draw() {
+      const cells = T * T, side = Math.min(180, Math.sqrt(cells / 1e10) * 180), lin = Math.min(320, (T / 1e5) * 320);
+      let s = txt(30, 22, `T = ${Math.round(T).toLocaleString("en")} tokens`, `font-size="13" font-weight="700" fill="${INK}"`);
+      s += `<rect x="40" y="${220 - 180}" width="180" height="180" fill="none" stroke="#e3e7e6" stroke-dasharray="3 3"/><rect x="40" y="${220 - Math.max(1, side)}" width="${Math.max(1, side)}" height="${Math.max(1, side)}" fill="${GOLD}" fill-opacity="0.7"/>` + txt(40, 236, "score table (area ∝ T²; dashed = 100,000)", `font-size="10.5" fill="${MUTED}"`);
+      s += `<rect x="290" y="130" width="${Math.max(1, lin)}" height="18" fill="${JADE}" fill-opacity="0.8"/>` + txt(290, 120, "grows like T (for comparison)", `font-size="10.5" fill="${MUTED}"`);
+      s += txt(290, 60, `${Math.round(cells).toLocaleString("en")} score cells`, `font-size="15" font-weight="700" fill="${INK}"`) + txt(290, 86, `${bytes(Math.round(2 * cells))} for one head, one layer`, `font-size="13" font-weight="700" fill="${cells > 1e9 ? NEG : INK}"`);
+      s += txt(290, 186, `× 64 numbers per dot product: ${Math.round(cells * 64).toLocaleString("en")} multiply-adds`, `font-size="11.5" fill="${MUTED}"`);
+      $("[data-draw]").innerHTML = s;
+      $("[data-vt]").textContent = Math.round(T).toLocaleString("en");
+    }
+    const redraw = stepper(root, steps, draw, { delay: 1.8 });
+    $<HTMLInputElement>("[data-t]").addEventListener("input", (e) => { T = Math.round(10 ** +(e.target as HTMLInputElement).value); redraw(); });
+  });
+</script>

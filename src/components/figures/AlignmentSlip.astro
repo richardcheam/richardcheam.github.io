@@ -1,0 +1,76 @@
+---
+// VALL-E review, Figure 9: Toy 5, a cartoon of the failure in Sec 6 (p. 12).
+// A reading cursor walks 12 phonemes, one move per frame: +1 normally, stay
+// with probability q, jump +2 (skip) with probability q, step back (repeat)
+// with probability r. Seeded; 500 runs per setting. Not VALL-E's attention.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram as" role="region" aria-label={alt} data-as>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 300" role="img" aria-labelledby="as-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="as-title">A reading cursor that sometimes skips or repeats a phoneme</title>
+    <text x="20" y="22" font-size="11.5" font-weight="700" fill="#2b2b30">The sentence, 12 phonemes</text>
+    <g data-ph></g>
+    <text x="20" y="118" font-size="11.5" font-weight="700" fill="#2b2b30">What got said, frame by frame</text>
+    <g data-out></g>
+    <text data-r1 x="20" y="250" font-size="12.5" font-weight="700" fill="#2b2b30"></text>
+    <text data-r2 x="20" y="272" font-size="12" fill="#2b2b30"></text>
+    <text x="20" y="292" font-size="11" fill="#5f5f66">A cartoon of “words missed or duplicated” (Sec 6, p. 12); every number here is from the toy.</text>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Skip chance q<strong data-vq></strong></span><input class="scrub" data-q type="range" min="0" max="0.1" step="0.01" value="0.05" /></label>
+    <label><span class="fig-panel__name">Repeat chance r<strong data-vr></strong></span><input class="scrub" data-r type="range" min="0" max="0.1" step="0.01" value="0.02" /></label>
+    <div><span class="fig-panel__name">Run</span><div class="fig-chips"><button type="button" class="fig-chip" data-again>Read again</button></div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { setupFigure, wait } from "../../lib/figure-motion";
+  import { rng } from "../../lib/flow-math";
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-as]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const qIn = $<HTMLInputElement>("[data-q]"), rIn = $<HTMLInputElement>("[data-r]");
+    const mk = (g: Element, tag: string, a: Record<string, string | number>, txt?: string) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, String(a[k])); if (txt !== undefined) e.textContent = txt; g.append(e); return e; };
+    const PH = ["ð", "ə", "k", "æ", "t", "s", "æ", "t", "d", "aʊ", "n", "."];
+    function walk(u: () => number, q: number, r: number) {
+      const path = [0];
+      for (let f = 0; f < 40 && path[path.length - 1] < 11; f++) {
+        const p = path[path.length - 1], x = u();
+        path.push(x < r && p > 0 ? p - 1 : x < r + q ? p : x < r + 2 * q ? Math.min(11, p + 2) : p + 1);
+      }
+      return path;
+    }
+    const bad = (path: number[]) => { const seen = new Set(path); let skip = false, rep = false; for (let i = 0; i < 12; i++) if (!seen.has(i)) skip = true; for (let i = 1; i < path.length; i++) if (path[i] < path[i - 1]) rep = true; return { skip, rep }; };
+    let seed = 1, path: number[] = [], shown = 99;
+    function stats() { const u = rng(0), q = +qIn.value, r = +rIn.value; let n = 0; for (let i = 0; i < 500; i++) { const b = bad(walk(u, q, r)); if (b.skip || b.rep) n++; } return n / 5; }
+    function draw() {
+      const gp = $("[data-ph]"), go = $("[data-out]"); gp.replaceChildren(); go.replaceChildren();
+      const vis = path.slice(0, shown), seen = new Set(vis), done = shown >= path.length;
+      PH.forEach((p, i) => {
+        const missed = done && !seen.has(i), cur = vis[vis.length - 1] === i;
+        mk(gp, "rect", { x: 20 + i * 60, y: 32, width: 54, height: 40, rx: 4, fill: missed ? "#a33b3b" : seen.has(i) ? "#4F5D3A" : "#f2f2f5", "fill-opacity": missed ? 0.85 : seen.has(i) ? 0.75 : 1, stroke: cur ? "#2b2b30" : "none", "stroke-width": 2 });
+        mk(gp, "text", { x: 47 + i * 60, y: 57, "font-size": 14, "text-anchor": "middle", fill: seen.has(i) || missed ? "#fff" : "#2b2b30" }, p);
+        if (missed) mk(gp, "text", { x: 47 + i * 60, y: 88, "font-size": 9.5, "text-anchor": "middle", fill: "#a33b3b", "font-weight": 700 }, "skipped");
+      });
+      const cw = Math.min(26, 740 / Math.max(1, path.length));
+      vis.forEach((p, f) => {
+        const back = f > 0 && p < vis[f - 1], hold = f > 0 && p === vis[f - 1];
+        mk(go, "rect", { x: 20 + f * cw, y: 128, width: cw - 2, height: 28, rx: 3, fill: back ? "#b8722c" : hold ? "#8a8a94" : "#594578", "fill-opacity": 0.85 });
+        mk(go, "text", { x: 20 + f * cw + cw / 2 - 1, y: 147, "font-size": 11, "text-anchor": "middle", fill: "#fff" }, PH[p]);
+      });
+      mk(go, "text", { x: 20, y: 176, "font-size": 10.5, fill: "#5f5f66" }, "purple: next sound   grey: held a frame longer (harmless)   orange: went back (a repeat)");
+      const b = bad(path);
+      $("[data-r1]").textContent = done ? (b.skip || b.rep ? `This reading ${[b.skip ? "skipped" : "", b.rep ? "repeated" : ""].filter(Boolean).join(" and ")} something.` : "This reading said every sound once, in order.") : "Reading…";
+      $("[data-r2]").textContent = `Over 500 seeded readings at q = ${(+qIn.value).toFixed(2)}, r = ${(+rIn.value).toFixed(2)}: ${stats().toFixed(1)}% have a skip or a repeat.`;
+      [[qIn, "vq"], [rIn, "vr"]].forEach(([i, k]) => { const el = i as HTMLInputElement; el.style.setProperty("--p", `${(+el.value / 0.1) * 100}%`); $(`[data-${k}]`).textContent = (+el.value).toFixed(2); });
+    }
+    const fresh = () => { path = walk(rng(seed++), +qIn.value, +rIn.value); };
+    let token = 0;
+    async function play(alive: () => boolean) { fresh(); for (shown = 1; shown <= path.length; shown++) { if (!alive()) return; draw(); await wait(0.15); } shown = 99; draw(); }
+    $("[data-again]").addEventListener("click", () => { const my = ++token; play(() => my === token); });
+    [qIn, rIn].forEach((i) => i.addEventListener("input", () => { token++; fresh(); shown = 99; draw(); }));
+    fresh(); draw();
+    setupFigure(root, () => { shown = 0; draw(); }, play);
+  });
+</script>

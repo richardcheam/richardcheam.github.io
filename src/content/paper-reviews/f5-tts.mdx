@@ -1,0 +1,413 @@
+---
+title: "F5-TTS: Speech From Text Padded With Blanks"
+published: true
+date: 2026-10-14
+question: "Can a speech model learn where each letter goes on its own, if you just pad the text with blanks to the length of the audio?"
+excerpt: "F5-TTS writes speech by flow matching on a mel spectrogram, with the text simply padded with filler tokens to the audio's length. A small ConvNeXt text branch makes that alignment learnable, and Sway Sampling, a one-line change to the time steps at inference, cuts word errors without retraining."
+type: paper
+topic: [speech, generative]
+tags: [Speech, TTS, Flow matching, F5-TTS, E2 TTS, Diffusion Transformer, Zero-shot]
+org: "Shanghai Jiao Tong University"
+authors: "Yushen Chen, Zhikang Niu, Ziyang Ma, Keqi Deng, Chunhui Wang, Jian Zhao, Kai Yu, Xie Chen"
+source_url: https://arxiv.org/abs/2410.06885
+source_label: "Read the paper (arXiv)"
+source_date: 2024-10-09
+math: true
+links:
+  - label: "Code"
+    url: https://github.com/SWivid/F5-TTS
+  - label: "Demo"
+    url: https://SWivid.github.io/F5-TTS
+tldr:
+  - "**Authors' claim:** a fully non-autoregressive text-to-speech system with no duration model, no text encoder and no phoneme alignment, reaching a real-time factor of 0.15 (Abstract, p. 1)."
+  - "**The trick:** pad the characters with filler tokens to the length of the mel spectrogram, as E2 TTS does, but first pass the text through four ConvNeXt V2 blocks so it can prepare itself before meeting the audio (Sec 3.2, p. 5; Sec 4, p. 6). At inference, bend the time grid toward the start with Sway Sampling (Eq 7, p. 5)."
+  - "**Evidence:** 2.42% WER on the authors' LibriSpeech-PC test-clean subset at 32 steps, against 2.95% for their reproduced E2 TTS (Table 1, p. 7). In the small-model ablation, F5-TTS reaches 4.17% WER where E2 TTS sits at 9.63% (Sec 5.1, p. 9). Sway Sampling alone takes F5-TTS from 2.84% to 2.41% WER (Table 6, p. 17)."
+  - "**My reading:** the architecture fix is real but modest; the bigger, more portable idea is Sway Sampling, because it says the first few steps of a flow decide what is said and the rest only polish how it sounds. For a low-resource language like Khmer, the no-alignment recipe is attractive, and the duration guess from character counts is the part I would distrust first."
+---
+import FillerPad from "../../components/figures/FillerPad.astro";
+import InfillMask from "../../components/figures/InfillMask.astro";
+import GuidanceArrows from "../../components/figures/GuidanceArrows.astro";
+import SwayGrid from "../../components/figures/SwayGrid.astro";
+import SwayFlowRace from "../../components/figures/SwayFlowRace.astro";
+import DurationGuess from "../../components/figures/DurationGuess.astro";
+import F5Scoreboard from "../../components/figures/F5Scoreboard.astro";
+
+## The question and why it matters
+
+Imagine you have to read a sentence aloud, and someone hands you a strip of paper with exactly 300 boxes on it, one box per tiny slice of time. Your job is to fill every box with sound so the sentence fits the strip. Nobody tells you which box the word "cat" should start in. You have to work that out.
+
+That is the bet behind F5-TTS. Text-to-speech (TTS) systems turn written words into audio. Most older systems first decide, letter by letter or sound by sound, how long each piece should last: a separate "duration model" says "the 'c' gets 4 boxes, the 'a' gets 9 boxes", and an "aligner" tells the model which boxes belong to which sound. F5-TTS throws both away. It writes the letters into the first boxes, fills the remaining boxes with a blank "filler" token, and asks the model to figure out the timing by itself ([how the padding works](#text-padded-with-blanks)).
+
+This idea came from E2 TTS (Embarrassingly Easy TTS) (cited as [36], Sec 1, p. 2). The F5 authors found it works but learns slowly and fails on some hard sentences: "timbre learned well at an early stage but struggled to learn alignment" (Sec 3, p. 4). F5-TTS keeps the simple recipe and fixes it in two ways: a small text-only branch built from ConvNeXt V2 blocks ([the fix](#the-fix-let-the-text-warm-up-first)), and a new way of choosing time steps when generating, called Sway Sampling ([Sway Sampling](#sway-sampling-spend-your-steps-early)).
+
+Why it matters to me: I am fine-tuning speech models for Khmer ([my Khmer TTS fine-tuning notes](/blog/khmer-tts-fine-tuning/)). Khmer has no ready-made phoneme aligners of good quality. A model that needs only characters and audio is exactly the kind I can train.
+
+The name, for the record: F5 stands for "a Fairytaler that Fakes Fluent and Faithful speech with Flow matching" (title, p. 1).
+
+
+## The pieces, before the details
+
+Five things show up again and again. Short versions here, details later.
+
+- **Mel spectrogram.** A picture of sound: time goes left to right, pitch bands go bottom to top, brightness is loudness. F5-TTS never makes the waveform directly; it paints this picture and a separate program called a vocoder (Vocos, Sec 4, p. 6) turns the picture into sound. If mel spectrograms are new, read [Audio basics](/blog/audio-basics/) first. F5-TTS uses **100** mel bands, audio at **24 kHz** (24,000 samples per second), and a hop length of **256** samples (Sec 4, p. 6). One frame is therefore $256 / 24000$ seconds.
+  - $256$: samples skipped between frames. $24000$: samples per second.
+  - Intuition: each column of the picture covers about one hundredth of a second.
+  - Example: $256 / 24000 \approx 0.0107$ seconds, so one second of speech is $24000 / 256 = 93.75$ frames. A 10 second clip is about 938 frames.
+- **Flow matching.** The way F5-TTS paints the picture: start from random static and move every pixel a little at a time toward a real spectrogram, following a learned "velocity". The [Flow Matching review](/paper-reviews/flow-matching/) explains it from scratch; this page only uses the result ([recap](#flow-matching-in-one-paragraph)).
+- **Non-autoregressive (NAR).** The whole spectrogram is painted at once, every frame in parallel. The opposite, autoregressive (AR), writes one piece after another, like [VALL-E](/paper-reviews/vall-e/) writing codec tokens left to right.
+- **Zero-shot voice cloning.** You give a few seconds of someone's voice (the "audio prompt") plus its transcript, and new text; the model speaks the new text in that voice, without being trained on that speaker.
+- **Diffusion Transformer (DiT).** A Transformer (the attention network behind most modern language models) that takes "how far along the painting is" as a special side input ([backbone](#the-backbone-a-diffusion-transformer)).
+
+## Flow matching in one paragraph
+
+Picture a cloud of sand grains (random noise) that has to be pushed into the shape of a sand castle (a real spectrogram). Flow matching trains a network $v_t$ to say, for every grain at every moment $t$ from 0 to 1, which way and how fast to move. F5-TTS uses the straight-line version: each grain travels in a straight line at constant speed from its noise spot to its data spot. That is the [optimal transport path](/paper-reviews/flow-matching/#optimal-transport-straight-lines-constant-speed), and the training loss is the [conditional flow matching loss](/paper-reviews/flow-matching/#conditional-flow-matching). The paper writes it as Eq 3 (Sec 2.1, p. 3):
+
+$$
+\mathcal{L}_{\text{CFM}}(\theta) = \mathbb{E}_{t, q(x_1), p(x_0)} \left\| v_t\big((1-t)x_0 + t x_1\big) - (x_1 - x_0) \right\|^2
+$$
+
+- $\theta$: all the network's adjustable numbers (its weights).
+- $t$: the flow step, a number between 0 (pure noise) and 1 (finished spectrogram), picked uniformly at random during training.
+- $x_0$: a sample of random noise, drawn from a standard normal distribution $p(x_0)$.
+- $x_1$: a real training spectrogram, drawn from the data $q(x_1)$.
+- $(1-t)x_0 + t x_1$: the point a fraction $t$ of the way along the straight line from noise to data.
+- $x_1 - x_0$: the true velocity along that line (where to go, divided by the one unit of time you have).
+- $v_t(\cdot)$: the network's guess of the velocity at that point and time.
+- $\|\cdot\|^2$: squared distance; $\mathbb{E}$: average over many random picks.
+
+Intuition: show the network a half-made picture and ask "which way to the finished picture from here?"; punish it by how far off the arrow is.
+
+Worked example, one pixel: noise $x_0 = -1$, data $x_1 = 3$, $t = 0.25$. The point is $0.75 \cdot (-1) + 0.25 \cdot 3 = 0$. The true velocity is $3 - (-1) = 4$. If the network says $3.5$, the loss for this pixel is $(3.5 - 4)^2 = 0.25$.
+
+At generation time an ODE (ordinary differential equation) solver walks from $t=0$ to $t=1$ in a fixed number of steps, asking the network for the velocity at each step. Each question is one "function evaluation", so the number of steps is called NFE (number of function evaluations) (Sec 2.1, p. 3). F5-TTS uses the simplest solver, Euler: new position = old position + velocity times step size (Sec 4, p. 6). More steps cost more time; [which steps you pick](#sway-sampling-spend-your-steps-early) turns out to matter as much as how many.
+
+## Text padded with blanks
+
+### The recipe E2 TTS introduced
+
+Take the transcript and break it into characters. For English the paper uses the letters and symbols directly; for Chinese it converts characters to full pinyin (romanised spelling with tones) using the jieba and pypinyin tools (Sec 3.1, p. 4; Sec 4, p. 6). Then add filler tokens, written $\langle F \rangle$, until the text is exactly as long as the spectrogram. This is Eq 5 (Sec 3.1, p. 4):
+
+$$
+z = (c_1, c_2, \ldots, c_M, \underbrace{\langle F \rangle, \ldots, \langle F \rangle}_{(N-M)\ \text{times}})
+$$
+
+- $z$: the extended text sequence fed to the model.
+- $c_i$: the $i$-th character of the transcript.
+- $M$: how many characters the transcript has.
+- $N$: how many mel frames the audio has.
+- $\langle F \rangle$: the filler token, a "nothing here" symbol.
+- $N - M$: how many fillers are needed so that $z$ has length $N$.
+
+Intuition: the text is written in the first boxes of the strip and the rest is blank. Character 3 sits next to frame 3, which is almost never where its sound really is. The model has to learn to look elsewhere.
+
+Worked example: the word "hi" ($M=2$) spoken over $N=6$ frames gives $z = (\text{h}, \text{i}, \langle F \rangle, \langle F \rangle, \langle F \rangle, \langle F \rangle)$, so $6 - 2 = 4$ fillers. A real 3 second clip has about $3 \times 93.75 \approx 281$ frames but maybe 40 characters, so roughly 240 of the 281 text slots are filler.
+
+The paper assumes the character count is never longer than the mel length (Sec 3.1, p. 4). The full vocabulary, including the filler token and every character that appears in the code-switched Emilia data, is **2546** symbols (Sec 4, p. 6).
+
+What this removes: no phoneme converter, no forced aligner, no duration predictor (Abstract, p. 1). Voicebox needs frame-wise phoneme alignment and Matcha-TTS a phoneme-level duration model (Sec 1, p. 2). The paper's argument, citing prior work, is that rigid alignment "hinders the model from generating results with higher naturalness" and that letting the model distribute the length itself improves prosody and rhythm (Sec 1, p. 2).
+
+<figure class="blog-figure blog-figure--wide">
+  <FillerPad alt="A strip of mel frames for a clip, coloured where a character sits and grey where a filler token sits, with a zoom on the first 36 frames showing each letter and filler. A text box, a clip-length slider and a toggle between padded and spread-out layouts." />
+  <figcaption><strong>Figure 1. Text padded with blanks.</strong> Eq 5 (p. 4) at 93.75 frames a second (Sec 4, p. 6). The spread-out view is an even split for comparison, not a real aligner.</figcaption>
+</figure>
+
+### Why E2 TTS learns slowly
+
+E2 TTS glues the padded text directly onto the noisy spectrogram, feature by feature, and lets one big Transformer sort it out. The paper's diagnosis is that this "deeply entangl[es] semantic and acoustic features with a large length gap of effective information" (Sec 3.2, p. 5). In plain words: in each position, the audio half of the input is full of useful detail, while the text half is mostly blanks. The network has to learn two very different jobs at once, "what sound does this look like" and "which letter am I on", using the same layers.
+
+Two symptoms are reported:
+- Slow alignment: the voice quality (timbre) comes early, the right words come late (Sec 3, p. 4).
+- Hard failures: in the small-model study, about **7%** of the Seed-TTS test-zh set (roughly **140** samples) failed with WER above 50% throughout training and could not be fixed by generating several times and picking the best ("re-ranking") (Sec 5.1, p. 9).
+- A telling clue: drop the audio prompt and synthesise from text alone, and E2 TTS stops failing (Sec 5.1, p. 9; Table 4, p. 16: E2 TTS WER **9.63** with the audio prompt, **3.48** without). The authors read this as the audio and text features getting in each other's way.
+
+
+### The fix: let the text warm up first
+
+Before the padded text meets the audio, F5-TTS runs it through a short stack of ConvNeXt V2 blocks (Sec 3.2, p. 5). ConvNeXt is a convolutional network design; a convolution looks at a small window of neighbours at a time, like reading a word by glancing at the letters on either side. The paper picks it for "capturing local connections, multi-scale features" (Sec 5.1, p. 8). In the base model this text branch has **4** layers with **512**-wide embeddings and a **1024**-wide feed-forward layer (Sec 4, p. 6). The text also gets an absolute sinusoidal position embedding before entering the ConvNeXt blocks (Sec 3.2, p. 5).
+
+The picture: before a team meeting, the person who only has notes gets ten minutes alone to organise them, instead of being thrown straight into the discussion. The paper calls this giving text "individual modeling space" (Sec 3.2, p. 5). It still does not draw hard boundaries between letters; alignment is learned by the whole model jointly.
+
+Then the three inputs are concatenated feature by feature at every frame position (Sec 3.2, p. 5; Fig 1, p. 2): the refined text, the noisy spectrogram, and the masked spectrogram ([what masking means](#the-training-task-fill-in-the-gap)).
+
+What the ablation says (Sec 5.1, pp. 8 to 9; Fig 2, p. 9; Table 4, p. 16), all small models of about **155M** parameters trained on the **945**-hour WenetSpeech4TTS Premium Mandarin set for **800K** updates, scored on Seed-TTS test-zh at 32 steps without Sway Sampling:
+- F5-TTS: WER **4.17**, SIM **0.54**.
+- F5-TTS without the text ConvNeXt (pure DiT): "fails to learn alignment" (Sec 5.1, p. 8). The curve appears only in Fig 2.
+- F5-TTS with the same ConvNeXt branch on the audio too: WER **5.78** (+1.61), SIM **0.55** (+0.01) (Sec 5.1, p. 9; Table 4).
+- F5-TTS plus a long skip connection: WER **5.17** (Table 4, p. 16).
+- E2 TTS: WER **9.63**, SIM **0.53**.
+- E2 TTS plus the text ConvNeXt: WER **18.10**, worse, so the trick does not transfer to E2's flat U-Net Transformer (Table 4, p. 16).
+- MMDiT (a two-stream joint-attention design from image generation): "learned fast and collapsed fast", with repeated words and wild timbre (Sec 5.1, p. 9).
+
+## The backbone: a Diffusion Transformer
+
+The big network is a DiT (Diffusion Transformer) with adaLN-zero (Sec 3.2, p. 5). Base model: **22** layers, **16** attention heads, **1024** embedding width, **2048** feed-forward width; together with the text branch, **335.8M** parameters (Sec 4, p. 6). The reproduced E2 TTS is **333.2M** parameters, **24** layers, 1024/4096 width (Sec 4, p. 6), so the comparison is at equal size.
+
+adaLN-zero, in plain words: Layer Norm rescales the numbers inside each layer. "Adaptive" means the rescaling knobs are set by the flow step $t$. So instead of writing "we are 30% done" into the input like an extra word (as Voicebox does), the time tells every layer how loud to turn its signals. "Zero" means these knobs start at zero, so each block begins as "do nothing" and learns to contribute. The paper also tried adding an averaged text token to these knobs and found it not needed (Sec 3.2, p. 5).
+
+Other plumbing (Sec 3.2, p. 5): sinusoidal embedding for $t$; a convolutional position embedding on the concatenated input; rotary position embedding (RoPE) inside self-attention. Compared with Voicebox and E2 TTS, the U-Net-style long skip connections are removed.
+
+Compute: the small F5-TTS costs **173** GFLOPs (billion floating point operations) per forward pass against **293** for small E2 TTS (Table 3, p. 16). The paper does not state the sequence length behind these counts.
+
+## The training task: fill in the gap
+
+F5-TTS follows Voicebox's "text-guided speech infilling" (Sec 3, p. 4). Picture a sentence with a strip of tape over part of it: you can see the surrounding audio and the full transcript, and you must recreate what is under the tape.
+
+Concretely (Sec 3.1, p. 4): take a training spectrogram $x_1$, choose a binary mask $m$ marking the frames to hide, and give the model three things: the noisy version $(1-t)x_0 + t x_1$, the visible part $(1-m) \odot x_1$, and the padded text $z$. A random **70% to 100%** of the frames are masked (Sec 4, p. 6). The model learns
+
+$$
+P\big(m \odot x_1 \mid (1-m) \odot x_1,\ z\big)
+$$
+
+- $x_1 \in \mathbb{R}^{F \times N}$: the real spectrogram, $F$ mel bands by $N$ frames.
+- $m \in \{0,1\}^{F \times N}$: the mask, 1 where hidden, 0 where visible. It is "temporal": whole frames are hidden, every band at once.
+- $\odot$: multiply entry by entry.
+- $m \odot x_1$: only the hidden part (what the model must produce).
+- $(1-m) \odot x_1$: only the visible part (the context it gets for free).
+- $z$: the full padded text, covering both the visible and the hidden speech.
+- $P(\cdot \mid \cdot)$: "the probability of the first thing given the second".
+
+Intuition: a jigsaw where most pieces are missing, the picture on the box (the text) is complete, and the few pieces you have tell you the colours (the voice).
+
+Worked example: a 10-frame clip with frames 4 to 10 masked. $m$ has zeros in columns 1 to 3 and ones in columns 4 to 10. That is $7/10 = 70\%$ masked, the minimum allowed. The model sees frames 1 to 3 clean and must produce frames 4 to 10.
+
+Why this matters at inference: zero-shot cloning is the same task. Put the reference audio as the visible part, put "reference transcript + new text" as $z$, leave blank frames for the new speech, and fill them in (Sec 3.1, p. 4, Eq 6). Afterwards, cut off the reference part and send the rest to the vocoder (Sec 3.1, p. 5).
+
+Training scale (Sec 4, p. 6): **1.2M** updates, batches of **307,200** frames (**0.91** hours of audio), over a week on **8** NVIDIA A100 80 GB GPUs; AdamW with peak learning rate $7.5 \times 10^{-5}$, **20K** warm-up updates, linear decay, gradient clipping at 1. Check: $307200 / 93.75 = 3276.8$ s $\approx 0.91$ h.
+
+<figure class="blog-figure blog-figure--wide">
+  <InfillMask alt="Four panels: a synthetic target spectrogram with a dashed mask region, the noisy mix of noise and target at flow step t, the visible context with the masked frames blacked out, and the padded text row. Sliders move the mask start and the flow step." />
+  <figcaption><strong>Figure 2. Fill in the gap.</strong> The three inputs of Sec 3.1 (p. 4). The spectrogram is synthetic; the 70% minimum is from Sec 4 (p. 6).</figcaption>
+</figure>
+
+## Classifier-free guidance
+
+Classifier-free guidance (CFG) is a way to make the model follow its conditions more firmly. During training the conditions are sometimes hidden, so the same network also learns to generate "without being told". At generation time you ask both questions and push further in the direction the conditions point. Eq 4 (Sec 2.2, p. 4):
+
+$$
+v_{t,\text{CFG}} = v_t(\psi_t(x_0), c) + \alpha \big( v_t(\psi_t(x_0), c) - v_t(\psi_t(x_0)) \big)
+$$
+
+- $\psi_t(x_0)$: where the sample currently is at flow step $t$.
+- $c$: the condition, here the reference audio and the padded text.
+- $v_t(\psi_t(x_0), c)$: velocity when the model is told the conditions.
+- $v_t(\psi_t(x_0))$: velocity when it is told nothing.
+- $\alpha$: the CFG strength; F5-TTS uses $\alpha = 2$ by default (Sec 5, p. 7).
+- $v_{t,\text{CFG}}$: the velocity actually used.
+
+Intuition: the difference between "told" and "not told" is the direction the text and voice pull you. CFG exaggerates that pull, like a friend who says "go a bit further in the direction you're already turning".
+
+Worked example: told velocity $2$, untold velocity $1$, $\alpha = 2$. Then $2 + 2 \times (2 - 1) = 4$. Without guidance you move at 2; with it, at 4.
+
+Cost: each step now runs the network twice, so inference time doubles (footnote 2, p. 4).
+
+How F5-TTS drops conditions in training (Sec 4, p. 6): first the masked audio is dropped with probability **0.3**; then the masked audio and the text together are dropped with probability **0.2**. The authors guess this two-stage scheme helps the model learn text alignment. The wording leaves open whether the 0.2 applies to all samples or only to those that kept their audio.
+
+<figure class="blog-figure blog-figure--wide">
+  <GuidanceArrows alt="Left, 300 noise points flowing to two targets, A and B, where the condition says B. Right, one point with three arrows: the untold velocity, the told velocity and the guided velocity. A slider sets the guidance strength." />
+  <figcaption><strong>Figure 3. Guidance as a push.</strong> Eq 4 (p. 4) on a toy 2-D flow with exact velocities. The share of points landing on B is computed live; α = 2 is F5-TTS’s default.</figcaption>
+</figure>
+
+## Sway Sampling: spend your steps early
+
+### The formula
+
+At generation time you pick, say, 16 or 32 flow steps between 0 and 1. The usual choice is evenly spaced. Sway Sampling bends that grid. Take evenly spaced $u$ values and transform them with Eq 7 (Sec 3.2, p. 5):
+
+$$
+f_{\text{sway}}(u; s) = u + s \cdot \left( \cos\!\left(\frac{\pi}{2} u\right) - 1 + u \right)
+$$
+
+- $u$: an evenly spaced number between 0 and 1 (the "plain" time step).
+- $s$: the sway coefficient. The paper allows $s$ between $-1$ and $\frac{2}{\pi - 2} \approx 1.75$ so the function stays increasing (Sec 3.2, p. 5).
+- $\cos(\frac{\pi}{2}u)$: goes smoothly from 1 at $u=0$ to 0 at $u=1$.
+- $\cos(\frac{\pi}{2}u) - 1 + u$: a bump that is 0 at both ends and negative in between.
+- $f_{\text{sway}}$: the bent time step $t$ actually handed to the solver.
+
+Intuition: $s < 0$ squeezes the steps toward $t = 0$, the noisy start; $s > 0$ squeezes them toward the end; $s = 0$ leaves them even (Sec 3.2, p. 5). F5-TTS uses $s = -1$ by default (Sec 5, p. 7).
+
+Worked example with $s = -1$: the formula simplifies to $f(u) = u - (\cos(\frac{\pi}{2}u) - 1 + u) = 1 - \cos(\frac{\pi}{2}u)$. At $u = 0.5$: $\cos(\pi/4) \approx 0.707$, so $t \approx 0.293$. The middle of the plain grid lands less than a third of the way along. With 16 steps, the grid points $u = k/16$ that land below $t = 0.3$ are $k = 0$ to $8$, that is **9** of the 17 points. The even grid has only 5 ($k = 0$ to $4$).
+
+Hand check of $k=9$: $\frac{\pi}{2} \cdot \frac{9}{16} \approx 0.884$ rad, $\cos(0.884) \approx 0.634$, so $t \approx 0.366 > 0.3$. So indeed 9 points sit below 0.3. The first step is tiny: $1 - \cos(\pi/32) \approx 0.0048$, against $1/16 = 0.0625$ for the even grid.
+
+Why monotonic matters: the derivative is $1 + s\big(1 - \frac{\pi}{2}\sin(\frac{\pi}{2}u)\big)$. For $s > 0$ the worst case is $u = 1$, giving $1 + s(1 - \frac{\pi}{2})$, which is at least 0 only when $s \le \frac{1}{\pi/2 - 1} = \frac{2}{\pi-2}$. That is where the upper limit comes from. (My derivation; the paper just states the range.)
+
+Note: the model is trained with plain uniform $t$; only inference is bent (Sec 3.2, p. 5). This differs from Stable Diffusion 3's logit-normal sampling, which reshapes $t$ during training (Sec 3.2, p. 5, citing [37]).
+
+<figure class="blog-figure blog-figure--wide">
+  <SwayGrid alt="Two number lines from 0 to 1: evenly spaced steps on top and the swayed steps below, joined by lines, with steps under 0.3 in red. Below, the curve t = f(u; s) and how crowded the steps are along t. A slider sets s and buttons set the number of steps." />
+  <figcaption><strong>Figure 4. Bending the clock.</strong> Eq 7 (p. 5). At 16 steps and s = −1, 9 of 17 steps fall below t = 0.3, against 5 on the even grid.</figcaption>
+</figure>
+
+### Why it helps
+
+The authors' story (Sec 3.2, p. 6): flow matching first sketches the outline from noise, then adds fine detail. The outline, including which word goes where, is decided in the first few steps. If those early steps are big and few, the solver guesses the outline badly and never recovers. Bending the grid gives the start more, smaller steps.
+
+Everyday picture: drawing a portrait. The first strokes place the eyes and mouth; if those are off, no amount of shading later fixes the face. So spend your care on the first strokes.
+
+### Leak and override
+
+The authors back this with an experiment (Sec 5.2, pp. 9 to 10). They replace the starting noise with a mix that already contains the answer to a different sentence: $(1 - t')x_0 + t' x'_{\text{ref}}$ with $t' = 0.1$, where $x'_{\text{ref}}$ is a copy of the reference audio's spectrogram. Then they give a different text and continue from $t = 0.1$. With Sway Sampling the model overrides the leaked sentence and speaks the new text; without it, the output keeps saying the leaked sentence. The same works for a leaked voice (Sec 5.2, p. 10). No numbers are reported for this experiment, only the outcome.
+
+- $t'$: the starting flow step, 0.1.
+- $x_0$: random noise; $x'_{\text{ref}}$: the leaked "wrong answer".
+- Example: at a pixel where noise is 2 and the leaked value is 5, the start is $0.9 \cdot 2 + 0.1 \cdot 5 = 2.3$: still mostly noise, but nudged.
+
+Why this is plausible: with the even 32-step grid, 28 steps remain after $t = 0.1$ (grid points from $u = 4/32$ up), whereas with $s = -1$ the grid points below $t = 0.1$ are $u_k$ with $1 - \cos(\frac{\pi}{2} u_k) < 0.1$, i.e. $u_k < 0.287$, so $k = 0$ to $9$. If those are all skipped, about 22 remain, but the next several are small steps in the critical region. The paper does not say how the grid was handled after skipping to $t'$; my count assumes the same bent grid with points below 0.1 dropped.
+
+
+## Guessing how long the speech should be
+
+Because there is no duration model, someone has to choose $N$, the number of frames to generate. F5-TTS uses the ratio of character counts between the new text and the reference transcript (Sec 3.1, p. 4). The paper gives the idea in words, not a formula. The released inference code (`utils_infer.py` in SWivid/F5-TTS, read in October 2026) does exactly this, with one twist: it measures text length in UTF-8 bytes, not characters. In characters:
+
+$$
+N_{\text{gen}} = N_{\text{ref}} \cdot \frac{|y_{\text{gen}}|}{|y_{\text{ref}}|}, \qquad N = N_{\text{ref}} + N_{\text{gen}}
+$$
+
+- $N_{\text{ref}}$: frames in the reference audio.
+- $|y_{\text{ref}}|$, $|y_{\text{gen}}|$: character counts of the reference transcript and the new text.
+- $N_{\text{gen}}$: frames to leave blank for the new speech.
+- $N$: total length of the canvas.
+
+Intuition: if the speaker took 3 seconds for 40 characters, they will take about 6 seconds for 80.
+
+Worked example: a 3 s reference is $\approx 281$ frames with 40 characters; new text has 60 characters. $N_{\text{gen}} = 281 \times 60/40 = 421.5 \approx 422$ frames ($\approx 4.5$ s). Total $N \approx 703$.
+
+In the code the counts are bytes: a Latin letter is 1 byte, a Khmer letter 3. When the reference and the new text use the same script the two rules agree; when they mix scripts, they do not (Figure 6).
+
+How much does the guess cost? Given the true duration instead, F5-TTS at 32 steps with Sway Sampling drops from **1.83** to **1.74** WER on Seed-TTS test-en and from **1.56** to **1.53** on test-zh (Sec 5, p. 8). In the small-model study, true duration helps F5-TTS more (4.17 to **3.87**) than E2 TTS (9.63 to **9.48**) (Table 4, p. 16). The same knob gives speed control: stretch $N$ and the speech slows (speed control is claimed in the Abstract, p. 1; no numbers are given).
+
+<figure class="blog-figure blog-figure--wide">
+  <DurationGuess alt="Two bars: a reference clip in frames followed by blank space for the new speech, once sized by counting characters and once by counting UTF-8 bytes. Text boxes for both transcripts, a reference-length slider, a speed slider, and a Khmer example." />
+  <figcaption><strong>Figure 6. How long should it be?</strong> The ratio rule of Sec 3.1 (p. 4), and the byte-count version in the released inference code. With a Khmer reference and English new text the two rules disagree by a factor of about three.</figcaption>
+</figure>
+
+## What the evidence shows
+
+### Setup
+
+- Training data: Emilia, an in-the-wild multilingual set, filtered to about **95K** hours of English and Chinese (Sec 4, p. 6). The results tables round this to "100K Multi." (Table 1, p. 7).
+- Ablation data: WenetSpeech4TTS Premium, **945** hours of Mandarin (Sec 4, p. 6).
+- Test sets (Sec 4, p. 6): LibriSpeech-PC test-clean, a **4 to 10 second** subset the authors built and released, **1127** samples, about **2** hours, from **39** speakers (Sec 5, p. 7); Seed-TTS test-en, **1088** samples from Common Voice; Seed-TTS test-zh, **2020** samples from DiDiSpeech.
+- Metrics (Sec 4, pp. 6 to 7): WER (word error rate, transcribed by Whisper-large-v3 for English and Paraformer-zh for Chinese); SIM-o (speaker similarity to the original target audio, cosine similarity of WavLM-large speaker embeddings); RTF (real-time factor, seconds of compute per second of speech, measured on 10 s of speech, Table 1 caption, p. 7); CMOS and SMOS (human ratings of naturalness against the ground truth, and of similarity to the prompt). See [Speech evaluation metrics](/blog/speech-evaluation-metrics/) for what each one means.
+- Every reported score is the average of three random seeds (Sec 5, p. 7). Defaults: CFG strength 2, $s = -1$, Euler solver (Sec 5, p. 7; Sec 4, p. 6).
+
+### LibriSpeech-PC test-clean (Table 1, p. 7)
+
+| Model | Params | Data | WER % | SIM-o | RTF |
+|---|---|---|---|---|---|
+| Ground truth | | | 2.23 | 0.69 | |
+| Vocoder resynthesized | | | 2.32 | 0.66 | |
+| CosyVoice | about 300M | 170K Multi. | 3.59 | 0.66 | 0.92 |
+| FireRedTTS | about 580M | 248K Multi. | 2.69 | 0.47 | 0.84 |
+| E2 TTS (32 NFE, reproduced) | 333M | 100K Multi. | 2.95 | 0.69 | 0.68 |
+| F5-TTS (16 NFE) | 336M | 100K Multi. | 2.53 | 0.66 | 0.15 |
+| F5-TTS (32 NFE) | 336M | 100K Multi. | 2.42 | 0.66 | 0.31 |
+
+Read it like this: F5-TTS makes fewer word mistakes than its own E2 reproduction (**2.42** vs **2.95**), but E2 sounds more like the speaker (**0.69** vs **0.66**). F5 at 16 steps runs at **0.15** RTF, so 10 seconds of speech takes 1.5 seconds. Note the E2 row uses the midpoint solver, which costs two network calls per step (Sec 4, p. 6), part of why its RTF is higher. The upper half of Table 1 (VALL-E 2, Voicebox, NaturalSpeech 3 etc.) uses other subsets and reported numbers, so it is not directly comparable (Table 1 caption, p. 7).
+
+### Seed-TTS test sets (Table 2, p. 8)
+
+| Model | en WER | en SIM-o | en CMOS | en SMOS | zh WER | zh SIM-o | zh CMOS | zh SMOS |
+|---|---|---|---|---|---|---|---|---|
+| Ground truth | 2.06 | 0.73 | 0.00 | 3.91 | 1.26 | 0.76 | 0.00 | 3.72 |
+| CosyVoice | 3.39 | 0.64 | 0.02 | 3.64 | 3.10 | 0.75 | -0.06 | 3.54 |
+| FireRedTTS | 3.82 | 0.46 | -1.46 | 2.94 | 1.51 | 0.63 | -0.49 | 3.28 |
+| MaskGCT (reported) | 2.623 | 0.717 | | | 2.273 | 0.774 | | |
+| Seed-TTS DiT (reported) | 1.733 | 0.790 | | | 1.178 | 0.809 | | |
+| E2 TTS (32 NFE) | 2.19 | 0.71 | 0.06 | 3.81 | 1.97 | 0.73 | -0.04 | 3.44 |
+| F5-TTS (16 NFE) | 1.89 | 0.67 | 0.16 | 3.79 | 1.74 | 0.75 | 0.02 | 3.72 |
+| F5-TTS (32 NFE) | 1.83 | 0.67 | 0.31 | 3.89 | 1.56 | 0.76 | 0.21 | 3.83 |
+
+(Vocoder resynthesized: 2.09 / 0.70 en, 1.27 / 0.72 zh.) Seed-TTS DiT is still better on both sets, but it is trained on far more data, "several million hours" (Sec 5, p. 8). A positive CMOS of **0.31** means raters preferred F5 slightly over the real recording on average (Sec 4, p. 7 explains CMOS). The paper does not state the number of raters or the CMOS scale range.
+
+### Sway Sampling on its own (Table 6, p. 17; Fig 3, p. 10)
+
+All with the midpoint solver, $s = -1$:
+- F5-TTS, 32 NFE, LibriSpeech-PC: WER **2.84** without, **2.41** with; SIM **0.62** to **0.66**.
+- F5-TTS, 32 NFE, Seed-TTS test-zh: **1.93** to **1.58**; SIM **0.69** to **0.75**.
+- Applied to E2 TTS with no retraining, LibriSpeech-PC: **2.95** to **2.84**; SIM **0.69** to **0.72**. Seed-TTS test-en: **2.19** to **1.98**. Test-zh: **1.97** to **1.77**, SIM **0.73** to **0.78**.
+- And 16 steps with sway beats 32 without, for both models (e.g. F5-TTS test-zh: **1.61** at 16 with vs **1.93** at 32 without).
+
+On the small models, the paper's Fig 3 (right, p. 10) shows WER falling and SIM rising as $s$ goes more negative. The values are only plotted.
+
+### Steps and solvers (Table 5, p. 17)
+
+| $s$ | Setting | LS-PC WER | en WER | zh WER | RTF |
+|---|---|---|---|---|---|
+| -1 | 16 NFE Euler | 2.53 | 1.89 | 1.74 | 0.15 |
+| -1 | 16 NFE midpoint | 2.43 | 1.88 | 1.61 | 0.26 |
+| -1 | 32 NFE Euler | 2.42 | 1.83 | 1.56 | 0.31 |
+| -1 | 32 NFE midpoint | 2.41 | 1.87 | 1.58 | 0.53 |
+| -0.8 | 16 NFE Euler | 2.82 | 2.14 | 2.28 | 0.15 |
+| -0.8 | 16 NFE midpoint | 2.58 | 1.86 | 1.70 | 0.26 |
+| -0.8 | 32 NFE Euler | 2.50 | 1.81 | 1.62 | 0.31 |
+| -0.8 | 32 NFE midpoint | 2.42 | 1.84 | 1.62 | 0.53 |
+
+Takeaway: at few steps, a stronger sway ($-1$) matters more; at 32 steps the two settings are close.
+
+### Hard sentences (Table 7, p. 18)
+
+On the **100** tricky ELLA-V sentences, F5-TTS WER **4.40** vs reproduced E2 TTS **8.58**; insertions **0.18** vs **0.06**, deletions **2.40** vs **4.82**. The reported (not re-run) E1 TTS DMD gets **4.29** and StyleTTS 2 **4.83** (Sec B.5, p. 18). The authors say high deletions mean F5 sometimes skips words in runs of repeated words, and some errors are mispronunciations ("yogis" heard as "yojus") (p. 18).
+
+<figure class="blog-figure blog-figure--wide">
+  <F5Scoreboard alt="Dot charts of word error rate per system, with speaker similarity written beside each dot and a dashed line for real recordings. Tabs switch between LibriSpeech-PC, Seed-TTS English, Seed-TTS Chinese and a Sway on-off view with arrows." />
+  <figcaption><strong>Figure 7. The scoreboard.</strong> Tables 1, 2 and 6 (pp. 7, 8, 17). Hollow dots were copied by the authors from other papers.</figcaption>
+</figure>
+
+## Limitations
+
+The paper has no dedicated limitations section. What it states or implies:
+- Duration is a crude character-ratio guess; true duration lowers WER (Sec 5, p. 8).
+- Speaker similarity is a little below E2 TTS on English (Table 1, p. 7; Table 2, p. 8).
+- Word skipping on repeated-word sentences and mispronunciations of rare words (Sec B.5, p. 18).
+- CFG doubles the inference cost (footnote 2, p. 4).
+- The test-set ASR can disagree depending on speaker ("quokkas" heard as "Cocos") (Sec B.5, p. 18), so small WER gaps are noisy.
+- Misuse risk (voice spoofing); the authors call for watermarking and detection (Ethics, p. 10).
+- What I add: the E2 TTS baseline is the authors' own reproduction on Emilia, not the original; the architecture ablation is on one Mandarin dataset at 155M scale; English test results use an English-plus-Chinese training set, so we learn nothing directly about a third language.
+
+## Toy experiments
+
+All in the browser, no trained model. Exact settings so a reader can reproduce them.
+
+**Toy 1: sway grids (used by `SwayGrid`).** Compute $t_k = f_{\text{sway}}(k/n; s)$ for $n \in \{4, 8, 16, 32\}$, $s \in [-1, 1.75]$. Report $t_1$, the median tick, and the count below 0.3. Expected checks: $n=16, s=-1$: $t_1 = 0.0048$, $t_8 = 0.2929$, 9 ticks below 0.3. $n=16, s=0$: 5 ticks below 0.3.
+
+**Toy 2: does sway help a perfect network? (Figure 5).** A 1-D flow from $\mathcal{N}(0,1)$ to two narrow targets, $\mathcal{N}(-2, 0.1^2)$ and $\mathcal{N}(2, 0.1^2)$, a stand-in for "which word". The exact velocity has a closed form, so no network is needed. 2,000 starts (seed 1), Euler on an even grid or a sway grid, compared with a 4,000-step reference. Result: with **4** steps the average miss is **0.051** on the even grid and **0.119** with $s = -1$; with **16** steps, **0.017** and **0.024**. No start ends on the wrong side in either case. With the exact velocity, sway does not help and slightly hurts.
+
+**Toy 3: leak and override, again with exact velocities.** Two targets at $-2$ and $+2$, the condition weighting $+2$ at 0.95, starting points nudged 10% toward $-2$ ($t' = 0.1$), 200 starts (seed 7). The share that ends at the commanded target is **88.5%** at 8 and 16 steps and **87%** at 32, identical for the even and the sway grid.
+
+What the two toys say together: the benefit the paper measures (Table 6, p. 17) cannot come from the geometry of the flow, because a perfect velocity field is solved just as well, or better, on an even grid. It has to come from the trained network, whose velocity guesses near $t = 0$ are the least accurate. Small early steps give those guesses less room to do damage. That matches the authors' own suggestion that training-time reweighting of $t$ could be combined with sway (Sec 5.2, p. 10), and it is my reading, not something the paper tests.
+
+**Toy 4: duration guess (used by `DurationGuess`).** Pure arithmetic: frames from seconds at 93.75 frames/s and the character-ratio rule.
+
+<figure class="blog-figure blog-figure--wide">
+  <SwayFlowRace alt="Two panels of paths over time for a one-dimensional flow from noise to two targets at plus and minus 2. Grey curves are exact paths; coloured lines are Euler steps on an even grid (left) and a sway grid (right). Readouts compare the average miss and the share ending on the wrong side." />
+  <figcaption><strong>Figure 5. Sway with a perfect network.</strong> A toy with the exact velocity field. Here Sway does not help, which points to the trained network, not the flow, as the source of the paper’s gain.</figcaption>
+</figure>
+
+## My interpretation
+
+1. **Sway Sampling is the most transferable idea here.** It is one line, needs no retraining, and helped both F5 and E2 (Table 6, p. 17). It is a statement about where the information in a speech flow is decided. [My toys](#toy-experiments) suggest a sharper version: it is about where a trained network's velocity is least reliable, since a perfect velocity gains nothing from it. For any flow-matching speech decoder I use, the first experiment is to try $s = -1$ at low NFE. Note Pocket TTS also uses a flow-style head, see [Pocket TTS and CALM explained](/blog/pocket-tts-calm-explained/), though its setup differs and I have not tested whether sway helps there.
+2. **The ConvNeXt fix is a smaller win than the headline.** The clean gain is on one 945-hour Mandarin ablation (4.17 vs 9.63 WER, Table 4, p. 16), and adding the same block to E2 made E2 worse (18.10). That suggests the gain is about the combination with adaLN DiT, not a universal "refine your text" rule.
+3. **The speaker-similarity gap is a real trade.** E2 TTS is more similar to the speaker on English (0.69 vs 0.66 on LibriSpeech-PC, Table 1, p. 7; 0.71 vs 0.67 on Seed-TTS test-en, Table 2, p. 8). F5 buys intelligibility with a little voice likeness.
+4. **What it means for Khmer.**
+   - No aligner is a big deal: Khmer has no mature grapheme-to-phoneme or forced-alignment tools, and the filler-token recipe only needs characters and audio. See [my Khmer TTS fine-tuning notes](/blog/khmer-tts-fine-tuning/).
+   - Characters are not equal in Khmer. A Khmer syllable can be several Unicode code points (base consonant, subscript coeng plus consonant, vowel sign, diacritic), and some of these take almost no time when spoken. The character-ratio duration guess counts code points, so it may misjudge length more than in English. A grapheme-cluster count is a cheap thing to test instead. [My hypothesis, untested.]
+   - Vocabulary: the F5 vocabulary is the 2546 symbols seen in Emilia (Sec 4, p. 6). Emilia is English and Chinese, so Khmer characters cannot be in it, and fine-tuning needs new embeddings, and the ConvNeXt text branch would have to learn them from scratch.
+   - Data: F5's alignment learning was slow even with 945 hours of Mandarin. A Khmer set of tens of hours will lean heavily on the pretrained model's alignment ability; this is where I expect failures first.
+5. **The comparison has soft spots.** The E2 TTS baseline is reproduced, not the original; numbers from other papers use other test subsets (Table 1 caption, p. 7). The new LibriSpeech-PC subset is a good contribution because it is released.
+
+## Open questions
+
+- Why does sway with $s = -1$ help even at 32 steps? If early steps were simply under-resolved, more steps should close the gap; Table 6 says they do not fully (32 without sway is worse than 16 with). Is the model's velocity at small $t$ simply poorly trained, and would training-time reweighting do the same job (the authors list combining with training-time schedules as future work, Sec 5.2, p. 10)?
+- Is the lower bound $s = -1$ just where the formula's range ends? Fig 3 suggests "more negative is better" up to that bound. What would a different, more extreme warp do?
+- How well does character-ratio duration work for scripts where characters vary wildly in spoken length (Khmer, Thai, Hindi)?
+- Does the slow-convergence diagnosis for E2 hold at larger data, or is it mostly a small-data (945 h) problem?
+- How much of F5's speed (RTF 0.15) comes from Euler vs midpoint, and how much from the smaller DiT (173 vs 293 GFLOPs, Table 3, p. 16)?
+
+## Related
+
+- [Flow Matching for Generative Modeling](/paper-reviews/flow-matching/), the training objective F5 uses.
+- [VALL-E](/paper-reviews/vall-e/), the autoregressive codec language model alternative.
+- [Moshi](/paper-reviews/moshi/), another 2024 speech model, which streams instead of painting all at once.
+- [Speech evaluation metrics](/blog/speech-evaluation-metrics/), for WER, SIM, CMOS and SMOS.
+- [Audio basics](/blog/audio-basics/), for mel spectrograms.

@@ -1,0 +1,4 @@
+---
+layout: null
+---
+{% include blog-figures/kv-transaction.html standalone=true %}

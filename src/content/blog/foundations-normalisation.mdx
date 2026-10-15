@@ -1,0 +1,471 @@
+---
+title: "Normalisation: batch norm, layer norm and RMSNorm"
+date: 2026-10-15
+category: "deep-learning"
+read_time: "28 min"
+series_order: 5
+series: foundations
+featured: false
+excerpt: "Numbers on wildly different scales make training slow and fragile. Normalisation rescales them to a common size, inside the network as well as at the input. This post works batch norm, layer norm and RMSNorm by hand on the same four-by-three table."
+question: "Why do networks keep rescaling their own numbers, and what is the difference between normalising over the batch, over the features, or not subtracting the mean at all?"
+my_work: "A concept note. I worked every normalisation by hand on one small matrix and checked every number with a short script."
+result: "On a stretched bowl, 20 careful steps of gradient descent still leave a loss of 0.878; after standardising the inputs, 5 steps reach 0.0043 from the same starting loss of 41. Batch norm, layer norm and RMSNorm differ only in which numbers they average over and whether they subtract the mean."
+evidence_limit: "Textbook methods on toy numbers and a small seeded random network. No experiments on real models; all numbers are arithmetic checked by a script."
+lesson: "Normalisation does not change what a network can represent, because the learnable scale and shift can undo it. It changes how easy the network is to train."
+---
+
+import StretchedBowls from "../../components/figures/StretchedBowls.astro";
+import StandardiseStepper from "../../components/figures/StandardiseStepper.astro";
+import BatchNormStepper from "../../components/figures/BatchNormStepper.astro";
+import NormAxisToggle from "../../components/figures/NormAxisToggle.astro";
+import RunningStatsStepper from "../../components/figures/RunningStatsStepper.astro";
+import BatchSizeNoise from "../../components/figures/BatchSizeNoise.astro";
+import ActivationDrift from "../../components/figures/ActivationDrift.astro";
+import NormPlacement from "../../components/figures/NormPlacement.astro";
+
+In [post 2](/blog/foundations-loss-gradient-descent/) gradient descent zigzagged across a narrow valley, and in [post 3](/blog/foundations-optimisers/) we built cleverer optimisers to cope with it. This post attacks the same problem from the other side. Instead of a smarter walker, we reshape the ground: rescale the numbers flowing through the network so that the valley is round in the first place.
+
+That rescaling is called **normalisation**. It appears at the input (standardising your data), and, in almost every modern network, again and again inside it: **batch normalisation** in image networks, **layer normalisation** in Transformers and speech models, and **RMSNorm** in LLaMA-style language models and in Kyutai's Moshi. All three are the same small recipe with one choice changed, and by the end you will have computed each of them by hand on the same table.
+
+
+## Why scale matters
+
+### Features on different scales stretch the bowl
+
+Imagine predicting a house price from two inputs: the number of bedrooms (around 1 to 5) and the floor area in square metres (around 50 to 250). A linear model multiplies each input by a weight and adds them up. Now nudge each weight by the same small amount, say 0.01. Nudging the bedrooms weight changes the prediction by about 0.01 × 3 = 0.03. Nudging the area weight changes it by about 0.01 × 150 = 1.5, fifty times more.
+
+So the loss is far more sensitive to one weight than the other. Seen as a landscape, the bowl is gentle in one direction and steep in the other: exactly the narrow valley from post 2. And post 2 taught us the rule: **the steepest direction sets the speed limit for every direction.** The learning rate has to be small enough not to bounce out of the steep direction, which makes progress along the gentle direction painfully slow.
+
+Here is a concrete toy. Take the bowl
+
+$$
+L = w_1^2 + 25\, w_2^2
+$$
+
+- $w_1$ and $w_2$ are two weights; $L$ is the loss.
+- The **25** says the loss is 25 times more curved along $w_2$, as if $w_2$'s input were 5 times larger than $w_1$'s (curvature grows with the square of the input's size, and $5^2 = 25$).
+
+Start at $(4, 1)$, where $L = 16 + 25 = 41$. A gradient step multiplies $w_1$ by $1 - 2\eta$ and $w_2$ by $1 - 50\eta$ (the same rule as post 2, where the slope of $a w^2$ is $2aw$). For $w_2$ not to blow up we need $|1 - 50\eta| < 1$, so $\eta < 0.04$. Choose $\eta = 0.035$:
+
+- $w_1$ shrinks by $1 - 0.07 = 0.93$ per step. Slow.
+- $w_2$ is multiplied by $1 - 1.75 = -0.75$ per step. It flips side every step: $(4, 1) \to (3.72, -0.75) \to (3.46, 0.56) \to (3.22, -0.42)$.
+
+After **20 steps** we are at about $(0.937, 0.003)$ with loss **0.878**. The steep direction has settled; the gentle one has barely moved.
+
+Now **standardise** the second input so both are on the same scale. That is the same as writing $u_2 = 5 w_2$, and the bowl becomes round: $L = w_1^2 + u_2^2$, starting at $(4, 5)$ with the same loss of 41. Both directions now shrink by $1 - 2\eta$, so a learning rate of $\eta = 0.3$ is safe, and each step multiplies every coordinate by $0.4$: $(4, 5) \to (1.6, 2) \to (0.64, 0.8) \to \ldots$ After **5 steps** the loss is **0.0043**. Same problem, same starting loss, two hundred times lower loss in a quarter of the steps.
+
+<figure class="blog-figure blog-figure--wide">
+  <StretchedBowls alt="Two contour maps side by side. Left: a long thin bowl, w1 squared plus 25 w2 squared, with a zigzag descent path from (4, 1). Right: a round bowl after standardising, with a straight path from (4, 5) to the centre. One Step button advances both paths and prints each update and the current loss." />
+  <figcaption><strong>Figure 1. Reshape the ground, not the walker.</strong> Press Step. On the stretched bowl (learning rate 0.035) the path zigzags and the loss is still 0.878 after 20 steps; on the standardised bowl (learning rate 0.3) it heads straight in and reaches 0.0043 after 5.</figcaption>
+</figure>
+
+### Activations drift from layer to layer
+
+The same problem reappears inside the network. The inputs to layer 3 are the outputs of layer 2, and those outputs change every time layer 2's weights change. If layer 2's outputs grow a little bigger each layer, layer 5 receives numbers on a very different scale from layer 1, and each layer is a stretched bowl of its own.
+
+Ioffe and Szegedy (2015), who introduced batch normalisation, called this shifting of each layer's input distribution **internal covariate shift** ("covariate" is a statistician's word for an input). Later work by Santurkar and colleagues (2018) showed that this story is not the full explanation: batch norm helps even when the shift is deliberately put back, and its main effect seems to be making the loss landscape smoother, so gradients are more predictable and larger learning rates are safe. Both papers agree on the practical upshot: **keep the numbers inside the network on a steady scale and training gets easier.**
+
+You can see the drift in a toy. Push 256 random examples through 5 layers of 64 neurons each, with random weights and ReLU (from [post 1](/blog/foundations-neurons-backprop/): keep positives, zero negatives). Without normalisation the spread (standard deviation, defined in the next section) of the outputs grows layer by layer: **1.13, 1.58, 2.46, 3.09, 3.39**. Add layer normalisation before each ReLU and it stays put: **0.58, 0.58, 0.61, 0.57, 0.57**.
+
+<figure class="blog-figure blog-figure--wide">
+  <ActivationDrift alt="Five small histograms in a row, one per layer, showing the distribution of activations in a random 5-layer network. A toggle switches normalisation on and off; without it the histograms widen from layer to layer, with it they stay the same width. Each histogram is labelled with its mean and standard deviation." />
+  <figcaption><strong>Figure 2. Drift.</strong> Toggle normalisation off and the activations widen layer by layer (standard deviation 1.13 to 3.39); toggle it on and every layer looks the same (about 0.58).</figcaption>
+</figure>
+
+
+## Mean, variance and standard deviation
+
+Every normaliser in this post is built from two summaries of a list of numbers: where they sit, and how spread out they are.
+
+### Mean: where the numbers sit
+
+In one sentence: add them up and divide by how many there are.
+
+$$
+\mu = \frac{1}{n} \sum_{i=1}^{n} x_i
+$$
+
+- $x_1, \ldots, x_n$ are the numbers; $n$ is how many.
+- $\sum$ means "add up"; $\mu$ (the Greek letter mu) is the mean.
+
+Picture: if the numbers were weights on a ruler, the mean is the point where the ruler balances.
+
+Example: for $3, 4, 5$, the mean is $(3 + 4 + 5) / 3 = 12 / 3 = 4$.
+
+### Variance: how spread out they are
+
+In one sentence: measure how far each number is from the mean, square those distances, and average them.
+
+$$
+\sigma^2 = \frac{1}{n} \sum_{i=1}^{n} (x_i - \mu)^2
+$$
+
+- $x_i - \mu$ is how far number $i$ is from the mean (negative if below).
+- Squaring makes every distance positive, so numbers below and above the mean do not cancel.
+- $\sigma^2$ (sigma squared) is the variance.
+
+Example: for $3, 4, 5$ the distances are $-1, 0, 1$; squared, $1, 0, 1$; average $2/3 \approx 0.667$.
+
+### Standard deviation: spread in the original units
+
+Variance is in squared units (square metres if the numbers were metres). Take its square root to get back to the original units:
+
+$$
+\sigma = \sqrt{\sigma^2}
+$$
+
+For $3, 4, 5$: $\sigma = \sqrt{0.667} \approx 0.816$. Roughly, "a typical number is about 0.8 away from the mean."
+
+What would change? Replace 5 with 50 and the mean jumps to 19 and the standard deviation to about 21.9: both summaries are sensitive to one big value.
+
+A small note: some textbooks divide by $n - 1$ instead of $n$ in the variance (the "sample" variance). Normalisation layers divide by $n$ when they normalise; we come back to the $n - 1$ version when we meet [running averages](#training-versus-inference-running-averages).
+
+
+## Standardising inputs
+
+In one sentence: subtract the mean, then divide by the standard deviation.
+
+$$
+\hat{x}_i = \frac{x_i - \mu}{\sigma}
+$$
+
+- $\hat{x}_i$ (x hat) is the standardised number.
+- Subtracting $\mu$ moves the centre to 0. Dividing by $\sigma$ makes the typical distance from 0 equal to 1.
+
+Picture: converting exam marks from different teachers into "how many typical gaps above or below the class average" so they can be compared fairly.
+
+Example: $3, 4, 5$ with $\mu = 4$, $\sigma = 0.816$:
+
+- $(3 - 4) / 0.816 = -1.22$
+- $(4 - 4) / 0.816 = 0$
+- $(5 - 4) / 0.816 = 1.22$
+
+The result always has mean **0** and standard deviation **1**, whatever units we started in. Multiply every original number by 1000 and the standardised numbers do not change at all; that is the whole point.
+
+LeCun, Bottou, Orr and Müller recommended exactly this in "Efficient BackProp" (1998): shift each input so its average over the training set is near zero, and scale it so all inputs have about the same spread. One rule matters in practice: compute $\mu$ and $\sigma$ on the **training set only**, store them, and reuse them on validation, test and real data (the three piles from [post 4](/blog/foundations-regularisation/)).
+
+<figure class="blog-figure">
+  <StandardiseStepper alt="A row of three numbers with sliders. Step buttons compute the mean, then each distance from the mean, the squared distances, the variance, the standard deviation, and finally each standardised value, printing the arithmetic at every step." />
+  <figcaption><strong>Figure 3. Standardising by hand.</strong> With 3, 4, 5 the steps give mean 4, variance 0.667, standard deviation 0.816 and outputs −1.22, 0, 1.22. Drag a slider and every number updates.</figcaption>
+</figure>
+
+
+## Batch normalisation
+
+Standardising the inputs fixes layer 1. Batch normalisation (Ioffe and Szegedy, 2015) does the same thing **inside** the network, at a layer of our choosing, using the examples in the current mini-batch (the small random group of examples from [post 2](/blog/foundations-loss-gradient-descent/)) to measure the mean and spread.
+
+### The recipe
+
+For each feature (each column, if rows are examples), over the $m$ examples in the batch:
+
+$$
+\mu_B = \frac{1}{m}\sum_{i=1}^{m} x_i
+\qquad
+\sigma_B^2 = \frac{1}{m}\sum_{i=1}^{m} (x_i - \mu_B)^2
+$$
+
+$$
+\hat{x}_i = \frac{x_i - \mu_B}{\sqrt{\sigma_B^2 + \epsilon}}
+\qquad
+y_i = \gamma\, \hat{x}_i + \beta
+$$
+
+- $m$ is the batch size; $x_i$ is this feature's value for example $i$.
+- $\mu_B$ and $\sigma_B^2$ are the batch mean and batch variance of this feature.
+- $\epsilon$ (epsilon) is a tiny number such as $10^{-5}$, explained [below](#why-epsilon).
+- $\gamma$ (gamma, "scale") and $\beta$ (beta, "shift") are two **learnable** numbers per feature, trained by gradient descent like any weight. They usually start at $\gamma = 1$, $\beta = 0$.
+- $y_i$ is the output.
+
+### Why gamma and beta
+
+Standardising forces every feature to mean 0 and spread 1. But maybe the next layer works better with a feature centred at 3 with spread 2. For example, a ReLU after a standardised feature always zeros about half of it; the network might want less or more. With $\gamma$ and $\beta$, the network can choose any mean and spread it likes. It can even undo the normalisation completely: if it learns $\gamma = \sigma_B$ and $\beta = \mu_B$, then $y_i = x_i$ again.
+
+So batch norm does not limit what the network can represent. What it changes is *how the scale is controlled*: instead of the mean and spread of a feature depending on a tangle of all the earlier weights, they are set directly by two numbers, $\beta$ and $\gamma$. That is much easier for gradient descent to adjust.
+
+### Why epsilon
+
+If every example in the batch has the same value for a feature, the variance is 0 and we would divide by zero. Adding $\epsilon$ under the square root keeps the division safe. When the variance is reasonably large, $\epsilon$ changes nothing you can see: with variance 1, $\sqrt{1 + 0.00001} = 1.000005$. In our hand examples we set $\epsilon = 0$ to keep the arithmetic clean.
+
+### Worked by hand on a batch of four
+
+Here is a batch of **4 examples** (rows) with **3 features** (columns). The features are deliberately on different scales: column 3 is about ten times column 2.
+
+| | feature 1 | feature 2 | feature 3 |
+|---|---|---|---|
+| example 1 | 2 | 1 | 20 |
+| example 2 | 4 | 3 | 60 |
+| example 3 | 2 | 3 | 20 |
+| example 4 | 4 | 9 | 60 |
+
+**Feature 1** (column $2, 4, 2, 4$):
+
+- Mean: $(2 + 4 + 2 + 4) / 4 = 12 / 4 = 3$.
+- Distances: $-1, 1, -1, 1$. Squared: $1, 1, 1, 1$. Variance: $4 / 4 = 1$. Standard deviation: $1$.
+- Normalised: $(2-3)/1 = -1$, $(4-3)/1 = 1$, $-1$, $1$.
+
+**Feature 2** (column $1, 3, 3, 9$):
+
+- Mean: $(1 + 3 + 3 + 9) / 4 = 16 / 4 = 4$.
+- Distances: $-3, -1, -1, 5$. Squared: $9, 1, 1, 25$. Variance: $36 / 4 = 9$. Standard deviation: $3$.
+- Normalised: $-3/3 = -1$, $-1/3 = -0.33$, $-0.33$, $5/3 = 1.67$.
+
+**Feature 3** (column $20, 60, 20, 60$):
+
+- Mean: $160 / 4 = 40$.
+- Distances: $-20, 20, -20, 20$. Squared: $400$ each. Variance: $1600 / 4 = 400$. Standard deviation: $20$.
+- Normalised: $-1, 1, -1, 1$.
+
+The batch-normalised table (with $\gamma = 1$, $\beta = 0$):
+
+| | feature 1 | feature 2 | feature 3 |
+|---|---|---|---|
+| example 1 | −1 | −1 | −1 |
+| example 2 | 1 | −0.33 | 1 |
+| example 3 | −1 | −0.33 | −1 |
+| example 4 | 1 | 1.67 | 1 |
+
+Every column now has mean 0 and standard deviation 1. Feature 3, which was in the tens, is now on exactly the same footing as feature 1.
+
+Now apply a learned scale and shift. Say feature 1 has learned $\gamma = 2$, $\beta = 1$. Each value becomes $2\hat{x} + 1$: $2(-1) + 1 = -1$ and $2(1) + 1 = 3$. The column is now $-1, 3, -1, 3$: mean 1, standard deviation 2, exactly as $\beta$ and $\gamma$ asked.
+
+What would change? Double every number in feature 3 (40, 120, 40, 120). The mean doubles to 80 and the standard deviation to 40, so the normalised column is unchanged: $-1, 1, -1, 1$. Batch norm does not care about the scale a feature arrives on.
+
+<figure class="blog-figure blog-figure--wide">
+  <BatchNormStepper alt="The 4 by 3 batch matrix. The steps walk one column at a time through five stages: mean, subtract, variance, divide, scale and shift. The active column is highlighted and the arithmetic for each stage is printed beneath. Gamma and beta sliders for the active column update the output column live." />
+  <figcaption><strong>Figure 4. Batch norm, one column at a time.</strong> Step through feature 2: mean 4, distances −3, −1, −1, 5, variance 9, standard deviation 3, outputs −1, −0.33, −0.33, 1.67. While stepping through feature 1, set γ to 2 and β to 1 and its outputs become −1, 3, −1, 3.</figcaption>
+</figure>
+
+### Where it sits
+
+In the original paper, batch norm is placed after a layer's weighted sum and before the activation function: weighted sum, then batch norm, then ReLU. Because $\beta$ already adds a shift, the layer's own bias becomes redundant and is usually dropped. In convolutional networks (the subject of [post 7](/blog/foundations-convolutions/)) each channel is one feature, and the mean is taken over the batch *and* over every position in the image.
+
+
+## Training versus inference: running averages
+
+Batch norm has an awkward property: during training, the output for one example depends on the *other* examples in its batch, because they all share $\mu_B$ and $\sigma_B$. When the trained model is used for real (**inference**), we often have one example at a time, and we want the same input to always give the same output.
+
+The fix: during training, keep a slowly updated **running average** of the batch means and variances, and at inference use those stored numbers instead of batch statistics.
+
+$$
+\text{running} \leftarrow (1 - \alpha)\cdot\text{running} + \alpha\cdot\text{batch value}
+$$
+
+- $\alpha$ is the update rate, which PyTorch calls **momentum** and sets to **0.1** by default. (Confusingly, this is not the optimiser momentum from post 3; it is the moving-average idea from that post, with $\alpha = 1 - \beta$.)
+- Each update keeps 90% of the old value and mixes in 10% of the new batch.
+
+Worked for three batches of feature 1. Start, as PyTorch does, with running mean 0 and running variance 1. Suppose the three batches have means **3, 5, 4** and variances **1, 4, 2**.
+
+| after batch | running mean | running variance |
+|---|---|---|
+| start | 0 | 1 |
+| 1 (mean 3, var 1) | $0.9 \times 0 + 0.1 \times 3 = 0.3$ | $0.9 \times 1 + 0.1 \times 1 = 1.0$ |
+| 2 (mean 5, var 4) | $0.9 \times 0.3 + 0.1 \times 5 = 0.77$ | $0.9 \times 1.0 + 0.1 \times 4 = 1.3$ |
+| 3 (mean 4, var 2) | $0.9 \times 0.77 + 0.1 \times 4 = 1.093$ | $0.9 \times 1.3 + 0.1 \times 2 = 1.37$ |
+
+After three batches the running mean is only **1.093**, far from the true value of about 4. That is the early bias from post 3: an average that starts at zero takes a while to catch up. Over thousands of training steps it does catch up, so by the end of training the stored numbers are good. But it is a classic bug to evaluate a model after only a few steps, or to forget to switch the model to evaluation mode, and see strange results.
+
+A detail for the curious: PyTorch stores the running variance using the $n - 1$ ("unbiased") version of the batch variance, while it normalises the batch itself with the $n$ version.
+
+<figure class="blog-figure">
+  <RunningStatsStepper alt="A timeline of three batches. Each Step mixes one batch's mean and variance into the running values, printing 0.9 times old plus 0.1 times new, and moves a marker on a number line toward the batch value. A slider sets the momentum." />
+  <figcaption><strong>Figure 5. Running averages.</strong> With momentum 0.1 and batch means 3, 5, 4, the running mean goes 0.3, 0.77, 1.093. Raise momentum to 0.5 and it goes 1.5, 3.25, 3.625.</figcaption>
+</figure>
+
+### The batch-size problem
+
+The batch mean and variance are only estimates of the true ones, and estimates from tiny batches are noisy. Take 10,000 numbers drawn from a bell curve with mean about **5.04** and standard deviation about **2.01** (seeded, so the figure is reproducible), and split them into batches.
+
+- With batches of **2**, the first ten batch means are 6.84, 6.59, 2.90, 1.83, 5.21, 5.03, 6.19, 6.89, 4.58, 6.12. One batch has a standard deviation of just **0.01**, so its two values would be blown up by a factor of 100 when normalised.
+- With batches of **32**, the first ten batch means all lie between **4.77 and 5.73**.
+
+Over 200 batches, the batch mean wobbles with a standard deviation of **1.52** at batch size 2 and **0.38** at batch size 32, close to the textbook rule that the wobble shrinks with the square root of the batch size ($2.01/\sqrt{2} \approx 1.42$, $2.01/\sqrt{32} \approx 0.36$).
+
+So batch norm gets unreliable when batches are small, which is common when each example is large (long audio clips, high-resolution images) or when you generate one item at a time. It is also awkward for sequences of different lengths. Those are exactly the problems layer normalisation avoids.
+
+<figure class="blog-figure blog-figure--wide">
+  <BatchSizeNoise alt="A histogram of a seeded dataset with its true mean marked. A batch-size toggle (2 or 32) and a Draw one batch button: each draw highlights the sampled points, drops a tick at the batch mean, and prints the batch mean and standard deviation. Ticks accumulate to show the spread." />
+  <figcaption><strong>Figure 6. Small batches, noisy statistics.</strong> At batch size 2 the batch means scatter from 1.83 to 6.89; at batch size 32 they stay between 4.77 and 5.73.</figcaption>
+</figure>
+
+
+## Layer normalisation
+
+Layer normalisation (Ba, Kiros and Hinton, 2016) uses the same recipe but turns it sideways: instead of normalising each feature over the batch (down a column), it normalises each example over its own features (across a row).
+
+$$
+\mu = \frac{1}{d}\sum_{j=1}^{d} x_j
+\qquad
+\sigma^2 = \frac{1}{d}\sum_{j=1}^{d} (x_j - \mu)^2
+\qquad
+y_j = \gamma_j \frac{x_j - \mu}{\sqrt{\sigma^2 + \epsilon}} + \beta_j
+$$
+
+- $d$ is the number of features in one example; $x_j$ is feature $j$.
+- $\mu$ and $\sigma^2$ are now the mean and variance of *this one example's* features.
+- $\gamma_j$ and $\beta_j$ are still one per feature, learned.
+
+### Worked on the same matrix
+
+Take the same four rows.
+
+**Example 1** ($2, 1, 20$):
+
+- Mean: $23 / 3 = 7.67$.
+- Distances: $-5.67, -6.67, 12.33$. Squared: $32.1, 44.4, 152.1$. Variance: $228.7 / 3 = 76.2$. Standard deviation: $8.73$.
+- Normalised: $-5.67/8.73 = -0.65$, $-6.67/8.73 = -0.76$, $12.33/8.73 = 1.41$.
+
+Doing the same for each row (means 7.67, 22.33, 8.33, 24.33; standard deviations 8.73, 26.64, 8.26, 25.30):
+
+| | feature 1 | feature 2 | feature 3 |
+|---|---|---|---|
+| example 1 | −0.65 | −0.76 | 1.41 |
+| example 2 | −0.69 | −0.73 | 1.41 |
+| example 3 | −0.77 | −0.65 | 1.41 |
+| example 4 | −0.80 | −0.61 | 1.41 |
+
+Now each *row* has mean 0 and standard deviation 1. Notice what happened: because feature 3 is so much bigger than the others, it dominates every row, and all four rows come out looking almost alike. That is a lesson in itself. Layer norm compares the features of one example with each other, so it only makes sense when those features are comparable, like the hidden units of a layer that all come out of the same kind of weighted sum. It is not a replacement for standardising raw inputs measured in different units.
+
+### Why Transformers and speech models use it
+
+- **No batch dependence.** Each example is normalised using only its own numbers, so the output is the same at training and inference, there are no running averages to store, and batch size 1 works perfectly.
+- **Works token by token.** In a Transformer, each token (a word piece, or a frame of audio) is a vector of features. Layer norm normalises each token's vector on its own, so sequences of any length, and generating one token at a time, are no problem. This is why the Transformer of Vaswani and colleagues (2017) uses it, and why speech models built on Transformers do too: in [Pocket TTS](/blog/pocket-tts-calm-explained/), the Transformer's output for each frame is layer-normalised before it goes to the small head network.
+
+<figure class="blog-figure blog-figure--wide">
+  <NormAxisToggle alt="The 4 by 3 matrix with a three-way toggle: BatchNorm, LayerNorm, RMSNorm. BatchNorm highlights one column at a time, the other two highlight one row at a time. Step walks through each column or row printing its statistics. Below, the three output tables are shown side by side with the active one emphasised." />
+  <figcaption><strong>Figure 7. Down the columns or across the rows.</strong> BatchNorm averages each feature over the batch; LayerNorm and RMSNorm average each example over its features. Compare example 1: BatchNorm gives −1, −1, −1; LayerNorm −0.65, −0.76, 1.41; RMSNorm 0.17, 0.09, 1.72.</figcaption>
+</figure>
+
+
+## RMSNorm
+
+RMSNorm (Zhang and Sennrich, 2019) asks: do we need to subtract the mean at all? Their answer, tested on translation and other tasks, was that the re-scaling is what matters most, and skipping the re-centring gave similar quality while running faster.
+
+In one sentence: divide each example's features by their **root mean square**, the square root of the average of the squares.
+
+$$
+\text{RMS}(x) = \sqrt{\frac{1}{d}\sum_{j=1}^{d} x_j^2}
+\qquad
+y_j = \gamma_j \frac{x_j}{\text{RMS}(x) + \epsilon}
+$$
+
+- $\text{RMS}(x)$ is the root mean square: square each feature, average, square-root. It measures the overall size of the vector, ignoring signs.
+- There is no mean subtracted, and usually no $\beta$: just one learned scale $\gamma_j$ per feature.
+- Implementations differ in where $\epsilon$ goes (inside or outside the square root); the effect is the same tiny safety margin.
+
+Picture: layer norm recentres a group photo and then zooms; RMSNorm only zooms.
+
+### Worked by hand
+
+Take the vector $(1, 5, 5, 7)$:
+
+- Squares: $1, 25, 25, 49$. Sum: $100$. Mean of squares: $100 / 4 = 25$.
+- Root mean square: $\sqrt{25} = 5$.
+- Output: $1/5 = 0.2$, $5/5 = 1$, $1$, $7/5 = 1.4$.
+
+The output has root mean square exactly 1, but its mean is $0.9$, not 0: RMSNorm controls size, not centre.
+
+On our matrix, example 1 ($2, 1, 20$): squares $4 + 1 + 400 = 405$, mean $135$, root mean square $\sqrt{135} = 11.62$, output $0.17, 0.09, 1.72$. All four rows:
+
+| | feature 1 | feature 2 | feature 3 |
+|---|---|---|---|
+| example 1 | 0.17 | 0.09 | 1.72 |
+| example 2 | 0.12 | 0.09 | 1.73 |
+| example 3 | 0.17 | 0.26 | 1.70 |
+| example 4 | 0.11 | 0.26 | 1.71 |
+
+What would change? If a row's mean is already near 0, the root mean square and the standard deviation are almost the same number, and RMSNorm and layer norm give almost the same output. Hidden activations in big networks are often roughly centred, which is part of why dropping the mean costs so little.
+
+### Why it is cheaper, and who uses it
+
+Layer norm needs two passes over the numbers (one for the mean, then one for the variance around it) and two learned vectors. RMSNorm needs one sum of squares and one learned vector. That saving is small per layer but it happens at every layer for every token. Zhang and Sennrich report running-time reductions of 7% to 64% depending on the model.
+
+It is now the standard in large language models. LLaMA (Touvron and colleagues, 2023) normalises the input of each Transformer sub-layer with RMSNorm. Kyutai's Moshi does the same in its Helium language model: its paper states it uses "RMS normalization (Zhang and Sennrich, 2019) at the input of the attention blocks, the feed-forward blocks and the output linear layer".
+
+
+## Pre-norm and post-norm
+
+Transformers are built from **residual blocks**: a sub-layer (attention or a small feed-forward network) whose output is added back to its own input, $x + \text{sublayer}(x)$. The full story is in [post 11](/blog/foundations-transformer/). There are two places to put the normalisation:
+
+- **Post-norm** (the original 2017 Transformer): add first, then normalise. $\;x_{\text{next}} = \text{Norm}(x + \text{sublayer}(x))$.
+- **Pre-norm**: normalise only the sub-layer's input, and leave the main path untouched. $\;x_{\text{next}} = x + \text{sublayer}(\text{Norm}(x))$.
+
+Xiong and colleagues (2020) showed why the difference matters. With post-norm, the gradients near the output are large at the start of training, so the model needs a learning-rate warm-up (from post 3) to avoid blowing up. With pre-norm the main path is a clean highway of additions, gradients are well behaved from the first step, and warm-up can be shortened or dropped. Most modern large models, LLaMA and Moshi's Helium among them, use pre-norm. A pre-norm stack usually adds one final normalisation before the output layer, since nothing else normalises the highway.
+
+<figure class="blog-figure">
+  <NormPlacement alt="Two residual block diagrams side by side. Post-norm: input, sublayer, add, norm. Pre-norm: input splits, norm then sublayer on the branch, added back to the untouched main path. A Step button sends a dot through each block highlighting the operation it passes." />
+  <figcaption><strong>Figure 8. Where the norm sits.</strong> Post-norm normalises after the addition; pre-norm normalises only the branch, leaving the main path clean.</figcaption>
+</figure>
+
+
+## Where normalisation sits in a network
+
+Putting it together, in a typical network you will find:
+
+- **At the input:** standardisation with training-set statistics (or, for audio, a fixed rescaling of the waveform or spectrogram).
+- **Image networks with large batches:** batch norm after each convolution, before the activation.
+- **Transformers, speech and language models:** layer norm or RMSNorm on the input of every attention and feed-forward sub-layer (pre-norm), plus one at the very end.
+- **Generative models:** variants that let a condition choose $\gamma$ and $\beta$, such as the adaptive layer norm in the diffusion Transformer blocks of [F5-TTS](/paper-reviews/f5-tts/). That is the same "learnable scale and shift" idea, with the scale and shift predicted from the condition instead of fixed.
+
+
+## Counting the parameters
+
+Normalisation adds very few parameters. The mean and variance are computed from the data, not learned; only the per-feature gain $\gamma$ and shift $\beta$ are trained.
+
+- **Batch norm** and **layer norm** over $d$ features: $\gamma$ and $\beta$, so $2d$ parameters.
+- **RMSNorm**: only $\gamma$, so $d$ parameters (it never subtracts a mean, so it has no shift).
+
+For our table's 3 features: 6, 6 and 3. Batch norm also keeps its running mean and variance, but those are **buffers**: saved with the model and updated by averaging, never by gradient descent, so they are not counted as parameters.
+
+```python
+import torch.nn as nn
+
+for layer in [nn.BatchNorm1d(3), nn.LayerNorm(3), nn.RMSNorm(3)]:
+    params = sum(p.numel() for p in layer.parameters())
+    buffers = [name for name, _ in layer.named_buffers()]
+    print(type(layer).__name__, params, buffers)
+```
+
+It prints:
+
+```text
+BatchNorm1d 6 ['running_mean', 'running_var', 'num_batches_tracked']
+LayerNorm 6 []
+RMSNorm 3 []
+```
+
+Even in a large model this is tiny: a layer norm at width 768 has $2 \times 768 = 1{,}536$ parameters, next to millions in the layers around it.
+
+## What to remember
+
+- Inputs and activations on very different scales make a stretched loss bowl; the steepest direction then limits the learning rate for all of them.
+- Standardising (subtract the mean, divide by the standard deviation) makes every feature mean 0, spread 1, whatever its units.
+- **Batch norm** normalises each feature over the batch, then applies a learned scale $\gamma$ and shift $\beta$. It needs running averages for inference and gets noisy with small batches.
+- **Layer norm** normalises each example over its own features. No batch dependence, so it suits Transformers and token-by-token generation.
+- **RMSNorm** skips the mean and divides by the root mean square. Cheaper, nearly as good, and standard in LLaMA-style models and Moshi.
+- $\gamma$ and $\beta$ mean normalisation never limits what the network can represent; it only makes training easier.
+- Pre-norm (normalise the branch, not the main path) trains more stably than post-norm in deep Transformers.
+
+
+## Try it yourself
+
+- **Figure 1.** Press Step 20 times. The stretched bowl must show $(0.937, 0.003)$ and loss **0.878**; the standardised bowl after 5 steps $(0.041, 0.051)$ and loss **0.0043**. Raise the stretched learning rate to 0.045 and see $w_2$ grow: $-1.25, 1.56, -1.95$.
+- **Figure 3.** Set 3, 4, 5: mean **4**, variance **0.667**, standard deviation **0.816**, outputs **−1.22, 0, 1.22**.
+- **Figure 4.** Step through feature 2: mean **4**, variance **9**, outputs **−1, −0.33, −0.33, 1.67**. Set $\gamma = 2$, $\beta = 1$ on feature 1: outputs **−1, 3, −1, 3**.
+- **Figure 5.** Momentum 0.1, batch means 3, 5, 4: running mean **0.3, 0.77, 1.093**; running variance **1.0, 1.3, 1.37**.
+- **Figure 6.** Batch size 2: one of the first ten batches has standard deviation **0.01**. Batch size 32: all first ten means between **4.77 and 5.73**.
+- **Figure 7.** Example 1 under each toggle: BatchNorm **−1, −1, −1**; LayerNorm **−0.65, −0.76, 1.41**; RMSNorm **0.17, 0.09, 1.72**.
+- **Figure 2.** Normalisation off: layer 5 standard deviation **3.39**. On: **0.57**.
+
+
+## Sources
+
+- Sergey Ioffe and Christian Szegedy, 2015. "Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift." ICML 2015. arXiv:1502.03167.
+- Jimmy Lei Ba, Jamie Ryan Kiros and Geoffrey E. Hinton, 2016. "Layer Normalization." arXiv:1607.06450.
+- Biao Zhang and Rico Sennrich, 2019. "Root Mean Square Layer Normalization." NeurIPS 2019. arXiv:1910.07467.
+- Ruibin Xiong, Yunchang Yang, Di He, Kai Zheng, Shuxin Zheng, Chen Xing, Huishuai Zhang, Yanyan Lan, Liwei Wang and Tie-Yan Liu, 2020. "On Layer Normalization in the Transformer Architecture." ICML 2020. arXiv:2002.04745.
+- Shibani Santurkar, Dimitris Tsipras, Andrew Ilyas and Aleksander Madry, 2018. "How Does Batch Normalization Help Optimization?" NeurIPS 2018. arXiv:1805.11604.
+- Yann LeCun, Léon Bottou, Genevieve B. Orr and Klaus-Robert Müller, 1998. "Efficient BackProp." In Neural Networks: Tricks of the Trade, Springer.
+- Hugo Touvron and colleagues, 2023. "LLaMA: Open and Efficient Foundation Language Models." arXiv:2302.13971.
+- Ashish Vaswani and colleagues, 2017. "Attention Is All You Need." NeurIPS 2017. arXiv:1706.03762.
+- Alexandre Défossez and colleagues, 2024. "Moshi: a speech-text foundation model for real-time dialogue." arXiv:2410.00037. (Helium's use of RMSNorm, section on the text language model.)
+

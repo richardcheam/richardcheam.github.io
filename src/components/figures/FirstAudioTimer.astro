@@ -1,0 +1,51 @@
+---
+// DSM review, Figure 6: time to first audio at batch 1 (App I, pp. 22 to 23):
+// (n - 1) d_b + (1 + 2)(d_b + d_q), with n the delay in ticks, d_b one
+// backbone step and d_q the codebook sampler. App I uses n = 25, d_b = 5 ms,
+// d_q = 25 ms, which gives 210 ms; Table 6 prints 150 ms.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram fat" role="region" aria-label={alt} data-fat>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 240" role="img" aria-labelledby="fat-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="fat-title">Cheap warm-up ticks and expensive audio ticks adding up to the time before the first sound</title>
+    <g data-g></g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Delay in ticks n<strong data-vn></strong></span><input class="scrub" data-n type="range" min="5" max="30" step="1" value="25" /></label>
+    <label><span class="fig-panel__name">Backbone step d_b<strong data-vb></strong></span><input class="scrub" data-b type="range" min="1" max="10" step="1" value="5" /></label>
+    <label><span class="fig-panel__name">Sampler d_q<strong data-vq></strong></span><input class="scrub" data-q type="range" min="5" max="40" step="1" value="25" /></label>
+    <div><span class="fig-panel__name">Preset</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-p="25">App I: 25 ticks</button>
+      <button type="button" class="fig-chip" data-p="16">16 ticks (1.28 s)</button>
+    </div></div>
+  </div>
+</div>
+
+<script>
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-fat]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const nIn = $<HTMLInputElement>("[data-n]"), bIn = $<HTMLInputElement>("[data-b]"), qIn = $<HTMLInputElement>("[data-q]");
+    const mk = (g: Element, tag: string, a: Record<string, string | number>, txt?: string) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, String(a[k])); if (txt !== undefined) e.textContent = txt; g.append(e); return e; };
+    function draw() {
+      const n = +nIn.value, db = +bIn.value, dq = +qIn.value, warm = (n - 1) * db, full = 3 * (db + dq), total = warm + full;
+      const g = $("[data-g]"); g.replaceChildren();
+      const S = 700 / Math.max(total, 250);
+      mk(g, "text", { x: 20, y: 22, "font-size": 11.5, "font-weight": 700, fill: "#2b2b30" }, "Compute time before the first sound, at batch 1");
+      let x = 20;
+      for (let i = 0; i < n - 1; i++) { mk(g, "rect", { x, y: 36, width: Math.max(1, db * S - 1), height: 40, fill: "#b9b9c2" }); x += db * S; }
+      for (let i = 0; i < 3; i++) { mk(g, "rect", { x, y: 36, width: db * S - 1, height: 40, fill: "#594578" }); x += db * S; mk(g, "rect", { x, y: 36, width: dq * S - 1, height: 40, fill: "#b8722c" }); x += dq * S; }
+      mk(g, "path", { d: `M${x + 6} 46 l10 -6 v32 l-10 -6 z`, fill: "#4F5D3A" });
+      mk(g, "line", { x1: 20 + 150 * S, x2: 20 + 150 * S, y1: 30, y2: 84, stroke: "#a33b3b", "stroke-dasharray": "4 3", "stroke-width": 2 });
+      mk(g, "text", { x: 24 + 150 * S, y: 98, "font-size": 10.5, fill: "#a33b3b" }, "Table 6: 150 ms");
+      mk(g, "text", { x: 20, y: 130, "font-size": 11, fill: "#5f5f66" }, "grey: backbone only, no audio due yet   purple: backbone   orange: codebook sampler");
+      mk(g, "text", { x: 20, y: 166, "font-size": 13, "font-weight": 700, fill: "#2b2b30" }, `(${n} − 1) × ${db} + 3 × (${db} + ${dq}) = ${warm} + ${full} = ${total} ms`);
+      mk(g, "text", { x: 20, y: 190, "font-size": 12, fill: "#2b2b30" }, "The 3 is the first audio tick plus the 2-tick acoustic delay inherited from Moshi.");
+      mk(g, "text", { x: 20, y: 214, "font-size": 11.5, fill: total === 150 ? "#4F5D3A" : "#a33b3b" }, total === 150 ? "This matches Table 6." : "As printed, the formula and Table 6 do not agree; the paper does not say which inputs give 150 ms.");
+      [[nIn, "vn", ""], [bIn, "vb", " ms"], [qIn, "vq", " ms"]].forEach(([i, k, u]) => { const el = i as HTMLInputElement; el.style.setProperty("--p", `${((+el.value - +el.min) / (+el.max - +el.min)) * 100}%`); $(`[data-${k}]`).textContent = el.value + u; });
+    }
+    [nIn, bIn, qIn].forEach((i) => i.addEventListener("input", draw));
+    root.querySelectorAll<HTMLButtonElement>("[data-p]").forEach((b) => b.addEventListener("click", () => { nIn.value = b.dataset.p!; bIn.value = "5"; qIn.value = "25"; draw(); }));
+    draw();
+  });
+</script>

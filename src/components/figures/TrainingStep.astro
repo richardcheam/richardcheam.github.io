@@ -1,0 +1,387 @@
+---
+// One full training step of the Khmer fine-tune, walked through in 12 small
+// steps on one fixed diagram. Every setting shown is the project's (report
+// Table 3); the frames, noise, IDs, embedding values and losses are
+// illustrative.
+const { alt } = Astro.props;
+const steps = [
+  ["Take a batch", "Training looks at 64 recordings at a time. Each one is already cut into a voice prompt and a target (Figure 6). Eight are shown; we follow the first."],
+  ["Hide some conditions (dropout)", "About 20% of examples lose their text and 20% lose their voice prompt, so the model also learns to speak without them. That later makes guidance possible."],
+  ["Split the text into pieces", "The tokenizer cuts the sentence into pieces. Each piece has an ID between 0 and 3,999."],
+  ["Look up each piece's vector", "Each ID selects one row of the text embedding: 4,000 rows, one per piece, created fresh for Khmer. At the start the rows are random."],
+  ["Fetch the audio as frames", "The prompt and the target were turned into Mimi frames (12.5 per second) once, before training. Mimi is frozen and never runs here."],
+  ["The transformer reads everything", "The 24 layers read the text vectors and the frames. A causal mask lets frame t look only at frames up to t. For each frame the output is h_t: an instruction saying what comes next and in whose voice."],
+  ["Pick the real next frame", "Training needs a right answer. It is the real target frame, taken from the Mimi target frames. The model is never shown it directly."],
+  ["Make 4 noisy versions of it", "Draw random noise and blend it with the real frame by a random amount τ (0 = all noise, 1 = the real frame). This is done 4 times, with 4 different noises and τ values."],
+  ["The flow head guesses the way back", "The flow head gets three inputs: the instruction h_t, a noisy blend, and τ. It outputs a direction: how to move the blend to reach the real frame."],
+  ["Score the guesses", "The true way back is simply real frame minus noise, because we made the blend ourselves. The gap between guess and truth is the flow error. Loss = flow error + 0.1 × end-of-speech error."],
+  ["Send the correction back", "Backpropagation sends the loss back through the flow head, all 24 layers and the 3 embedding rows that were used. It stops at Mimi. AdamW then updates 316,015,874 weights."],
+  ["Update the smoothed copy", "A second, smoothed copy of the weights (EMA, decay 0.999) moves a tiny step toward the new ones. That copy is what gets saved. Then the next batch starts."],
+];
+const N = steps.length;
+const MASK = 7;
+const MONO = "ui-monospace, SFMono-Regular, Menlo, monospace";
+---
+<div class="blog-diagram ts" role="region" aria-label={alt} data-ts data-steps={JSON.stringify(steps)}>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 620" role="img" aria-labelledby="ts-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="ts-title">One training step, walked through from batch to updated weights</title>
+    <rect x="16" y="8" width="748" height="58" rx="6" fill="#f6f6f8" />
+    <text data-stitle x="28" y="30" font-size="14.5" font-weight="700" fill="#2b2b30"></text>
+    <text data-sdesc1 x="28" y="47" font-size="11" fill="#2b2b30"></text>
+    <text data-sdesc2 x="28" y="60" font-size="11" fill="#2b2b30"></text>
+
+    <!-- batch (steps 1–2) -->
+    <g data-s="1">
+      <text x="24" y="88" font-size="10" letter-spacing="1" fill="#5f5f66">BATCH (8 OF 64 SHOWN)</text>
+      <g data-cards transform="translate(24 96)"></g>
+    </g>
+
+    <!-- text (steps 3–4) -->
+    <g data-s="3">
+      <text x="24" y="172" font-size="10" letter-spacing="1" fill="#5f5f66">TEXT</text>
+      <text x="24" y="198" font-size="20" fill="#2b2b30" font-family="'Noto Sans Khmer', 'Khmer OS', 'Khmer Sangam MN', sans-serif">ខ្ញុំទៅផ្សារ</text>
+      <g data-chips transform="translate(24 210)"></g>
+    </g>
+    <g data-s="4">
+      <g data-links></g>
+      <g data-emb transform="translate(24 274)"></g>
+      <text x="24" y="402" font-size="10" fill="#2b2b30"><tspan font-weight="700" fill="#8a6a1f">Text embedding:</tspan> one row per piece,</text>
+      <text x="24" y="415" font-size="10" fill="#2b2b30">4,000 rows, created fresh for Khmer.</text>
+      <text x="24" y="428" font-size="10" fill="#5f5f66">Each row is a vector of learned numbers.</text>
+    </g>
+
+    <!-- audio (step 5) -->
+    <g data-s="5">
+      <text x="24" y="452" font-size="10" letter-spacing="1" fill="#5f5f66">AUDIO</text>
+      <rect x="24" y="460" width="118" height="30" rx="5" fill="#5f5f66" fill-opacity="0.06" stroke="#5f5f66" stroke-dasharray="4 3" />
+      <text x="34" y="479" font-size="11.5" font-weight="700" fill="#2b2b30">❄ Mimi encoder</text>
+      <text x="150" y="473" font-size="9.5" fill="#5f5f66">frozen,</text>
+      <text x="150" y="485" font-size="9.5" fill="#5f5f66">run once before training</text>
+      <g data-frames transform="translate(24 500)"></g>
+      <text x="24" y="584" font-size="9.5" fill="#594578">prompt frames</text>
+      <text x="100" y="584" font-size="9.5" fill="#4F5D3A">target frames</text>
+    </g>
+
+    <!-- transformer (step 6) -->
+    <g data-s="6">
+      <path d="M206 352 C 250 352, 262 312, 300 312 M230 536 C 270 536, 266 440, 300 440" fill="none" stroke="#2b2b30" stroke-width="1.2" />
+      <text x="300" y="172" font-size="10" letter-spacing="1" fill="#5f5f66">TRANSFORMER</text>
+      <g data-layers transform="translate(300 180)"></g>
+      <text x="300" y="492" font-size="10" fill="#5f5f66">24 layers, from English weights</text>
+      <g transform="translate(486 180)">
+        <text font-size="10" letter-spacing="1" fill="#5f5f66" y="-8">CAUSAL MASK</text>
+        {Array.from({ length: MASK }, (_, i) => Array.from({ length: MASK }, (_, j) => (
+          <rect data-mask={j <= i ? "on" : "off"} x={j * 12} y={i * 12} width="10" height="10" rx="1.5" fill={j <= i ? "#594578" : "#ececf1"} fill-opacity={j <= i ? 0.55 : 1} />
+        )))}
+        <text x="92" y="24" font-size="9.5" fill="#5f5f66">row = frame <tspan font-family="KaTeX_Math, 'Times New Roman', serif" font-style="italic" font-size="11">t</tspan></text>
+        <text x="92" y="37" font-size="9.5" fill="#5f5f66">coloured = frames</text>
+        <text x="92" y="50" font-size="9.5" fill="#5f5f66">it may look at</text>
+      </g>
+      <path data-ht d="M470 288 H625 V300" fill="none" stroke="#594578" stroke-width="1.8" />
+      <text x="640" y="292" font-size="10" font-weight="700" fill="#594578"><tspan font-family="KaTeX_Math, 'Times New Roman', serif" font-style="italic" font-size="11">h</tspan><tspan dy="3" font-size="8" font-family="KaTeX_Math, 'Times New Roman', serif" font-style="italic">t</tspan><tspan dy="-3">: the instruction</tspan></text>
+    </g>
+
+    <!-- real frame (step 7) -->
+    <g data-s="7">
+      <text x="486" y="306" font-size="9.5" fill="#4F5D3A" font-weight="700">real frame</text>
+      <g data-realvec transform="translate(546 297)"></g>
+      <rect data-pick x="0" y="0" width="12" height="74" rx="2" fill="none" stroke="#4F5D3A" stroke-width="2" />
+      <text x="100" y="596" font-size="9.5" font-weight="700" fill="#4F5D3A">↑ the real answer comes from here</text>
+    </g>
+
+    <!-- noisy blends (step 8) -->
+    <g data-s="8">
+      <text x="486" y="330" font-size="9.5" fill="#5f5f66">noise</text>
+      <text x="546" y="330" font-size="9.5" fill="#5f5f66">blend (τ)</text>
+      <g data-rows></g>
+    </g>
+
+    <!-- flow head (step 9) -->
+    <g data-s="9">
+      <rect x="610" y="300" width="30" height="150" rx="5" fill="#594578" fill-opacity="0.12" stroke="#594578" stroke-width="1.5" />
+      <text x="625" y="378" font-size="11" font-weight="700" fill="#594578" text-anchor="middle" transform="rotate(-90 625 378)">Flow head</text>
+      <text x="650" y="330" font-size="9.5" fill="#594578">its guess</text>
+    </g>
+
+    <!-- score (step 10) -->
+    <g data-s="10">
+      <text x="712" y="330" font-size="9.5" fill="#4F5D3A">true way back</text>
+      <rect x="560" y="462" width="200" height="46" rx="6" fill="#2b2b30" />
+      <text x="572" y="479" font-size="10.5" fill="#d6d6dd">loss = flow error + 0.1 × EOS error</text>
+      <text data-loss x="572" y="499" font-size="15" font-weight="700" fill="#fff" font-family={MONO}></text>
+    </g>
+
+    <!-- backward (step 11) -->
+    <g data-s="11">
+      <path data-grad d="M560 485 C 500 485, 520 340, 472 340 M300 312 C 262 312, 240 334, 206 334" fill="none" stroke="#a33b3b" stroke-width="3" stroke-linecap="round" />
+      <text x="150" y="455" font-size="11" font-weight="700" fill="#a33b3b">✕ stops here</text>
+      <text x="300" y="512" font-size="10.5" fill="#a33b3b">AdamW · gradient clip 1.0 · learning rate 2 × 10⁻⁴</text>
+    </g>
+
+    <!-- EMA (step 12) -->
+    <g data-s="12" transform="translate(300 530)">
+      <text font-size="10" letter-spacing="1" fill="#5f5f66">ONE WEIGHT, BEFORE AND AFTER THIS STEP</text>
+      <text y="22" font-size="10.5" fill="#2b2b30">trained weight</text>
+      <rect x="110" y="12" width="300" height="12" rx="2" fill="#ececf1" />
+      <rect data-w x="110" y="12" width="0" height="12" rx="2" fill="#a33b3b" fill-opacity="0.75" />
+      <text data-wv x="420" y="22" font-size="10.5" font-weight="700" fill="#a33b3b" font-family={MONO}></text>
+      <text y="44" font-size="10.5" fill="#2b2b30">EMA copy (saved)</text>
+      <rect x="110" y="34" width="300" height="12" rx="2" fill="#ececf1" />
+      <rect data-e x="110" y="34" width="0" height="12" rx="2" fill="#4F5D3A" fill-opacity="0.85" />
+      <text data-ev x="420" y="44" font-size="10.5" font-weight="700" fill="#4F5D3A" font-family={MONO}></text>
+      <text y="66" font-size="9.5" fill="#5f5f66">smoothed = 0.999 × smoothed + 0.001 × current</text>
+    </g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Walkthrough<strong data-sval>1 of {N}</strong></span><input class="scrub" data-stage type="range" min="1" max={N} step="1" value="1" style={`--n: ${N - 1}; --p: 0%`} /></label>
+    <div><span class="fig-panel__name">Controls</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-prev>← Back</button>
+      <button type="button" class="fig-chip" data-next>Next →</button>
+      <button type="button" class="fig-chip" data-play>▶ Play all</button>
+    </div></div>
+    <div><span class="fig-panel__name">How far into training (illustrative)</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-when="1" aria-pressed="true">Very first update</button>
+      <button type="button" class="fig-chip" data-when="10000" aria-pressed="false">After 10,000 updates</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<style is:global>
+  /* Colour and visibility changes ease instead of jumping; the script only
+     sets end states and tweens geometry. */
+  .blog-diagram.ts :is(g, rect, path, text, circle) {
+    transition: opacity 0.6s ease, fill 0.5s ease, fill-opacity 0.45s ease, stroke 0.5s ease, stroke-opacity 0.5s ease;
+  }
+  .blog-diagram.ts [data-grad] { transition: none; }
+  @media (prefers-reduced-motion: reduce) {
+    .blog-diagram.ts :is(g, rect, path, text, circle) { transition: none; }
+  }
+</style>
+
+<script>
+  import { setupFigure, tween, wait } from "../../lib/figure-motion";
+  import { rng } from "../../lib/eval-math";
+
+  const NS = "http://www.w3.org/2000/svg";
+  const SLOW = 2; // stretches every wait and tween in this figure
+  const PAUSE = 4; // seconds each finished step stays on screen during Play
+  const KM = "'Noto Sans Khmer', 'Khmer OS', 'Khmer Sangam MN', sans-serif";
+  const MONO = "ui-monospace, SFMono-Regular, Menlo, monospace";
+  const el = (tag: string, a: Record<string, string | number>, t?: string) => { const e = document.createElementNS(NS, tag); Object.entries(a).forEach(([k, v]) => e.setAttribute(k, String(v))); if (t !== undefined) e.textContent = t; return e; };
+
+  // Narration is plain text except for two symbols: h_t gets a real subscript
+  // (the text after it is lifted back to the baseline), and a lone "t" in
+  // "frame t" / "up to t" is set in math italic.
+  const escHtml = (x: string) => x.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const MATH = `font-family="KaTeX_Math, 'Times New Roman', serif" font-style="italic"`;
+  const mathify = (x: string) => {
+    const parts = escHtml(x).replace(/(frame |to )t\b/g, (_, w) => `${w}<tspan ${MATH} font-size="12">t</tspan>`).split(/\bh_t\b/);
+    return parts.reduce((acc, part, i) => (i === 0 ? part : `${acc}<tspan ${MATH} font-size="12">h</tspan><tspan dy="3" font-size="8.5" ${MATH}>t</tspan><tspan dy="-3">${part}</tspan>`), "");
+  };
+
+  // Wrap a description into at most two lines of about 120 characters.
+  const wrap = (s: string, n = 122) => { if (s.length <= n) return [s, ""]; const cut = s.lastIndexOf(" ", n); return [s.slice(0, cut), s.slice(cut + 1)]; };
+
+  document.querySelectorAll<HTMLElement>("[data-ts]").forEach((root) => {
+    const steps: string[][] = JSON.parse(root.dataset.steps!);
+    const N = steps.length;
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const groups = Array.from(root.querySelectorAll<SVGGElement>("[data-s]"));
+    const stageIn = $<HTMLInputElement>("[data-stage]");
+    let late = false;
+    const r = rng(21);
+
+    // ---- batch cards (steps 1–2): card 1 is followed; 3, 7 lose text; 4, 8 lose voice.
+    const cards: { text: SVGRectElement; voice: SVGRectElement; tx: SVGTextElement; vx: SVGTextElement }[] = [];
+    for (let i = 0; i < 8; i++) {
+      const g = el("g", { transform: `translate(${i * 92} 0)` });
+      g.append(el("rect", { width: 84, height: 50, rx: 5, fill: "#fff", stroke: i === 0 ? "#2b2b30" : "#d6d6dd", "stroke-width": i === 0 ? 2 : 1 }));
+      const text = el("rect", { x: 8, y: 9, width: 68, height: 12, rx: 2, fill: "#8a6a1f", "fill-opacity": 0.6 }) as SVGRectElement;
+      const voice = el("rect", { x: 8, y: 28, width: 68, height: 12, rx: 2, fill: "#594578", "fill-opacity": 0.6 }) as SVGRectElement;
+      const tx = el("text", { x: 42, y: 19, "font-size": 9, "text-anchor": "middle", fill: "#fff" }, "text") as SVGTextElement;
+      const vx = el("text", { x: 42, y: 38, "font-size": 9, "text-anchor": "middle", fill: "#fff" }, "voice") as SVGTextElement;
+      g.append(text, voice, tx, vx);
+      $("[data-cards]").append(g);
+      cards.push({ text, voice, tx, vx });
+    }
+    const dropout = (on: boolean) => cards.forEach((c, i) => {
+      const dt = on && (i === 2 || i === 6), dv = on && (i === 3 || i === 7);
+      c.text.setAttribute("fill", dt ? "#d6d6dd" : "#8a6a1f"); c.tx.textContent = dt ? "text hidden" : "text"; c.tx.setAttribute("fill", dt ? "#5f5f66" : "#fff");
+      c.voice.setAttribute("fill", dv ? "#d6d6dd" : "#594578"); c.vx.textContent = dv ? "voice hidden" : "voice"; c.vx.setAttribute("fill", dv ? "#5f5f66" : "#fff");
+    });
+
+    // ---- tokens (step 3) and embedding rows (step 4). IDs are illustrative.
+    const pieces = [["ខ្ញុំ", 812], ["ទៅ", 57], ["ផ្សារ", 2391]] as const;
+    const ROWS: (number | null)[] = [0, 1, null, 57, null, 812, null, 2391, null, 3999];
+    const RH = 11, GX = 36, EY = 274;
+    const chipX: number[] = [];
+    let cx = 0;
+    pieces.forEach(([p, id]) => {
+      const w = 18 + p.length * 9;
+      $("[data-chips]").append(
+        el("rect", { x: cx, width: w, height: 22, rx: 4, fill: "#8a6a1f", "fill-opacity": 0.15, stroke: "#8a6a1f" }),
+        el("text", { x: cx + w / 2, y: 16, "font-size": 13, "text-anchor": "middle", fill: "#2b2b30", "font-family": KM }, p),
+        el("text", { x: cx + w / 2, y: 36, "font-size": 9.5, "font-weight": 700, "text-anchor": "middle", fill: "#8a6a1f", "font-family": MONO }, `ID ${id}`),
+      );
+      chipX.push(24 + cx + w / 2); cx += w + 6;
+    });
+    $("[data-chips]").append(el("text", { x: cx + 4, y: 15, "font-size": 9.5, fill: "#5f5f66" }, "illustrative"));
+    const embCells: SVGRectElement[][] = [], noise = Array.from({ length: ROWS.length * 16 }, () => r());
+    ROWS.forEach((id, i) => {
+      embCells.push([]);
+      const y = i * RH;
+      $("[data-emb]").append(el("text", { x: GX - 4, y: y + 8.5, "font-size": 9, "text-anchor": "end", fill: "#5f5f66", "font-family": MONO }, id === null ? "⋮" : String(id)));
+      if (id === null) return;
+      for (let j = 0; j < 16; j++) { const c = el("rect", { x: GX + j * 9, y, width: 8, height: 9, rx: 1, fill: "#8a6a1f" }) as SVGRectElement; $("[data-emb]").append(c); embCells[i].push(c); }
+    });
+    const HL = pieces.map(([, id]) => ROWS.indexOf(id));
+    const paintEmb = (hl: number[] = [], red = false) => embCells.forEach((row, i) => row.forEach((c, j) => {
+      const learned = 0.2 + 0.7 * Math.abs(Math.sin(i * 0.8 + j * 0.35));
+      c.setAttribute("fill-opacity", String((late ? learned : noise[i * 16 + j]) * (hl.length && !hl.includes(i) ? 0.25 : 1)));
+      c.setAttribute("fill", red && hl.includes(i) ? "#a33b3b" : "#8a6a1f");
+    }));
+    const links = $("[data-links]");
+    const drawLinks = (count: number, red = false) => {
+      links.replaceChildren();
+      HL.slice(0, count).forEach((row, k) => links.append(el("path", { d: `M${chipX[k]} 248 C ${chipX[k]} 262, ${24 + GX - 10} ${EY + row * RH + 5}, ${24 + GX - 2} ${EY + row * RH + 5}`, fill: "none", stroke: red ? "#a33b3b" : "#8a6a1f", "stroke-width": 1.2 })));
+    };
+
+    // ---- audio frames (step 5): 6 prompt + 10 target columns; column 10 is "the next frame".
+    const PICK = 9, DIM = 8;
+    const frameVals = Array.from({ length: 16 }, () => Array.from({ length: DIM }, () => 0.2 + 0.7 * r()));
+    const frameCols: SVGRectElement[][] = frameVals.map((col, k) => col.map((v, d) => {
+      const c = el("rect", { x: k * 12, y: d * 9, width: 10, height: 8, rx: 1, fill: k < 6 ? "#594578" : "#4F5D3A", "fill-opacity": v }) as SVGRectElement;
+      $("[data-frames]").append(c); return c;
+    }));
+    const pickBox = $<SVGRectElement>("[data-pick]");
+    pickBox.setAttribute("transform", `translate(${24 + PICK * 12 - 1} ${500 - 1})`);
+
+    // ---- transformer layers (step 6).
+    const layers: SVGRectElement[] = [];
+    for (let l = 0; l < 24; l++) { const c = el("rect", { x: 0, y: (23 - l) * 12.5, width: 170, height: 10, rx: 2, fill: "#594578", "fill-opacity": 0.12 }) as SVGRectElement; $("[data-layers]").append(c); layers.push(c); }
+
+    // ---- real frame (step 7), 4 noisy blends (step 8), guesses (9), truth and loss (10).
+    const real = frameVals[PICK];
+    const realCells = real.map((v, d) => { const c = el("rect", { x: d * 6.5, y: 0, width: 5.5, height: 12, rx: 1, fill: "#4F5D3A", "fill-opacity": v }) as SVGRectElement; $("[data-realvec]").append(c); return c; });
+    void realCells;
+    const TAUS = [0.2, 0.45, 0.7, 0.9];
+    const draws = TAUS.map(() => Array.from({ length: DIM }, () => r()));
+    const jitter = TAUS.map(() => Array.from({ length: DIM }, () => r() - 0.5));
+    type Row = { g: SVGGElement; noise: SVGRectElement[]; mix: SVGRectElement[]; guess: SVGRectElement[]; truth: SVGRectElement[]; err: SVGGElement };
+    const rowsG = $("[data-rows]");
+    const vec = (g: SVGGElement, x: number, y: number) => Array.from({ length: DIM }, (_, v) => { const c = el("rect", { x: x + v * 6.5, y, width: 5.5, height: 12, rx: 1, "fill-opacity": 0 }) as SVGRectElement; g.append(c); return c; });
+    const rowY = (i: number) => 340 + i * 30;
+    const rows: Row[] = TAUS.map((tau, i) => {
+      const g = el("g", {}) as SVGGElement, y = rowY(i);
+      const row = { g, noise: vec(g, 486, y), mix: vec(g, 546, y), guess: vec(g, 650, y), truth: vec(g, 712, y), err: el("g", {}) as SVGGElement };
+      g.append(el("text", { x: 482, y: y + 10, "font-size": 8.5, "text-anchor": "end", fill: "#5f5f66" }, `${i + 1}`), el("text", { x: 546, y: y + 22, "font-size": 8, fill: "#5f5f66" }, `τ = ${tau}`), row.err);
+      rowsG.append(g);
+      return row;
+    });
+    const shade = (cells: SVGRectElement[], vals: number[], col: string, t = 1) => cells.forEach((c, v) => { c.setAttribute("fill", col); c.setAttribute("fill-opacity", String(Math.min(1, Math.abs(vals[v])) * t + (t ? 0.04 : 0))); });
+    const truthOf = (i: number) => real.map((x, v) => x - draws[i][v]);
+    const guessOf = (i: number) => truthOf(i).map((d, v) => d + jitter[i][v] * (late ? 0.2 : 1.2));
+    const lossVal = () => { let s = 0; TAUS.forEach((_, i) => { const t = truthOf(i), g = guessOf(i); t.forEach((x, v) => (s += (g[v] - x) ** 2)); }); return (s / (TAUS.length * DIM)) * 4; };
+    // level: 0 hidden, 1 noise, 1→2 blending, 3 + guess, 4 + truth and error marks
+    function paintRow(i: number, level: number) {
+      const rw = rows[i], n = draws[i], tau = TAUS[i];
+      rw.g.style.opacity = level > 0 ? "1" : "0";
+      shade(rw.noise, n, "#2b2b30", level >= 1 ? 1 : 0);
+      const b = Math.min(1, Math.max(0, level - 1));
+      shade(rw.mix, n.map((x, v) => (1 - tau * b) * x + tau * b * real[v]), "#5f5f66", level >= 1 ? Math.min(1, level) : 0);
+      shade(rw.guess, guessOf(i), "#594578", level >= 3 ? 1 : 0);
+      shade(rw.truth, truthOf(i), "#4F5D3A", level >= 4 ? 1 : 0);
+      rw.err.replaceChildren();
+      if (level >= 4) guessOf(i).forEach((gv, v) => { const d = Math.abs(gv - truthOf(i)[v]); if (d > 0.15) rw.err.append(el("rect", { x: 650 + v * 6.5, y: rowY(i) + 14, width: 5.5, height: 2.5, fill: "#a33b3b", "fill-opacity": Math.min(1, d) })); });
+    }
+    const setRows = (level: number) => rows.forEach((_, i) => paintRow(i, level));
+    const showLoss = (on: boolean) => ($("[data-loss]").textContent = on ? `${lossVal().toFixed(2)}${late ? "  (after 10,000)" : "  (first update)"}` : "");
+
+    // ---- EMA (step 12).
+    function paintEma(t: number) {
+      const w = 1 + 0.1 * t, e = 1 + 0.0001 * t, sc = (x: number) => ((x - 0.95) / 0.2) * 300;
+      $("[data-w]").setAttribute("width", String(sc(w))); $("[data-e]").setAttribute("width", String(sc(e)));
+      $("[data-wv]").textContent = w.toFixed(2); $("[data-ev]").textContent = e.toFixed(4);
+    }
+
+    // The end state of every step, so the slider can jump anywhere.
+    function base(step: number) {
+      groups.forEach((g) => { const s = +g.dataset.s!; g.style.opacity = s > step ? "0" : s === step ? "1" : "0.75"; });
+      const [title, desc] = steps[step - 1], [d1, d2] = wrap(desc);
+      $("[data-stitle]").textContent = `Step ${step} of ${N}: ${title}`;
+      $("[data-sdesc1]").innerHTML = mathify(d1); $("[data-sdesc2]").innerHTML = mathify(d2);
+      $("[data-sval]").textContent = `${step} of ${N}`;
+      stageIn.value = String(step);
+      stageIn.style.setProperty("--p", `${((step - 1) / (N - 1)) * 100}%`);
+      dropout(step >= 2);
+      paintEmb(step === 4 || step === 11 ? HL : [], step === 11);
+      drawLinks(step >= 4 ? HL.length : 0, step === 11);
+      frameCols.forEach((col) => col.forEach((c) => (c.style.opacity = "1")));
+      frameCols[PICK].forEach((c) => c.setAttribute("stroke", step === 7 ? "#2b2b30" : "none"));
+      layers.forEach((c) => { c.setAttribute("fill", "#594578"); c.setAttribute("fill-opacity", step >= 6 ? "0.35" : "0.12"); });
+      root.querySelectorAll<SVGRectElement>('[data-mask="on"]').forEach((m) => m.setAttribute("fill-opacity", "0.55"));
+      setRows(step >= 10 ? 4 : step >= 9 ? 3 : step >= 8 ? 2 : 0);
+      showLoss(step >= 10);
+      paintEma(step >= 12 ? 1 : 0);
+      const g = $<SVGPathElement>("[data-grad]"); g.style.strokeDasharray = ""; g.style.strokeDashoffset = "";
+    }
+
+    let token = 0, auto = true;
+    async function play(step: number) {
+      const my = ++token, alive = () => my === token;
+      base(step);
+      const W = (s: number) => wait(s * SLOW);
+      if (step === 1) { cards.forEach((_, i) => (($("[data-cards]").children[i] as SVGGElement).style.opacity = "0")); for (let i = 0; i < 8; i++) { if (!alive()) return; ($("[data-cards]").children[i] as SVGGElement).style.opacity = "1"; await W(0.12); } }
+      if (step === 2) { dropout(false); await W(0.5); if (alive()) dropout(true); }
+      if (step === 4) { drawLinks(0); paintEmb([]); for (let k = 1; k <= HL.length; k++) { if (!alive()) return; drawLinks(k); paintEmb(HL.slice(0, k)); await W(0.6); } }
+      if (step === 5) { frameCols.forEach((col) => col.forEach((c) => (c.style.opacity = "0"))); await W(0.2); for (let k = 0; k < 16; k++) { if (!alive()) return; frameCols[k].forEach((c) => (c.style.opacity = "1")); await W(0.08); } }
+      if (step === 6) {
+        for (let l = 0; l < 24; l++) { if (!alive()) return; layers[l].setAttribute("fill-opacity", "0.8"); await W(0.05); layers[l].setAttribute("fill-opacity", "0.4"); }
+        const on = Array.from(root.querySelectorAll<SVGRectElement>('[data-mask="on"]'));
+        on.forEach((m) => m.setAttribute("fill-opacity", "0.1"));
+        for (const m of on) { if (!alive()) return; m.setAttribute("fill-opacity", "0.7"); await W(0.03); }
+      }
+      if (step === 8) {
+        setRows(0);
+        for (let i = 0; i < rows.length; i++) {
+          if (!alive()) return;
+          paintRow(i, 1); await W(0.35);
+          await tween(0.6 * SLOW, (t) => alive() && paintRow(i, 1 + t));
+          await W(0.2);
+        }
+      }
+      if (step === 9) { setRows(2); for (let i = 0; i < rows.length; i++) { if (!alive()) return; paintRow(i, 3); await W(0.4); } }
+      if (step === 10) { setRows(3); showLoss(false); for (let i = 0; i < rows.length; i++) { if (!alive()) return; paintRow(i, 4); await W(0.4); } showLoss(true); }
+      if (step === 11) {
+        const g = $<SVGPathElement>("[data-grad]"), L = g.getTotalLength();
+        g.style.strokeDasharray = `${L}`; g.style.strokeDashoffset = `${L}`;
+        await tween(0.8 * SLOW, (t) => { g.style.strokeDashoffset = `${L * (1 - t)}`; });
+        for (let l = 23; l >= 0; l--) { if (!alive()) return; layers[l].setAttribute("fill", "#a33b3b"); layers[l].setAttribute("fill-opacity", "0.6"); await W(0.04); }
+      }
+      if (step === 12) await tween(1.2 * SLOW, (t) => alive() && paintEma(t));
+    }
+    async function playAll(from = 1) {
+      const me = ++token;
+      for (let s = from; s <= N; s++) {
+        token = me; // keep ownership between steps
+        await play(s);
+        if (token !== me + 1) return; // a control was used meanwhile
+        token = me;
+        await wait(PAUSE);
+        if (token !== me) return;
+      }
+    }
+    const go = (s: number) => { auto = false; play(Math.min(N, Math.max(1, s))); };
+    stageIn.addEventListener("input", () => go(+stageIn.value));
+    $("[data-next]").addEventListener("click", () => go(+stageIn.value + 1));
+    $("[data-prev]").addEventListener("click", () => go(+stageIn.value - 1));
+    $("[data-play]").addEventListener("click", () => { auto = false; playAll(1); });
+    root.querySelectorAll<HTMLButtonElement>("[data-when]").forEach((b) => b.addEventListener("click", () => {
+      late = b.dataset.when === "10000";
+      root.querySelectorAll("[data-when]").forEach((o) => o.setAttribute("aria-pressed", String(o === b)));
+      base(+stageIn.value);
+    }));
+    setupFigure(root, () => { auto = true; base(1); }, async (alive) => { if (alive() && auto) await playAll(1); });
+  });
+</script>

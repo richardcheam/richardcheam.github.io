@@ -1,0 +1,95 @@
+---
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" tabindex="0" role="region" aria-label={alt} data-cob>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 52 780 248" role="img" aria-labelledby="change-of-basis-title change-of-basis-desc" class="blog-diagram-svg" font-family="Inter, sans-serif">
+<title id="change-of-basis-title">The same cloud described in two coordinate frames</title><desc id="change-of-basis-desc">Two panels holding the identical tilted cloud. On the left the rulers are the encoder output units; on the right they are the eigenvectors. One highlighted point is projected onto each frame. The points do not move.</desc>
+<line x1="90" y1="150" x2="300" y2="150" stroke="#d5d5dc" /><line x1="190" y1="78" x2="190" y2="228" stroke="#d5d5dc" />
+<circle cx="117.2" cy="195.1" r="4" fill="#4F5D3A" />
+<circle cx="129.3" cy="161.8" r="4" fill="#4F5D3A" />
+<circle cx="171.3" cy="145.4" r="4" fill="#4F5D3A" />
+<circle cx="197.9" cy="155.1" r="4" fill="#4F5D3A" />
+<circle cx="205.1" cy="123.1" r="4" fill="#4F5D3A" />
+<circle cx="240.4" cy="139.7" r="4" fill="#4F5D3A" />
+<circle cx="254.6" cy="111.1" r="4" fill="#4F5D3A" />
+<circle cx="278.2" cy="114.3" r="4" fill="#4F5D3A" />
+<line x1="165.9" y1="181.1" x2="165.9" y2="150" stroke="#5f5f66" stroke-dasharray="3 3" />
+<line x1="165.9" y1="181.1" x2="190" y2="181.1" stroke="#5f5f66" stroke-dasharray="3 3" />
+<circle cx="165.9" cy="181.1" r="5.5" fill="#4F5D3A" />
+<text x="306" y="154" fill="#5f5f66" font-size="14">unit 1</text>
+<text x="190" y="70" fill="#5f5f66" font-size="14" text-anchor="middle">unit 2</text>
+<g data-ghost stroke="#ececf1" stroke-dasharray="3 3" opacity="0"><line x1="450" y1="150" x2="670" y2="150" /><line x1="560" y1="78" x2="560" y2="228" /></g>
+<line data-ax1 x1="460.3" y1="196.5" x2="659.7" y2="103.5" stroke="#d5d5dc" />
+<line data-ax2 x1="542.2" y1="111.9" x2="577.8" y2="188.1" stroke="#d5d5dc" />
+<circle cx="487.2" cy="195.1" r="4" fill="#4F5D3A" />
+<circle cx="499.3" cy="161.8" r="4" fill="#4F5D3A" />
+<circle cx="541.3" cy="145.4" r="4" fill="#4F5D3A" />
+<circle cx="567.9" cy="155.1" r="4" fill="#4F5D3A" />
+<circle cx="575.1" cy="123.1" r="4" fill="#4F5D3A" />
+<circle cx="610.4" cy="139.7" r="4" fill="#4F5D3A" />
+<circle cx="624.6" cy="111.1" r="4" fill="#4F5D3A" />
+<circle cx="648.2" cy="114.3" r="4" fill="#4F5D3A" />
+<line data-p1 x1="535.9" y1="181.1" x2="528.3" y2="164.8" stroke="#5f5f66" stroke-dasharray="3 3" />
+<line data-p2 x1="535.9" y1="181.1" x2="567.6" y2="166.3" stroke="#5f5f66" stroke-dasharray="3 3" />
+<circle cx="535.9" cy="181.1" r="5.5" fill="#4F5D3A" />
+<text data-l1 x="666" y="100" fill="#5f5f66" font-size="14">u₁</text>
+<text data-l2 x="524" y="106" fill="#5f5f66" font-size="14">u₂</text>
+<text x="90" y="258" fill="#111111" font-size="17">Encoder coordinates</text>
+<text x="460" y="258" fill="#111111" font-size="17">Eigen-coordinates</text>
+<text x="90" y="280" fill="#5f5f66" font-size="14">the point reads (−24, −31)</text>
+<text data-read x="460" y="280" fill="#5f5f66" font-size="14">the same point reads (−35, −18)</text>
+</svg>
+<button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+<p class="blog-figure-reading">Distances and angles are unchanged. Only the numbers written down change.</p>
+
+<script>
+  import { animate, dur, setupFigure } from "../../lib/figure-motion";
+
+  // The rulers rotate from the encoder axes to the eigenvectors (25°) while the
+  // cloud and the highlighted point stay fixed. The readout is the point's
+  // coordinates in the current frame: they change, its length (39.3) does not.
+  document.querySelectorAll<HTMLElement>("[data-cob]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const ox = 560, oy = 150, px = 535.9, py = 181.1;
+    const vx = px - ox, vy = -(py - oy); // math coordinates (y up): (-24.1, -31.1)
+    const final = Math.atan2(93, 199.4); // u1 of the drawn frame, about 25°
+    const ax1 = $<SVGLineElement>("[data-ax1]"), ax2 = $<SVGLineElement>("[data-ax2]");
+    const p1 = $<SVGLineElement>("[data-p1]"), p2 = $<SVGLineElement>("[data-p2]");
+    const l1 = $<SVGTextElement>("[data-l1]"), l2 = $<SVGTextElement>("[data-l2]");
+    const read = $("[data-read]"), ghost = $<SVGGElement>("[data-ghost]");
+    const set = (el: Element, a: Record<string, number>) => { for (const k in a) el.setAttribute(k, a[k].toFixed(1)); };
+    const fmt = (n: number) => (Math.round(n) < 0 ? "−" : "") + Math.abs(Math.round(n));
+
+    function frame(t: number) {
+      const c = Math.cos(t), s = Math.sin(t);
+      // Unit vectors on screen (y down): u1 = (c, -s), u2 = (-s, -c).
+      set(ax1, { x1: ox - 110 * c, y1: oy + 110 * s, x2: ox + 110 * c, y2: oy - 110 * s });
+      set(ax2, { x1: ox + 42 * s, y1: oy + 42 * c, x2: ox - 42 * s, y2: oy - 42 * c });
+      const c1 = vx * c + vy * s, c2 = -vx * s + vy * c;
+      set(p1, { x1: px, y1: py, x2: ox + c1 * c, y2: oy - c1 * s });
+      set(p2, { x1: px, y1: py, x2: ox - c2 * s, y2: oy - c2 * c });
+      set(l1, { x: ox + 116 * c - 4, y: oy - 116 * s + 4 });
+      set(l2, { x: ox - 50 * s - 6, y: oy - 50 * c + 2 });
+      read.textContent = `the same point reads (${fmt(c1)}, ${fmt(c2)})`;
+    }
+    const tween = (seconds: number, step: (u: number) => void, alive: () => boolean) =>
+      new Promise<void>((res) => {
+        const d = dur(seconds) * 1000;
+        if (!d) { step(1); return res(); }
+        const t0 = performance.now();
+        const f = (now: number) => { if (!alive()) return res(); const u = Math.min(1, (now - t0) / d); step(u); u < 1 ? requestAnimationFrame(f) : res(); };
+        requestAnimationFrame(f);
+      });
+
+    setupFigure(
+      root,
+      () => { frame(0); ghost.style.opacity = "0"; },
+      async (alive) => {
+        await animate(ghost, { opacity: [0, 1] }, { duration: dur(0.4), delay: dur(0.4) });
+        await tween(2.4, (u) => frame(final * (u < 0.5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2)), alive);
+        if (alive()) frame(final);
+      },
+    );
+  });
+</script>

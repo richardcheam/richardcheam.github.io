@@ -1,0 +1,54 @@
+---
+// VALL-E review, Figure 3: forward passes needed to fill an 8-row grid of T
+// frames. All rows one token at a time: 8T. VALL-E: T passes for row 1, then
+// one pass per remaining row: T + 7 (Sec 4.2, p. 6). Fully parallel: 8.
+// Counts, not timings: the paper reports none.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram pcn" role="region" aria-label={alt} data-pcn>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 360" role="img" aria-labelledby="pcn-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="pcn-title">Three ways to fill the same token grid, counted in model passes</title>
+    <g data-lanes></g>
+    <text data-r1 x="20" y="330" font-size="12.5" font-weight="700" fill="#2b2b30"></text>
+    <text data-r2 x="20" y="350" font-size="11.5" fill="#5f5f66"></text>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Frames T<strong data-vt></strong></span><input class="scrub" data-t type="range" min="75" max="1500" step="75" value="750" /></label>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Race</button>
+</div>
+
+<script>
+  import { setupFigure, wait } from "../../lib/figure-motion";
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-pcn]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const tIn = $<HTMLInputElement>("[data-t]"), W = 24;
+    const mk = (g: Element, tag: string, a: Record<string, string | number>, txt?: string) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, String(a[k])); if (txt !== undefined) e.textContent = txt; g.append(e); return e; };
+    const lanes = [
+      { name: "Every token in turn", passes: (T: number) => 8 * T, done: (p: number) => (r: number, c: number) => r * W + c < p },
+      { name: "VALL-E: row 1 in turn, then a row per pass", passes: (T: number) => T + 7, done: (p: number) => (r: number, c: number) => (r === 0 ? c < p : p >= W + r) },
+      { name: "Every row at once", passes: () => 8, done: (p: number) => (r: number) => r < p },
+    ];
+    let tick = 9999;
+    function draw() {
+      const g = $("[data-lanes]"); g.replaceChildren();
+      const T = +tIn.value;
+      lanes.forEach((l, i) => {
+        const y = 20 + i * 100, need = l.passes(W), p = Math.min(tick, need), done = l.done(p);
+        mk(g, "text", { x: 20, y: y + 10, "font-size": 11.5, "font-weight": 700, fill: "#2b2b30" }, l.name);
+        for (let r = 0; r < 8; r++) for (let c = 0; c < W; c++) mk(g, "rect", { x: 20 + c * 14, y: y + 18 + r * 9, width: 12, height: 7.5, rx: 1, fill: done(r, c) ? (r === 0 ? "#594578" : "#8a7aa8") : "#f2f2f5" });
+        mk(g, "text", { x: 380, y: y + 46, "font-size": 11, fill: "#5f5f66" }, `passes so far (on this ${W}-frame strip)`);
+        mk(g, "text", { x: 380, y: y + 70, "font-size": 18, "font-weight": 700, fill: p >= need ? "#4F5D3A" : "#2b2b30", "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace" }, `${p} / ${need}`);
+        mk(g, "text", { x: 600, y: y + 46, "font-size": 11, fill: "#5f5f66" }, `for T = ${T.toLocaleString("en")}`);
+        mk(g, "text", { x: 600, y: y + 70, "font-size": 18, "font-weight": 700, fill: "#594578", "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace" }, l.passes(T).toLocaleString("en"));
+      });
+      $("[data-r1]").textContent = `${(T / 75).toFixed(0)} s of speech: ${(8 * T).toLocaleString("en")} passes one token at a time, ${(T + 7).toLocaleString("en")} for VALL-E, 8 if every row went at once.`;
+      $("[data-r2]").textContent = "Counts, not seconds: each pass of a big model costs more than a pass of a small one, and the paper reports no timings.";
+      $("[data-vt]").textContent = `${T} (${T / 75} s)`; tIn.style.setProperty("--p", `${((T - 75) / 1425) * 100}%`);
+    }
+    tIn.addEventListener("input", draw);
+    draw();
+    setupFigure(root, () => { tick = 0; draw(); }, async (alive) => { for (tick = 0; tick <= 8 * W; tick++) { if (!alive()) return; draw(); await wait(0.035); } });
+  });
+</script>

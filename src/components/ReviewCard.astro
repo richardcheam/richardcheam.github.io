@@ -1,0 +1,37 @@
+---
+import { titleHtml } from "../lib/title";
+import { emblemSvg } from "../lib/emblem";
+import { readMinutes, reviewUrl, shortDate, stripHtml, topicLabels, truncate, typeLabel, type Review } from "../lib/content";
+
+interface Props {
+  review: Review;
+  featured?: boolean;
+  filterable?: boolean;
+  compact?: boolean;
+}
+const { review: r, featured = false, filterable = false, compact = false } = Astro.props;
+const type = r.data.type;
+const tLabel = typeLabel(type);
+const topics = topicLabels(r.data.topic);
+const excerpt = stripHtml(r.data.excerpt ?? "");
+const facets = [`type:${type}`, ...r.data.topic.map((t) => `topic:${t}`)].join(" ");
+const filterText = [r.data.title, tLabel, r.data.org ?? "", r.data.authors ?? "", topics, r.data.topic.join(" "), r.data.tags.join(" "), excerpt].join(" ").toLowerCase();
+---
+<a
+  class:list={["review-card", { "review-card--featured": featured }]}
+  {...(filterable ? { "data-reveal": "", "data-filter-card": "", "data-filter-facets": facets, "data-filter-text": filterText } : {})}
+  href={reviewUrl(r)}
+>
+  <p class="review-card__top">
+    {featured && <span class="review-card__featured">Featured</span>}
+    <span class={`type-badge type-badge--${type}`}>{tLabel}</span>
+    {topics && <span class="review-card__topics">{topics}</span>}
+  </p>
+  <h3 class="review-card__title" set:html={titleHtml(r.data.title, r.data.title_key)} />
+  {!compact && <p class="review-card__summary">{truncate(excerpt, 170)}</p>}
+  {!compact && <span class="review-card__emblem" set:html={emblemSvg(r.body ?? "", "reviews", "reviews")} />}
+  <p class="review-card__foot">
+    <span>{r.data.org ? `${r.data.org} · ` : ""}{shortDate(r.data.date)}</span>
+    {!compact && <span>{readMinutes(r)} min</span>}
+  </p>
+</a>

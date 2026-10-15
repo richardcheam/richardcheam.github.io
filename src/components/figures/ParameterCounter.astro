@@ -1,0 +1,44 @@
+---
+// Foundations, Transformer post: parameters of a GPT-2-style model. 12
+// layers, width 768, vocabulary 50,257, 1,024 positions: 124,439,808. 24
+// layers at width 1,024: 354,823,168. Heads never change the total.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-pcount>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 250" role="img" aria-labelledby="pcc-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="pcc-title">Where a Transformer's parameters live: embeddings, positions, attention, feed-forward and norms</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Layers <strong data-v="L"></strong></span><input class="scrub" data-k="L" type="range" min="1" max="48" step="1" value="12" /></label>
+    <label><span class="fig-panel__name">Width d <strong data-v="d"></strong></span><input class="scrub" data-k="d" type="range" min="64" max="2048" step="64" value="768" /></label>
+    <label><span class="fig-panel__name">Heads <strong data-v="h"></strong></span><input class="scrub" data-k="h" type="range" min="1" max="32" step="1" value="12" /></label>
+    <label><span class="fig-panel__name">Vocabulary <strong data-v="V"></strong></span><input class="scrub" data-k="V" type="range" min="1000" max="100000" step="1" value="50257" /></label>
+    <label><span class="fig-panel__name">Positions <strong data-v="T"></strong></span><input class="scrub" data-k="T" type="range" min="128" max="8192" step="128" value="1024" /></label>
+  </div>
+</div>
+
+<script>
+  import { INK, MUTED, GOLD, JADE, NEG } from "../../lib/net-diagram";
+  import { txt } from "../../lib/plot";
+  import { gptParams } from "../../lib/transformer";
+  const num = (v: number) => v.toLocaleString("en");
+  document.querySelectorAll<HTMLElement>("[data-pcount]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const p: Record<string, number> = { L: 12, d: 768, h: 12, V: 50257, T: 1024 };
+    function draw() {
+      const r = gptParams(p as { L: number; d: number; V: number; T: number }), d = p.d, L = p.L;
+      const segs: [string, number, string, string][] = [["token embedding", r.token, `${num(p.V)} × ${num(d)}`, GOLD], ["positions", r.pos, `${num(p.T)} × ${num(d)}`, "#C9A15B"], ["attention", L * r.attn, `${L} × (4 × ${d}² + 4 × ${d})`, "#3E6E9E"], ["feed-forward", L * r.ffn, `${L} × (8 × ${d}² + 5 × ${d})`, JADE], ["norms", L * r.norms + r.finalNorm, `${L} × 4 × ${d} + 2 × ${d}`, INK]];
+      let s = txt(30, 22, `Total: ${num(r.total)} parameters`, `font-size="15" font-weight="700" fill="${INK}"`);
+      let x = 30;
+      segs.forEach(([, v, , col]) => { const w = (v / r.total) * 700; s += `<rect x="${x}" y="40" width="${Math.max(1, w)}" height="28" fill="${col}" fill-opacity="0.85"/>`; x += w; });
+      segs.forEach(([n, v, f, col], i) => (s += `<rect x="30" y="${88 + i * 30}" width="12" height="12" fill="${col}"/>` + txt(50, 99 + i * 30, n, `font-size="12" font-weight="700" fill="${INK}"`) + txt(180, 99 + i * 30, `${f} = ${num(v)}`, `font-size="12" fill="${INK}"`) + txt(730, 99 + i * 30, `${((v / r.total) * 100).toFixed(1)}%`, `font-size="11.5" text-anchor="end" fill="${MUTED}"`)));
+      const ok = d % p.h === 0;
+      s += txt(30, 244, ok ? `${p.h} heads of ${d / p.h} numbers each: heads only split the width, so the total does not change.` : `Width ${d} does not divide into ${p.h} equal heads.`, `font-size="11.5" fill="${ok ? MUTED : NEG}"`);
+      $("[data-draw]").innerHTML = s;
+      root.querySelectorAll<HTMLElement>("[data-v]").forEach((el) => (el.textContent = num(p[el.dataset.v!])));
+    }
+    root.querySelectorAll<HTMLInputElement>("[data-k]").forEach((inp) => inp.addEventListener("input", () => { p[inp.dataset.k!] = +inp.value; draw(); }));
+    draw();
+  });
+</script>

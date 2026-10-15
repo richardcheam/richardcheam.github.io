@@ -1,0 +1,72 @@
+---
+// F5-TTS review, Figure 1: text padded with filler tokens to the mel length
+// (Eq 5, p. 4). 24 kHz audio with hop 256 gives 93.75 frames a second
+// (Sec 4, p. 6). The "aligned" view spreads characters evenly over the clip,
+// a stand-in for a real aligner, for comparison only.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram fpd" role="region" aria-label={alt} data-fpd>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 330" role="img" aria-labelledby="fpd-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="fpd-title">Characters written into the first frames and filler tokens in the rest</title>
+    <text x="20" y="20" font-size="11.5" font-weight="700" fill="#2b2b30">The whole clip: one thin column per mel frame</text>
+    <g data-strip></g>
+    <text x="20" y="104" font-size="11.5" font-weight="700" fill="#2b2b30">Zoom on the first 36 frames</text>
+    <g data-zoom></g>
+    <text data-r1 x="20" y="262" font-size="13" font-weight="700" fill="#2b2b30"></text>
+    <text data-r2 x="20" y="284" font-size="12" fill="#2b2b30"></text>
+    <text data-r3 x="20" y="308" font-size="11.5" fill="#5f5f66"></text>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Text</span><input class="fig-text" data-txt type="text" value="hello world" maxlength="60" /></label>
+    <label><span class="fig-panel__name">Clip length<strong data-vs></strong></span><input class="scrub" data-s type="range" min="1" max="6" step="0.5" value="3" /></label>
+    <div><span class="fig-panel__name">Layout</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-mode="pad" aria-pressed="true">Padded (E2, F5)</button>
+      <button type="button" class="fig-chip" data-mode="align" aria-pressed="false">Spread out (like an aligner)</button>
+    </div></div>
+  </div>
+</div>
+
+<style>
+  .fig-text { font: inherit; font-size: 0.9rem; padding: 0.2rem 0.45rem; border: 1px solid var(--line, #d5d5dc); border-radius: 4px; background: transparent; color: inherit; width: 14rem; max-width: 100%; }
+</style>
+
+<script>
+  import { tween } from "../../lib/figure-motion";
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-fpd]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const tIn = $<HTMLInputElement>("[data-txt]"), sIn = $<HTMLInputElement>("[data-s]");
+    const mk = (g: Element, tag: string, a: Record<string, string | number>, txt?: string) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, String(a[k])); if (txt !== undefined) e.textContent = txt; g.append(e); return e; };
+    let mix = 0;
+    const PAL = ["#594578", "#35588a", "#2f6f6a", "#4F5D3A", "#8a7a1f", "#b8722c", "#a33b3b", "#8a3f6e"];
+    function draw() {
+      const chars = [...tIn.value], M = chars.length, sec = +sIn.value, N = Math.round(93.75 * sec);
+      // Where each frame's text slot points: padded = char f (or filler), aligned = char floor(f*M/N).
+      const owner = (f: number) => { const pad = f < M ? f : -1, al = M ? Math.min(M - 1, Math.floor((f * M) / N)) : -1; return mix < 0.5 ? pad : al; };
+      const gs = $("[data-strip]"); gs.replaceChildren();
+      const w = 740 / N;
+      for (let f = 0; f < N; f++) { const o = owner(f); mk(gs, "rect", { x: 20 + f * w, y: 30, width: Math.max(0.6, w - (w > 3 ? 0.6 : 0)), height: 40, fill: o < 0 ? "#e4e4ea" : PAL[o % 8] }); }
+      mk(gs, "text", { x: 20, y: 86, "font-size": 10, fill: "#5f5f66" }, "0 s");
+      mk(gs, "text", { x: 760, y: 86, "font-size": 10, "text-anchor": "end", fill: "#5f5f66" }, `${sec} s, ${N} frames`);
+      const gz = $("[data-zoom]"); gz.replaceChildren();
+      const Z = 36, zw = 740 / Z;
+      for (let f = 0; f < Math.min(Z, N); f++) {
+        const o = owner(f), x = 20 + f * zw;
+        mk(gz, "rect", { x, y: 116, width: zw - 2, height: 40, rx: 3, fill: o < 0 ? "#e4e4ea" : PAL[o % 8] });
+        mk(gz, "text", { x: x + zw / 2 - 1, y: 141, "font-size": o < 0 ? 9 : 12, "font-weight": 700, "text-anchor": "middle", fill: o < 0 ? "#8a8a94" : "#fff" }, o < 0 ? "F" : chars[o] === " " ? "␣" : chars[o]);
+        mk(gz, "text", { x: x + zw / 2 - 1, y: 172, "font-size": 9, "text-anchor": "middle", fill: "#b9b9c2" }, String(f + 1));
+      }
+      mk(gz, "text", { x: 20, y: 196, "font-size": 10.5, fill: "#5f5f66" }, mix < 0.5 ? "Each letter sits next to the frame with the same number, almost never where it is really spoken. F = filler." : "Spread out evenly: each letter owns a run of frames. A real aligner would make the runs uneven.");
+      $("[data-r1]").textContent = `N = round(93.75 × ${sec}) = ${N} frames;  M = ${M} characters;  N − M = ${Math.max(0, N - M)} fillers`;
+      $("[data-r2]").textContent = M > N ? "Too much text for this clip: the method assumes M ≤ N (Sec 3.1, p. 4)." : `${(100 * (N - M) / N).toFixed(1)}% of the text slots are filler. The model must learn where each letter's sound really is.`;
+      $("[data-r3]").textContent = "Space counts as a character (shown ␣). Frames: 24,000 samples a second ÷ hop 256.";
+      $("[data-vs]").textContent = `${sec} s`; sIn.style.setProperty("--p", `${((sec - 1) / 5) * 100}%`);
+    }
+    tIn.addEventListener("input", draw); sIn.addEventListener("input", draw);
+    root.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach((b) => b.addEventListener("click", async () => {
+      const to = b.dataset.mode === "align" ? 1 : 0, from = mix; root.querySelectorAll("[data-mode]").forEach((o) => o.setAttribute("aria-pressed", String(o === b)));
+      await tween(0.5, (e) => { mix = from + (to - from) * e; draw(); }); mix = to; draw();
+    }));
+    draw();
+  });
+</script>

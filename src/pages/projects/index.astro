@@ -1,0 +1,7 @@
+---
+import Base from "../../layouts/Base.astro";
+import html from "../../page-content/projects.html?raw";
+---
+<Base title="Projects" heading>
+  <Fragment set:html={html} />
+</Base>

@@ -1,0 +1,60 @@
+---
+// VALL-E review, Figure 8: Table 6 (p. 10). Speaker similarity on VCTK as the
+// voice prompt grows from 3 to 5 to 10 seconds, for all 108 speakers (YourTTS
+// saw 97 of them in training) and for the 11 speakers neither model saw.
+const { alt } = Astro.props;
+const data = {
+  all: { YourTTS: [0.357, 0.377, 0.394], "VALL-E": [0.382, 0.423, 0.484], "Ground truth": [0.546, 0.591, 0.62] },
+  unseen: { YourTTS: [0.331, 0.337, 0.344], "VALL-E": [0.389, 0.38, 0.414], "Ground truth": [0.528, 0.556, 0.586] },
+};
+---
+<div class="blog-diagram pll" role="region" aria-label={alt} data-pll data-d={JSON.stringify(data)}>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 320" role="img" aria-labelledby="pll-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="pll-title">Speaker similarity as the voice prompt gets longer</title>
+    <g data-plot></g>
+    <text data-r1 x="20" y="282" font-size="12.5" font-weight="700" fill="#2b2b30"></text>
+    <text data-r2 x="20" y="304" font-size="11.5" fill="#5f5f66"></text>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Speakers</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-set="all" aria-pressed="true">All 108</button>
+      <button type="button" class="fig-chip" data-set="unseen" aria-pressed="false">11 unseen by both</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { setupFigure, tween } from "../../lib/figure-motion";
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-pll]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const D: Record<string, Record<string, number[]>> = JSON.parse(root.dataset.d!);
+    const mk = (g: Element, tag: string, a: Record<string, string | number>, txt?: string) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, String(a[k])); if (txt !== undefined) e.textContent = txt; g.append(e); return e; };
+    const secs = [3, 5, 10], X = (s: number) => 90 + ((s - 3) / 7) * 480, Y = (v: number) => 250 - ((v - 0.3) / 0.35) * 220;
+    const col: Record<string, string> = { YourTTS: "#b8722c", "VALL-E": "#594578", "Ground truth": "#2b2b30" };
+    let set = "all";
+    function draw(p: number) {
+      const g = $("[data-plot]"); g.replaceChildren();
+      for (let v = 0.3; v <= 0.651; v += 0.05) { mk(g, "line", { x1: 90, x2: 570, y1: Y(v), y2: Y(v), stroke: "#f2f2f5" }); mk(g, "text", { x: 82, y: Y(v) + 4, "font-size": 10, "text-anchor": "end", fill: "#2b2b30" }, v.toFixed(2)); }
+      secs.forEach((s) => mk(g, "text", { x: X(s), y: 268, "font-size": 10.5, "text-anchor": "middle", fill: "#2b2b30" }, `${s} s prompt`));
+      const rows = D[set], yv = rows.YourTTS, vv = rows["VALL-E"];
+      // Shade the gap between VALL-E and YourTTS.
+      if (p >= 1) mk(g, "path", { d: `M${secs.map((s, i) => `${X(s)} ${Y(vv[i])}`).join(" L")} L${[...secs].reverse().map((s, i) => `${X(s)} ${Y(yv[2 - i])}`).join(" L")} Z`, fill: "#594578", "fill-opacity": 0.08 });
+      Object.entries(rows).forEach(([n, v]) => {
+        const upto = p * 2;
+        let d = `M${X(3)} ${Y(v[0])}`;
+        for (let i = 1; i <= 2; i++) { const f = Math.max(0, Math.min(1, upto - (i - 1))); if (f <= 0) break; d += ` L${X(secs[i - 1]) + (X(secs[i]) - X(secs[i - 1])) * f} ${Y(v[i - 1]) + (Y(v[i]) - Y(v[i - 1])) * f}`; }
+        mk(g, "path", { d, fill: "none", stroke: col[n], "stroke-width": 2.5 });
+        v.forEach((y, i) => { if (upto >= i) { const c = mk(g, "circle", { cx: X(secs[i]), cy: Y(y), r: 4.5, fill: col[n] }); mk(c, "title", {}, `${n}, ${secs[i]} s: ${y}`); } });
+        if (p >= 1) mk(g, "text", { x: 582, y: Y(v[2]) + 4, "font-size": 11, "font-weight": 700, fill: col[n] }, `${n} ${v[2]}`);
+      });
+      const gv = vv[2] - vv[0], gy = yv[2] - yv[0];
+      $("[data-r1]").textContent = `From 3 s to 10 s: VALL-E gains ${gv >= 0 ? "+" : ""}${gv.toFixed(3)}, YourTTS ${gy >= 0 ? "+" : ""}${gy.toFixed(3)}.`;
+      $("[data-r2]").textContent = set === "unseen" ? "On these 11 speakers VALL-E dips from 0.389 at 3 s to 0.380 at 5 s: on a set this small, longer is not always better." : "YourTTS saw 97 of these 108 speakers in training; VALL-E saw none (Sec 5.3, p. 10).";
+    }
+    root.querySelectorAll<HTMLButtonElement>("[data-set]").forEach((b) => b.addEventListener("click", () => { set = b.dataset.set!; root.querySelectorAll("[data-set]").forEach((o) => o.setAttribute("aria-pressed", String(o === b))); draw(1); }));
+    draw(1);
+    setupFigure(root, () => draw(0), async (alive) => { await tween(1.8, (e) => { if (alive()) draw(e); }); draw(1); });
+  });
+</script>

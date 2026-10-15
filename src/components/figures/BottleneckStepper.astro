@@ -1,0 +1,64 @@
+---
+// Foundations, autoencoders post: a linear autoencoder squeezing six 2-D
+// points to one number along a unit arrow w. w = (0.8, 0.6): B(3, 1) →
+// code 3 → (2.4, 1.8), error 1; average 0.667. Best angle ≈ 35.3°
+// (PCA), average 0.657. Angle 0°: 4.667.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-bneck>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 300" role="img" aria-labelledby="bn3-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="bn3-title">Points squeezed onto a line through a one-number code and rebuilt</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Stick angle <strong data-va></strong></span><input class="scrub" data-a type="range" min="0" max="180" step="0.1" value="36.87" /></label>
+    <div><span class="fig-panel__name">Point</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-p="0" aria-pressed="false">A (4, 3)</button><button type="button" class="fig-chip" data-p="1" aria-pressed="true">B (3, 1)</button><button type="button" class="fig-chip" data-p="2" aria-pressed="false">C (1, 2)</button>
+      <button type="button" class="fig-chip" data-best>Best angle</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt, par } from "../../lib/tiny-net";
+  import { INK, MUTED, GOLD, TINT, JADE, NEG } from "../../lib/net-diagram";
+  import { frame, txt } from "../../lib/plot";
+  const PTS = [[4, 3], [3, 1], [1, 2], [-4, -3], [-3, -1], [-1, -2]], NM = ["A", "B", "C", "A′", "B′", "C′"];
+  const BEST = (Math.atan2(0.5780, 0.8161) * 180) / Math.PI;
+  document.querySelectorAll<HTMLElement>("[data-bneck]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    let ang = 36.87, sel = 1;
+    const w = () => [Math.cos((ang * Math.PI) / 180), Math.sin((ang * Math.PI) / 180)];
+    const one = (p: number[]) => { const [a, b] = w(), z = a * p[0] + b * p[1], r = [z * a, z * b]; return { z, r, e: (r[0] - p[0]) ** 2 + (r[1] - p[1]) ** 2 }; };
+    const avg = () => PTS.reduce((s, p) => s + one(p).e, 0) / 6;
+    const steps = () => { const p = PTS[sel], c = one(p), [a, b] = w(); return [
+      { say: `Encode ${NM[sel]}: its shadow on the stick, a single number.`, math: `z = ${fmt(a, 3)} × ${par(p[0])} + ${fmt(b, 3)} × ${par(p[1])} = ${fmt(c.z, 3)}` },
+      { say: "That one number is all that passes through the bottleneck.", math: `code = ${fmt(c.z, 3)}` },
+      { say: "Decode: walk that far along the stick.", math: `x̂ = (${fmt(c.z, 3)} × ${fmt(a, 3)}, ${fmt(c.z, 3)} × ${fmt(b, 3)}) = (${fmt(c.r[0], 3)}, ${fmt(c.r[1], 3)})` },
+      { say: "Score the rebuild: the squared distance back to the original.", math: `error = (${fmt(c.r[0], 3)} − ${par(p[0])})² + (${fmt(c.r[1], 3)} − ${par(p[1])})² = ${fmt(c.e, 3)}` },
+      { say: "Average the error over all six points. Turn the stick to find the smallest average.", math: `errors ${PTS.map((q) => fmt(one(q).e, 3)).join(", ")} → average ${fmt(avg(), 3)}` },
+    ]; };
+    function draw(k: number) {
+      const F = frame({ l: 40, t: 20, w: 260, h: 260, x0: -5, x1: 5, y0: -5, y1: 5 }), [a, b] = w(), p = PTS[sel], c = one(p);
+      let s = F.grid([-4, 0, 4], [-4, 0, 4], 0) + `<line x1="${F.X(-6 * a)}" y1="${F.Y(-6 * b)}" x2="${F.X(6 * a)}" y2="${F.Y(6 * b)}" stroke="${GOLD}" stroke-width="2.5"/>`;
+      PTS.forEach((q, i) => (s += `<circle cx="${F.X(q[0])}" cy="${F.Y(q[1])}" r="${i === sel ? 7 : 5}" fill="${i === sel ? INK : JADE}"/>` + txt(F.X(q[0]) + 8, F.Y(q[1]) - 6, NM[i], `font-size="10.5" fill="${MUTED}"`)));
+      if (k >= 0) s += `<line x1="${F.X(p[0])}" y1="${F.Y(p[1])}" x2="${F.X(c.r[0])}" y2="${F.Y(c.r[1])}" stroke="${NEG}" stroke-dasharray="4 3" stroke-width="${k >= 3 ? 2 : 1}"/>`;
+      if (k >= 2) s += `<circle cx="${F.X(c.r[0])}" cy="${F.Y(c.r[1])}" r="6" fill="none" stroke="${NEG}" stroke-width="2"/>`;
+      // Encoder, code, decoder strip.
+      s += `<rect x="340" y="40" width="110" height="40" rx="7" fill="${k === 0 ? TINT : "#fff"}" stroke="${INK}"/>` + txt(395, 65, "encoder", `font-size="12" text-anchor="middle" fill="${INK}"`);
+      s += `<rect x="470" y="46" width="60" height="28" rx="5" fill="${k === 1 ? TINT : "#FBF3E0"}" stroke="${GOLD}" stroke-width="2"/>` + txt(500, 65, k >= 1 ? fmt(c.z, 2) : "z", `font-size="13" font-weight="700" text-anchor="middle" fill="${INK}"`);
+      s += `<rect x="550" y="40" width="110" height="40" rx="7" fill="${k === 2 ? TINT : "#fff"}" stroke="${INK}"/>` + txt(605, 65, "decoder", `font-size="12" text-anchor="middle" fill="${INK}"`);
+      s += txt(340, 112, "2 numbers in → 1 number → 2 numbers out", `font-size="11" fill="${MUTED}"`);
+      PTS.forEach((q, i) => (s += txt(340 + (i % 3) * 110, 150 + Math.floor(i / 3) * 22, `${NM[i]}: error ${fmt(one(q).e, 3)}`, `font-size="12" fill="${INK}"`)));
+      s += txt(340, 210, `average error ${fmt(avg(), 3)}`, `font-size="15" font-weight="700" fill="${INK}"`) + txt(340, 232, `best possible (the PCA direction, ${fmt(BEST, 1)}°): 0.657`, `font-size="11.5" fill="${MUTED}"`);
+      $("[data-draw]").innerHTML = s;
+      $("[data-va]").textContent = `${fmt(ang, 1)}°`;
+    }
+    const redraw = stepper(root, steps, draw, { delay: 1.6 });
+    $<HTMLInputElement>("[data-a]").addEventListener("input", (e) => { ang = +(e.target as HTMLInputElement).value; redraw(); });
+    $("[data-best]").addEventListener("click", () => { ang = BEST; $<HTMLInputElement>("[data-a]").value = String(BEST); redraw(); });
+    root.querySelectorAll<HTMLButtonElement>("[data-p]").forEach((b) => b.addEventListener("click", () => { sel = +b.dataset.p!; root.querySelectorAll("[data-p]").forEach((o) => o.setAttribute("aria-pressed", String(o === b))); redraw(); }));
+  });
+</script>

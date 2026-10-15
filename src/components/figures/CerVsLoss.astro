@@ -1,0 +1,87 @@
+---
+// Dev-core CER by training step for the 100 h baseline (report Table 6) and
+// the 854.5 h foundation run (Table 9). Validation loss is drawn as a shape
+// only: the report says it fell at every step but gives no per-step values.
+const { alt } = Astro.props;
+const p3 = [[10, 13.37], [15, 14.83], [20, 14.86], [25, 17.25], [30, 18.07]];
+const fd = [[15, 11.49], [20, 11.53], [25, 11.70], [30, 12.01], [35, 12.02], [40, 12.06]];
+const X0 = 70, Y0 = 290, W = 460, H = 240, SMAX = 42, CMIN = 10, CMAX = 19;
+const sx = (s: number) => X0 + (s / SMAX) * W;
+const sy = (c: number) => Y0 - ((c - CMIN) / (CMAX - CMIN)) * H;
+const line = (pts: number[][]) => pts.map(([s, c], i) => `${i ? "L" : "M"}${sx(s)} ${sy(c)}`).join(" ");
+---
+<div class="blog-diagram cl" role="region" aria-label={alt} data-cl data-cfg={JSON.stringify({ X0, Y0, W, H, SMAX, CMIN, CMAX })}>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 340" role="img" aria-labelledby="cl-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="cl-title">Character error rate by training step for two runs</title>
+    <g stroke="#ececf1">{[10, 12, 14, 16, 18].map((c) => <line x1={X0} x2={X0 + W} y1={sy(c)} y2={sy(c)} />)}</g>
+    <g font-size="9.5" fill="#5f5f66" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">
+      {[10, 12, 14, 16, 18].map((c) => <text x={X0 - 8} y={sy(c) + 3} text-anchor="end">{c}%</text>)}
+      {[0, 10, 20, 30, 40].map((s) => <text x={sx(s)} y={Y0 + 16} text-anchor="middle">{s}k</text>)}
+    </g>
+    <text x={X0 + W / 2} y={Y0 + 36} font-size="10.5" text-anchor="middle" fill="#2b2b30">training step</text>
+    <text x="18" y={Y0 - H / 2} font-size="10.5" text-anchor="middle" fill="#2b2b30" transform={`rotate(-90 18 ${Y0 - H / 2})`}>dev-core CER (lower is better)</text>
+    <path data-loss d={`M${sx(2)} ${sy(18.4)} C ${sx(10)} ${sy(14.5)}, ${sx(22)} ${sy(12.2)}, ${sx(40)} ${sy(10.5)}`} fill="none" stroke="#8a6a1f" stroke-width="2" stroke-opacity="0.7" />
+    <text data-loss x={sx(3) + 10} y={sy(18.4) + 4} font-size="10" fill="#8a6a1f">validation loss, foundation run (shape only)</text>
+    <path data-c="p3" d={line(p3)} fill="none" stroke="#a33b3b" stroke-width="2.5" />
+    <path data-c="fd" d={line(fd)} fill="none" stroke="#594578" stroke-width="2.5" />
+    {p3.map(([s, c]) => <g data-pt="p3"><circle cx={sx(s)} cy={sy(c)} r="4" fill="#a33b3b" /><text x={sx(s)} y={sy(c) - 9} font-size="9.5" text-anchor="middle" fill="#a33b3b">{c.toFixed(2)}</text></g>)}
+    {fd.map(([s, c]) => <g data-pt="fd"><circle cx={sx(s)} cy={sy(c)} r="4" fill="#594578" /><text x={sx(s)} y={sy(c) + 17} font-size="9.5" text-anchor="middle" fill="#594578">{c.toFixed(2)}</text></g>)}
+    <text x={sx(30) + 8} y={sy(18.07) + 4} font-size="10.5" font-weight="600" fill="#a33b3b">100 h baseline</text>
+    <text x={sx(40) + 8} y={sy(12.06) + 4} font-size="10.5" font-weight="600" fill="#594578">854.5 h</text>
+    <g data-pick><circle r="10" fill="none" stroke="#2b2b30" stroke-width="2" /></g>
+    <g transform="translate(590 60)">
+      <text font-size="11" letter-spacing="1" fill="#5f5f66">FOUNDATION CHECKPOINT</text>
+      <text data-rule y="30" font-size="12" font-weight="600" fill="#2b2b30"></text>
+      <text data-pickv y="66" font-size="28" font-weight="700" fill="#2b2b30" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"></text>
+      <text data-note1 y="92" font-size="10.5" fill="#5f5f66"></text>
+      <text data-note2 y="108" font-size="10.5" fill="#5f5f66"></text>
+      <text y="160" font-size="10.5" fill="#5f5f66">Cool-down test: val loss</text>
+      <text y="176" font-size="10.5" fill="#5f5f66">−0.127 → −0.184, CER +0.34 pt.</text>
+      <text y="192" font-size="10.5" fill="#5f5f66">Better loss, worse speech: rejected.</text>
+    </g>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Pick the checkpoint by</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-by="loss" aria-pressed="false">Lowest validation loss</button>
+      <button type="button" class="fig-chip" data-by="cer" aria-pressed="true">Registered dev-CER rule</button>
+      <button type="button" class="fig-chip" data-by="served" aria-pressed="false">What was served</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { drawStroke, hideStroke, setupFigure, tween, wait } from "../../lib/figure-motion";
+
+  const PICK = {
+    loss: { s: 40, c: 12.06, rule: "lowest validation loss", n1: "the last step: loss fell all the way,", n2: "while CER drifted up." },
+    cer: { s: 25, c: 11.70, rule: "best, or later within 0.5 pt", n1: "the rule written before training;", n2: "the minimum was 11.49% at 15k." },
+    served: { s: 15, c: 11.49, rule: "served in the usable system", n1: "15k kept new voices better:", n2: "unseen-voice CER +2.5 pt by 25k." },
+  } as const;
+  document.querySelectorAll<HTMLElement>("[data-cl]").forEach((root) => {
+    const c = JSON.parse(root.dataset.cfg!);
+    const sx = (s: number) => c.X0 + (s / c.SMAX) * c.W, sy = (v: number) => c.Y0 - ((v - c.CMIN) / (c.CMAX - c.CMIN)) * c.H;
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    let by: keyof typeof PICK = "cer", cur = { s: 25, c: 11.7 };
+    const place = (p: { s: number; c: number }) => { cur = p; $("[data-pick]").setAttribute("transform", `translate(${sx(p.s)} ${sy(p.c)})`); };
+    const text = () => {
+      const p = PICK[by];
+      $("[data-rule]").textContent = p.rule; $("[data-pickv]").textContent = `${p.s}k · ${p.c.toFixed(2)}%`;
+      $("[data-note1]").textContent = p.n1; $("[data-note2]").textContent = p.n2;
+      root.querySelectorAll("[data-by]").forEach((b) => b.setAttribute("aria-pressed", String((b as HTMLElement).dataset.by === by)));
+    };
+    root.querySelectorAll<HTMLButtonElement>("[data-by]").forEach((b) => b.addEventListener("click", async () => {
+      by = b.dataset.by as keyof typeof PICK; text();
+      const from = cur, to = PICK[by];
+      await tween(0.6, (t) => place({ s: from.s + (to.s - from.s) * t, c: from.c + (to.c - from.c) * t }));
+    }));
+    const curves = Array.from(root.querySelectorAll<SVGPathElement>("path[data-c], path[data-loss]"));
+    const pts = Array.from(root.querySelectorAll<SVGGElement>("[data-pt], text[data-loss]"));
+    setupFigure(root, () => { by = "cer"; text(); place(PICK.cer); curves.forEach(hideStroke); pts.forEach((p) => (p.style.opacity = "0")); $<SVGGElement>("[data-pick]").style.opacity = "0"; }, async (alive) => {
+      for (const p of curves) { if (!alive()) return; await drawStroke(p, 1); }
+      pts.forEach((p) => (p.style.opacity = "1"));
+      await wait(0.3);
+      $<SVGGElement>("[data-pick]").style.opacity = "1";
+    });
+  });
+</script>

@@ -1,0 +1,51 @@
+---
+// Foundations, recurrent networks post: how long the first input survives.
+// h1 = tanh(s), then h_t = tanh(w_h h_{t−1}). At w_h = 0.5, h10 = 0.0014 (gap
+// 0.0028); 0.9: 0.1892 (gap 0.3785); 1.5: 0.8585 (gap 1.7171).
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-fade>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 260" role="img" aria-labelledby="mf-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="mf-title">Hidden state over ten steps after a first input of plus or minus one</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Recurrent weight w_h <strong data-vw></strong></span><input class="scrub" data-w type="range" min="0" max="3" step="0.05" value="0.5" /></label>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt } from "../../lib/tiny-net";
+  import { INK, MUTED, GOLD } from "../../lib/net-diagram";
+  import { frame, txt } from "../../lib/plot";
+  const T = 10, BLUE = "#3E6E9E";
+  document.querySelectorAll<HTMLElement>("[data-fade]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    let wh = 0.5;
+    const setW = (v: number) => { wh = v; $<HTMLInputElement>("[data-w]").value = String(v); };
+    const run = () => { const hs = [Math.tanh(1)]; for (let t = 1; t < T; t++) hs.push(Math.tanh(wh * hs[t - 1])); return hs; };
+    const steps = () => [
+      ...[0.5, 0.9, 1, 1.5, 3].map((v) => {
+        const hs = (() => { const a = [Math.tanh(1)]; for (let t = 1; t < T; t++) a.push(Math.tanh(v * a[t - 1])); return a; })();
+        return { say: v === 0.5 ? "With w_h = 0.5 the memory roughly halves every step: after ten steps almost nothing of the first input is left." : v === 3 ? "A big w_h keeps the memory near the tanh rim. Forward, it holds; the trouble comes in the backward pass." : `w_h = ${v}.`, math: `h10 = ${fmt(hs[T - 1], 4)} for s = +1 and ${fmt(-hs[T - 1], 4)} for s = −1;  gap = ${fmt(2 * hs[T - 1], 4)}`, enter: () => setW(v) };
+      }),
+    ];
+    function draw() {
+      const hs = run(), F = frame({ l: 50, t: 30, w: 450, h: 200, x0: 1, x1: T, y0: -1, y1: 1 });
+      let s = F.grid([1, 2, 4, 6, 8, 10], [-1, 0, 1], 0) + txt(50, 18, `Hidden state after a first input of +1 (gold) or −1 (blue), w_h = ${fmt(wh, 2)}`, `font-size="12" font-weight="700" fill="${INK}"`);
+      s += `<polygon fill="${GOLD}" fill-opacity="0.12" points="${hs.map((h, t) => `${F.X(t + 1)},${F.Y(h)}`).join(" ")} ${[...hs].reverse().map((h, t) => `${F.X(T - t)},${F.Y(-h)}`).join(" ")}"/>`;
+      s += `<polyline fill="none" stroke="${GOLD}" stroke-width="2.5" points="${hs.map((h, t) => `${F.X(t + 1)},${F.Y(h)}`).join(" ")}"/><polyline fill="none" stroke="${BLUE}" stroke-width="2.5" points="${hs.map((h, t) => `${F.X(t + 1)},${F.Y(-h)}`).join(" ")}"/>`;
+      hs.forEach((h, t) => (s += `<circle cx="${F.X(t + 1)}" cy="${F.Y(h)}" r="3.5" fill="${GOLD}"/><circle cx="${F.X(t + 1)}" cy="${F.Y(-h)}" r="3.5" fill="${BLUE}"/>`));
+      s += txt(530, 60, "after 10 steps", `font-size="12" font-weight="700" fill="${INK}"`) + txt(530, 84, `h10 = ${fmt(hs[T - 1], 4)}`, `font-size="13" fill="${INK}"`) + txt(530, 108, `gap = ${fmt(2 * hs[T - 1], 4)}`, `font-size="15" font-weight="700" fill="${GOLD}"`);
+      s += txt(530, 140, "The shaded gap is all the network", `font-size="11.5" fill="${MUTED}"`) + txt(530, 156, "still knows about step 1.", `font-size="11.5" fill="${MUTED}"`);
+      s += txt(530, 190, hs.map((h) => fmt(h, 3)).slice(0, 5).join(", ") + ",", `font-size="10.5" fill="${MUTED}"`) + txt(530, 206, hs.map((h) => fmt(h, 4)).slice(5).join(", "), `font-size="10.5" fill="${MUTED}"`);
+      s += txt(50, 252, "step", `font-size="10.5" fill="${MUTED}"`);
+      $("[data-draw]").innerHTML = s;
+      $("[data-vw]").textContent = fmt(wh, 2);
+    }
+    const redraw = stepper(root, steps, draw, { delay: 2 });
+    $<HTMLInputElement>("[data-w]").addEventListener("input", (e) => { wh = +(e.target as HTMLInputElement).value; redraw(); });
+  });
+</script>

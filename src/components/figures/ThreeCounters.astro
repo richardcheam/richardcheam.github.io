@@ -1,0 +1,68 @@
+---
+// Khmer script post, Figure 4: three ways to count one string. Grapheme
+// clusters from Intl.Segmenter (your browser's rules), code points from the
+// string iterator, bytes from TextEncoder (UTF-8). Each code point is a bead
+// coloured by its role in the Khmer block; under it, its UTF-8 bytes in hex.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram tcn" role="region" aria-label={alt} data-tcn>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Type or paste text</span><input class="fig-text" data-in type="text" value="ខ្មែរ" /></label>
+    <div><span class="fig-panel__name">Try</span><div class="fig-chips">
+      {["ក", "ក្រ", "ខ្មែរ", "២០២៤", "ខ្មែរ​ស្រី", "Khmer"].map((s) => <button type="button" class="fig-chip" data-try={s}>{s.replace("​", "·ZWSP·")}</button>)}
+    </div></div>
+  </div>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 300" role="img" aria-labelledby="tcn-title" class="blog-diagram-svg" font-family="Inter, 'Noto Sans Khmer', 'Khmer Sangam MN', sans-serif">
+    <title id="tcn-title">Grapheme clusters, code points and bytes counted for the typed text</title>
+    <g data-count></g>
+    <g data-beads></g>
+  </svg>
+</div>
+
+<style>
+  .tcn .fig-text { font: inherit; font-size: 1.1rem; padding: 0.25rem 0.5rem; border: 1px solid var(--line, #d5d5dc); border-radius: 4px; background: transparent; color: inherit; width: 16rem; max-width: 100%; }
+</style>
+
+<script>
+  import { tween } from "../../lib/figure-motion";
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-tcn]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const inp = $<HTMLInputElement>("[data-in]");
+    const mk = (g: Element, tag: string, a: Record<string, string | number>, txt?: string) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, String(a[k])); if (txt !== undefined) e.textContent = txt; g.append(e); return e; };
+    const role = (c: number): [string, string] =>
+      c >= 0x1780 && c <= 0x17a2 ? ["consonant", "#594578"] : c >= 0x17a3 && c <= 0x17b5 ? ["independent vowel", "#8a3f6e"] : c >= 0x17b6 && c <= 0x17c5 ? ["vowel sign", "#a33b3b"] : c === 0x17d2 ? ["COENG", "#8a8a94"] : c >= 0x17c6 && c <= 0x17d3 ? ["sign", "#b8722c"] : c >= 0x17d4 && c <= 0x17dd ? ["punctuation, currency", "#2f6f6a"] : c >= 0x17e0 && c <= 0x17e9 ? ["Khmer digit", "#35588a"] : c === 0x200b ? ["zero-width space", "#d5d5dc"] : ["other", "#4F5D3A"];
+    const seg = "Segmenter" in Intl ? new (Intl as any).Segmenter("km", { granularity: "grapheme" }) : null;
+    let shown = [0, 0, 0];
+    function draw(target: number[], e = 1) {
+      const s = inp.value, cps = [...s], gc = $("[data-count]"); gc.replaceChildren();
+      ["grapheme clusters", "code points", "UTF-8 bytes"].forEach((n, i) => {
+        const v = Math.round(shown[i] + (target[i] - shown[i]) * e);
+        mk(gc, "text", { x: 60 + i * 240, y: 50, "font-size": 34, "font-weight": 700, fill: ["#2b2b30", "#594578", "#a33b3b"][i], "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace" }, String(v));
+        mk(gc, "text", { x: 60 + i * 240, y: 72, "font-size": 11.5, fill: "#5f5f66" }, n);
+      });
+      const gb = $("[data-beads]"); gb.replaceChildren();
+      const n = Math.min(cps.length, 16), w = Math.min(46, 740 / Math.max(n, 1));
+      cps.slice(0, 16).forEach((ch, i) => {
+        const c = ch.codePointAt(0)!, [r, col] = role(c), x = 20 + i * w, bytes = [...new TextEncoder().encode(ch)];
+        mk(gb, "rect", { x, y: 96, width: w - 4, height: 50, rx: 6, fill: col, "fill-opacity": c === 0x200b ? 0.4 : 0.85 });
+        mk(gb, "text", { x: x + (w - 4) / 2, y: 128, "font-size": 20, "text-anchor": "middle", fill: "#fff" }, c === 0x200b ? "·" : c >= 0x17b6 && c <= 0x17d3 ? "◌" + ch : ch);
+        mk(gb, "text", { x: x + (w - 4) / 2, y: 160, "font-size": 8.5, "text-anchor": "middle", fill: "#2b2b30", "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace" }, c.toString(16).toUpperCase());
+        bytes.forEach((b, j) => { const bh = 14; mk(gb, "rect", { x: x + 2, y: 168 + j * (bh + 2), width: w - 8, height: bh, rx: 2, fill: "#f2f2f5", stroke: "#d5d5dc" }); mk(gb, "text", { x: x + (w - 4) / 2, y: 179 + j * (bh + 2), "font-size": 8.5, "text-anchor": "middle", fill: "#a33b3b", "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace" }, b.toString(16).toUpperCase().padStart(2, "0")); });
+        void r;
+      });
+      if (cps.length > 16) mk(gb, "text", { x: 760, y: 126, "font-size": 11, "text-anchor": "end", fill: "#5f5f66" }, `+${cps.length - 16} more`);
+      const used = [...new Set(cps.map((ch) => role(ch.codePointAt(0)!)[0]))];
+      used.forEach((u, i) => { const col = role(cps.find((ch) => role(ch.codePointAt(0)!)[0] === u)!.codePointAt(0)!)[1]; mk(gb, "rect", { x: 20 + i * 150, y: 240, width: 12, height: 12, fill: col }); mk(gb, "text", { x: 38 + i * 150, y: 250, "font-size": 10.5, fill: "#2b2b30" }, u); });
+      mk(gb, "text", { x: 20, y: 284, "font-size": 11, fill: "#5f5f66" }, seg ? "Graphemes use your browser's segmentation rules; browsers on older Unicode versions may count differently." : "This browser has no Intl.Segmenter, so the grapheme count is unavailable.");
+    }
+    async function update() {
+      const s = inp.value, target = [seg ? [...seg.segment(s)].length : 0, [...s].length, new TextEncoder().encode(s).length], from = shown.slice();
+      await tween(0.5, (e) => { shown = from; draw(target, e); });
+      shown = target; draw(target);
+    }
+    inp.addEventListener("input", update);
+    root.querySelectorAll<HTMLButtonElement>("[data-try]").forEach((b) => b.addEventListener("click", () => { inp.value = b.dataset.try!; update(); }));
+    update();
+  });
+</script>

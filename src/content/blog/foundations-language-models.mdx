@@ -1,0 +1,414 @@
+---
+title: "Language models and tokenizers: predicting the next token"
+title_key: ["Language models", "tokenizers"]
+date: 2026-10-15
+category: "deep-learning"
+read_time: "32 min"
+series_order: 15
+series: foundations
+featured: false
+excerpt: "A language model does one small thing: it gives a probability to every possible next token. Chain those guesses together and you can score a sentence, train on raw text, and write new text one piece at a time. Counting, tokenizing, training and sampling, each worked on tiny numbers, and how the same machine speaks."
+question: "How does a model that only ever guesses the next piece of text end up able to score, learn from and write whole sentences, and even speech?"
+my_work: "A concept note that closes the Foundations series. I worked every example by hand, checked each number with a short script, and specified the figures from the standard formulas."
+result: "A three-sentence corpus gives the bigram probability of 'the cat sat' as 1/3. Four next-token probabilities of 0.5, 0.25, 0.5 and 0.125 give a loss of 1.213 nats per token and a perplexity of 3.36. Four byte-pair merges shrink a 95-symbol toy corpus to 61 tokens. On the logits 2, 1, 0, −1, the top token's probability is 0.865 at temperature 0.5, 0.644 at 1 and 0.455 at 2."
+evidence_limit: "Explains textbook methods on toy data. No experiments; all numbers are simple arithmetic. Scaling claims are quoted from the cited papers, not reproduced."
+lesson: "Everything a language model does reduces to one softmax over the next token: the chain rule turns it into sentence probabilities, cross-entropy trains it, and sampling turns it into text."
+---
+
+import ChainRuleSentence from "../../components/figures/ChainRuleSentence.astro";
+import BigramCounter from "../../components/figures/BigramCounter.astro";
+import PerplexityCalculator from "../../components/figures/PerplexityCalculator.astro";
+import BpeMergeStepper from "../../components/figures/BpeMergeStepper.astro";
+import DecoderPipeline from "../../components/figures/DecoderPipeline.astro";
+import TeacherForcingStepper from "../../components/figures/TeacherForcingStepper.astro";
+import SamplingDials from "../../components/figures/SamplingDials.astro";
+
+Fourteen posts ago we built a single neuron. Since then we have stacked neurons into layers, trained them with gradient descent, turned words into vectors, and wired vectors together with attention into the Transformer. This last post asks the question all that machinery was built to answer: how does a computer write?
+
+The answer is surprisingly modest. A **language model** never plans a paragraph. It only answers one question, over and over: *given the text so far, how likely is each possible next piece?* Everything else (scoring sentences, learning from the whole internet, chatting, even speaking) is built out of that one guess.
+
+We will go in order: what "probability of a sentence" means, the oldest language models (counting), how to measure one (perplexity), how text is cut into pieces (tokenizers), the neural version, how it is trained, how it writes, and finally how the same idea makes speech in the models I have written about before.
+
+## What a language model predicts
+
+Play a game. I say "the cat sat on the" and stop. You almost certainly guess "mat", maybe "floor" or "sofa", and never "purple". You have a feeling for which words come next, and how strongly. A language model writes that feeling down as numbers: a probability for every word it knows, all adding to 1.
+
+Claude Shannon, the founder of information theory, played exactly this game. In 1948 he built fake English by picking each letter or word based on the few before it, and in 1951 he asked people to guess the next letter of real English text, one letter at a time, to measure how predictable English is. His estimate was roughly **1 bit per letter**, far below the 4.7 bits you would need if all 27 symbols (26 letters and a space) were equally likely (his bounds, with 100 letters of context, ran from about 0.6 to 1.3 bits). Predictability is the whole business of language models.
+
+The pieces a model predicts are called **tokens**. For now, think of a token as a word. In the [tokenizer section](#cutting-text-into-tokens) we will see that real tokens are usually pieces of words.
+
+In symbols, a language model gives
+
+$$
+P(x_t \mid x_1, \dots, x_{t-1})
+$$
+
+In words: the probability that the token at position $t$ is $x_t$, given the tokens before it.
+
+- $x_1, \dots, x_{t-1}$: the tokens so far, called the **context** or **prefix**.
+- $x_t$: a candidate for the next token.
+- The bar $\mid$ reads "given".
+- $P$: a probability between 0 and 1. Summed over every token in the vocabulary, these add to exactly 1.
+
+Everyday picture: an autocomplete keyboard on a phone, showing its three best guesses, but secretly holding a number for every word it knows.
+
+## From next-token guesses to a whole sentence
+
+How likely is a whole sentence? We can build it from next-token guesses with the **chain rule of probability**. One plain sentence first: the chance of a whole sequence is the chance of the first token, times the chance of the second given the first, times the chance of the third given the first two, and so on.
+
+$$
+P(x_1, x_2, \dots, x_T) = P(x_1) \times P(x_2 \mid x_1) \times \dots \times P(x_T \mid x_1, \dots, x_{T-1})
+$$
+
+- $T$: the number of tokens in the sentence.
+- $P(x_1, \dots, x_T)$: the probability of the whole sentence.
+- Each factor is one next-token guess, exactly what a language model gives.
+
+Everyday picture: a path through a maze of doors. To reach the end you must pass the first door, then the second, then the third. If you pass each with some chance, you reach the end with the product of the chances.
+
+This is not an approximation. It is always true; it is just how conditional probability works. So a model that guesses the next token well automatically scores whole sentences well.
+
+### Worked on three words
+
+Take "the cat sat", with made-up probabilities:
+
+- $P(\text{the}) = 0.2$: one sentence in five starts with "the".
+- $P(\text{cat} \mid \text{the}) = 0.1$: after "the", "cat" has a one-in-ten chance.
+- $P(\text{sat} \mid \text{the cat}) = 0.5$: after "the cat", "sat" is a coin flip.
+
+Multiply: $0.2 \times 0.1 = 0.02$, then $0.02 \times 0.5 = $ **0.01**. One sentence in a hundred, among all three-word starts, is "the cat sat".
+
+What changes if a number changes: if $P(\text{cat} \mid \text{the})$ doubles to 0.2, the sentence probability doubles to 0.02. Every factor matters equally. And because probabilities are at most 1, every extra word can only make the product smaller or keep it the same. Long sentences have tiny probabilities, which is why we will soon switch to logarithms.
+
+<figure class="blog-figure blog-figure--wide">
+  <ChainRuleSentence alt="Three word cards, the, cat, sat, appear one at a time. Under each card a bar shows its next-token probability, 0.2, 0.1 and 0.5, and a running product beneath falls from 1 to 0.2 to 0.02 to 0.01. Sliders change each probability and the product updates." />
+  <figcaption><strong>Figure 1. A sentence is a chain of guesses.</strong> Step through the words: each step multiplies the running product by one next-token probability. The probabilities are made up for the example.</figcaption>
+</figure>
+
+## Counting models: bigrams
+
+Where do the probabilities come from? The oldest answer is: count. If we only look at the one previous word, we get a **bigram** model ("bi" for two: the previous word and the next). This throws away most of the context, $P(x_t \mid x_1, \dots, x_{t-1})$ becomes just $P(x_t \mid x_{t-1})$, but it is easy to compute.
+
+The rule, in one sentence: the chance that word $b$ follows word $a$ is how often $a$ was followed by $b$, divided by how often $a$ appeared at all (followed by anything).
+
+$$
+P(b \mid a) = \frac{\text{count}(a\ b)}{\text{count}(a)}
+$$
+
+- $\text{count}(a\ b)$: how many times the pair "$a$ then $b$" appears in the training text.
+- $\text{count}(a)$: how many times $a$ appears followed by any word.
+
+Everyday picture: a notebook where, every time you hear "the", you tick a box for whatever word came next. Afterwards, the share of ticks in each box is the probability.
+
+### Worked on a tiny corpus
+
+Our training text (a **corpus**) is three sentences. We mark the start with `BOS` (beginning of sentence) and the end with `EOS` (end of sentence), so the model also learns how sentences start and stop:
+
+- `BOS` the cat sat `EOS`
+- `BOS` the dog sat `EOS`
+- `BOS` the cat ran `EOS`
+
+Count every adjacent pair:
+
+| Pair | Count | Previous word total | Probability |
+|---|---|---|---|
+| `BOS` the | 3 | 3 | 3/3 = **1** |
+| the cat | 2 | 3 | 2/3 = **0.667** |
+| the dog | 1 | 3 | 1/3 = **0.333** |
+| cat sat | 1 | 2 | 1/2 = **0.5** |
+| cat ran | 1 | 2 | 1/2 = **0.5** |
+| dog sat | 1 | 1 | **1** |
+| sat `EOS` | 2 | 2 | **1** |
+| ran `EOS` | 1 | 1 | **1** |
+
+Now score "`BOS` the cat sat `EOS`" with the chain rule:
+
+$$
+1 \times \tfrac{2}{3} \times \tfrac{1}{2} \times 1 = \tfrac{1}{3} \approx 0.333
+$$
+
+"the dog sat" also gets $1 \times \tfrac13 \times 1 \times 1 = \tfrac13$. But "the dog ran" gets **0**: the pair "dog ran" never appeared, so the model says it is impossible, even though it is a perfectly good sentence.
+
+That zero is the fatal weakness of counting. Real text is full of sensible combinations nobody has written down yet, and with longer contexts (three, four, five previous words) almost every context is new. Old systems patched this with **smoothing** (pretend every pair was seen a little), but the deep fix came from [embeddings](/blog/foundations-embeddings/): if "dog" and "cat" have similar vectors, what the model learns about "cat ran" can carry over to "dog ran". Bengio and colleagues made exactly this argument in 2003 with the first neural language model, which learned word vectors and next-word probabilities together.
+
+<figure class="blog-figure blog-figure--wide">
+  <BigramCounter alt="The three-sentence corpus at the top. A cursor slides along it one pair at a time, and each pair adds a tick to a grid of previous word by next word. Then each row is divided by its total to show probabilities, and buttons score four sentences, highlighting a zero in red." />
+  <figcaption><strong>Figure 2. Counting pairs.</strong> Step through the corpus to fill the count grid, then turn counts into probabilities row by row. Try "the dog ran" to see a sensible sentence get probability zero.</figcaption>
+</figure>
+
+## Measuring a model: perplexity
+
+To compare two language models, we show each some text it has never seen and ask: how surprised were you? The surprise of one token is the cross-entropy from [the loss post](/blog/foundations-loss-gradient-descent/#surprise-and-why-the-loss-is-minus-log): minus the log of the probability the model gave to the token that actually came. Average it over the text:
+
+$$
+H = -\frac{1}{N} \sum_{t=1}^{N} \ln P(x_t \mid x_1, \dots, x_{t-1})
+$$
+
+In words: for every token, take how surprised the model was, then average.
+
+- $N$: number of tokens in the test text.
+- $\ln$: the natural logarithm. With $\ln$ the unit is **nats**; with $\log_2$ it is **bits**.
+- $H$: the average surprise per token, the **cross-entropy**. Lower is better.
+
+Taking logs also fixes the tiny-product problem: the log of a product is the sum of the logs, so instead of multiplying many small numbers we add up moderate ones.
+
+The trouble with $H$ is that "1.2 nats" means nothing to most people. **Perplexity** turns it back into something you can picture:
+
+$$
+\text{PPL} = e^{H}
+$$
+
+- $e \approx 2.718$, the base of the natural log (use $2^H$ if $H$ is in bits; the answer is the same).
+- $\text{PPL}$: perplexity.
+
+Everyday picture: perplexity is the **effective number of choices** the model is torn between at each step. A model that spreads its probability evenly over 4 tokens has $H = \ln 4$ and perplexity exactly **4**: like rolling a fair four-sided die. A perplexity of 100 means "as unsure as a fair choice among 100 words".
+
+### Worked on four tokens
+
+A model reads a four-token test text and gives the correct next token these probabilities: **0.5**, **0.25**, **0.5**, **0.125**.
+
+- Surprises: $-\ln 0.5 = 0.693$, $-\ln 0.25 = 1.386$, $-\ln 0.5 = 0.693$, $-\ln 0.125 = 2.079$.
+- Sum: $0.693 + 1.386 + 0.693 + 2.079 = 4.852$.
+- Average: $H = 4.852 / 4 = $ **1.213** nats per token.
+- Perplexity: $e^{1.213} = $ **3.36**.
+
+In bits it is even friendlier: the surprises are 1, 2, 1 and 3 bits (because $0.5 = 2^{-1}$, $0.25 = 2^{-2}$, $0.125 = 2^{-3}$), average **1.75** bits, and $2^{1.75} = 3.36$. Same answer.
+
+So this model is, on average, as unsure as someone choosing among about 3.4 equally likely tokens. If it had given 0.9 to every correct token, perplexity would be $1/0.9 = 1.11$: barely unsure at all. And if any token gets probability 0, like "dog ran" in the bigram model, the surprise is infinite and so is the perplexity. One impossible-looking word ruins the score, which is why real models never give exactly zero.
+
+Perplexity depends on the tokenizer: a model that cuts text into more, smaller pieces faces easier guesses per piece. Compare perplexities only between models that share a tokenizer.
+
+<figure class="blog-figure blog-figure--wide">
+  <PerplexityCalculator alt="Four sliders, one per token, set the probability the model gave to the correct token. For each, a bar shows the surprise minus log p. Below, the average surprise and perplexity e to the H update live." />
+  <figcaption><strong>Figure 3. Perplexity as a number of choices.</strong> Defaults 0.5, 0.25, 0.5, 0.125 give 1.213 nats and perplexity 3.36. Push all four to 0.25 and perplexity is exactly 4.</figcaption>
+</figure>
+
+## Cutting text into tokens
+
+So far a token was a word. Real models must decide what a token is, and there are three natural choices.
+
+- **Characters.** The vocabulary is tiny (for English, letters, digits and punctuation, around a hundred), and no word is ever unknown. But sequences are long: "unbelievable" is 12 tokens, and the model must learn spelling before it can learn meaning.
+- **Words.** Sequences are short and each token means something. But the vocabulary is huge, and any word not seen in training (a name, a typo, "unbelievably") becomes an unknown token the model cannot read.
+- **Subwords.** The middle path: common words are one token, rare words are split into common pieces. "unbelievable" might become "un", "believ", "able". Nothing is unknown, sequences stay short.
+
+Subwords won. The most widely used way to choose them is byte-pair encoding.
+
+### Byte-pair encoding, step by step
+
+**Byte-pair encoding** (BPE) began in 1994 as a data compression trick by Philip Gage, and Sennrich, Haddow and Birch adapted it to words for machine translation in 2016. The algorithm in one sentence: start from single characters, find the pair of neighbouring symbols that appears most often, glue it into one new symbol, and repeat until the vocabulary is as big as you want.
+
+We use the toy corpus from Sennrich and colleagues' paper: four words with their counts. We add an end-of-word marker, written `_`, so the model can tell "est" at the end of a word from "est" in the middle.
+
+| Word | Count | Split into characters |
+|---|---|---|
+| low | 5 | l o w `_` |
+| lower | 2 | l o w e r `_` |
+| newest | 6 | n e w e s t `_` |
+| widest | 3 | w i d e s t `_` |
+
+Total symbols: $5 \times 4 + 2 \times 6 + 6 \times 7 + 3 \times 7 = 20 + 12 + 42 + 21 = $ **95**.
+
+**Merge 1.** Count every neighbouring pair, weighted by word count. "e s" appears in newest (6) and widest (3): $6 + 3 = $ **9**. So do "s t" (9) and "t `_`" (9). Next come "w e" with 8 (lower 2, newest 6), "l o" and "o w" with 7. Three pairs tie at 9; we break ties by taking the first one found, "e s". Glue it: newest becomes n e w **es** t `_`, widest becomes w i d **es** t `_`. Each glue removes one symbol per word occurrence: $95 - 9 = $ **86** tokens.
+
+**Merge 2.** Recount. "es t" now appears 9 times (it was "s t"). It ties with "t `_`" (9) and wins the tie. Merge: n e w **est** `_`. Tokens: $86 - 9 = $ **77**.
+
+**Merge 3.** "est `_`" appears 9 times, the most. Merge: n e w **est_**. Tokens: $77 - 9 = $ **68**. The model has learned the suffix "est at the end of a word".
+
+**Merge 4.** The highest counts are now "l o" and "o w", 7 each (low 5, lower 2). Take "l o": **lo** w `_` and **lo** w e r `_`. Tokens: $68 - 7 = $ **61**.
+
+After four merges the vocabulary is the original characters plus four new symbols (es, est, est_, lo), and the corpus shrank from 95 to 61 tokens. The merges are saved in order. To tokenize a new word like "lowest", apply them in the same order: l o w e s t `_` becomes l o w **es** t `_`, then l o w **est** `_`, then l o w **est_**, then **lo** w **est_**. Three tokens, built from pieces seen in training, even though "lowest" itself never appeared.
+
+Radford and colleagues' GPT-2 (2019) made one more change: run BPE on **bytes** instead of characters. Any text, in any script, is a sequence of bytes from 0 to 255, so starting from all 256 bytes means nothing is ever unknown. GPT-2's vocabulary had **50,257** tokens: 256 bytes, 50,000 merges and one end-of-text token.
+
+<figure class="blog-figure blog-figure--wide">
+  <BpeMergeStepper alt="The four toy words as rows of character tiles with their counts. Each step shows a ranked table of pair counts with the winner highlighted, then animates the winning pair's tiles joining in every word, and a token counter drops 95, 86, 77, 68, 61. Buttons at the end tokenize a new word with the learned merges." />
+  <figcaption><strong>Figure 4. Learning merges from counts.</strong> Each step is one count-and-glue. Choose "lowest" at the last step to watch the four merges apply in order. Toy corpus from Sennrich, Haddow and Birch (2016).</figcaption>
+</figure>
+
+### How big should the vocabulary be?
+
+More merges means a bigger vocabulary and shorter sequences. Both directions cost something.
+
+- **Too small**: sequences get long. Attention compares every token with every other ([the cost section of the attention post](/blog/foundations-attention/#the-cost-every-position-against-every-position)), so twice the tokens is about four times the attention work, and the model must spend layers re-assembling pieces.
+- **Too big**: the [embedding table](/blog/foundations-embeddings/#an-embedding-table-is-a-lookup) and the output layer each have one row per token. GPT-2's smallest model, with vectors of 768 numbers, spends $50{,}257 \times 768 = $ **38,597,376** parameters on its embedding table alone. And rare tokens appear so seldom that their rows barely get trained.
+
+Typical vocabularies today are tens of thousands to a few hundred thousand tokens.
+
+### When the tokenizer has never seen your language
+
+The trade-off is sharpest for languages a tokenizer was not trained on. My [Khmer script post](/blog/khmer-script-for-tts/#what-a-tokenizer-does-to-khmer) shows what a byte-level tokenizer with no Khmer merges does: every Khmer code point is **3** bytes in UTF-8, so the word ខ្មែរ becomes **15** byte tokens, none of which means anything on its own (its ByteMerge figure shows the merges at work). In my [Khmer fine-tuning project](/blog/khmer-tts-fine-tuning/#a-tokenizer-for-the-script) I trained a SentencePiece tokenizer with **4,000** pieces instead. A typical sentence became **27** tokens, about **3.8** characters per token, roughly **11** times fewer tokens than byte fallback. SentencePiece also needs no spaces between words, which Khmer does not use. The lesson generalises: the same sentence can cost very different numbers of tokens in different languages, and a model sees, pays for and is scored on tokens.
+
+## A neural language model
+
+Now replace the counting notebook with a network. The modern recipe is exactly the decoder-only Transformer from [post 11](/blog/foundations-transformer/#three-shapes-of-transformer), and every piece is one we have built:
+
+1. **Tokenize** the text into token numbers (this post).
+2. **Look up** each token's vector in an embedding table and add position information ([embeddings](/blog/foundations-embeddings/), [Transformer positions](/blog/foundations-transformer/#giving-attention-a-sense-of-order)).
+3. **Run a stack of Transformer blocks** with a **causal mask**, so position $t$ can only attend to positions 1 to $t$ ([causal masking](/blog/foundations-attention/#causal-masking-no-peeking-at-the-future)).
+4. **Project** each position's final vector to one score per vocabulary token. These raw scores are **logits**.
+5. **Softmax** the logits into a probability for every possible next token ([softmax](/blog/foundations-loss-gradient-descent/#turning-scores-into-probabilities-with-softmax)).
+
+The causal mask is what makes it a language model: the output at position $t$ is the guess for token $t + 1$, and it was computed without seeing token $t + 1$. Without the mask the model could simply copy the answer.
+
+Bengio and colleagues' 2003 model used a feed-forward network over a fixed window of previous words; recurrent networks ([post 8](/blog/foundations-recurrent-networks/), [post 9](/blog/foundations-lstm-gru/)) removed the fixed window; the Transformer of Vaswani and colleagues (2017) replaced recurrence with attention, which trains in parallel. The job never changed: logits for the next token.
+
+<figure class="blog-figure blog-figure--wide">
+  <DecoderPipeline alt="A left-to-right pipeline: the text the cat sat, token ids, embedding vectors, a stack of Transformer blocks with a triangular causal mask drawn beside them, logits for a six-word vocabulary, and softmax bars. Stepping highlights one stage at a time, and a gold triangle shows which earlier positions each may attend to." />
+  <figcaption><strong>Figure 5. From text to next-token probabilities.</strong> Each step lights up one stage. The numbers are a toy with a six-word vocabulary; the shapes match a real decoder.</figcaption>
+</figure>
+
+## Training: every position is a lesson
+
+How do we train it? Take any text, shift it by one, and ask the model to predict each next token. No labels are needed: the text is its own answer key. This is why language models can learn from enormous amounts of raw text.
+
+**Teacher forcing** means that at each position the model is fed the *true* previous tokens, not its own guesses. Because of the causal mask, one forward pass over a sequence gives a guess at every position at once, so a sequence of $T$ tokens gives $T$ lessons in one go.
+
+The loss, in one sentence: average, over every position, the cross-entropy of the true next token.
+
+$$
+L = -\frac{1}{T} \sum_{t=1}^{T} \ln p_\theta(x_{t} \mid x_1, \dots, x_{t-1})
+$$
+
+- $\theta$ (theta): all the model's weights.
+- $p_\theta$: the probability the model, with those weights, gives.
+- $T$: the number of predicted positions.
+
+It is the same formula as $H$ in the [perplexity section](#measuring-a-model-perplexity). Training a language model is literally minimising perplexity on the training text.
+
+### Worked on a short sequence
+
+Input: `BOS` the cat sat. Targets, shifted by one: the cat sat `EOS`.
+
+| Position | Model sees | Should predict | Model's probability | Loss $-\ln p$ |
+|---|---|---|---|---|
+| 1 | `BOS` | the | 0.5 | 0.693 |
+| 2 | `BOS` the | cat | 0.25 | 1.386 |
+| 3 | `BOS` the cat | sat | 0.5 | 0.693 |
+| 4 | `BOS` the cat sat | `EOS` | 0.125 | 2.079 |
+
+Average: $4.852 / 4 = $ **1.213** nats, the same numbers as the perplexity example, perplexity 3.36.
+
+The gradient at each position is the friendly "$p$ minus $y$" from [the loss post](/blog/foundations-loss-gradient-descent/#the-neat-gradient-p-minus-y): the predicted probabilities minus a one-hot vector for the true token. At position 2, the logit for "cat" gets gradient $0.25 - 1 = -0.75$ (push it up; the figure shows this as each step's gradient), and every other token's logit gets its own probability (push it down a little). All four positions' gradients flow back through the shared weights together. Position 4 has the largest surprise, so it pulls hardest.
+
+What teacher forcing does not do: at generation time there is no teacher, and the model reads its own earlier guesses. A mistake early on is something it never saw in training. This gap is called **exposure bias**; in practice large models cope well, but it explains some odd repetitive outputs.
+
+<figure class="blog-figure blog-figure--wide">
+  <TeacherForcingStepper alt="A four-column grid for the input BOS the cat sat. Each step lights one column: the visible prefix in solid tiles, the masked future greyed, a softmax bar chart over a six-word vocabulary with the true next token outlined, its loss minus log p,. A running average loss sits at the right." />
+  <figcaption><strong>Figure 6. Four lessons from one sentence.</strong> Step through the positions; the running average reaches 1.213 nats. Toy probabilities.</figcaption>
+</figure>
+
+## Writing: picking the next token
+
+A trained model gives probabilities. To write, we must pick one token, append it, and ask again. How we pick matters a lot. We use one small example throughout: four candidate tokens with logits **2, 1, 0, −1**. The plain softmax gives probabilities **0.644**, **0.237**, **0.087**, **0.032**.
+
+### Greedy
+
+Always take the most likely token (here the first, 0.644). Simple and repeatable, but bland, and it easily falls into loops ("I think that I think that..."), because the most likely continuation of a loop is often more loop.
+
+### Temperature
+
+Temperature, in one sentence: divide every logit by a number $T$ before the softmax, to sharpen or flatten the distribution.
+
+$$
+p_i = \frac{e^{z_i / T}}{\sum_j e^{z_j / T}}
+$$
+
+- $z_i$: the logit of token $i$.
+- $T$: the temperature, a positive number (not the sequence length here).
+- The sum in the bottom runs over every token, so the $p_i$ add to 1.
+
+Everyday picture: temperature is how bold the writer is. Cold ($T$ below 1) sticks to safe words; hot ($T$ above 1) takes chances.
+
+Worked on our logits:
+
+| $T$ | Logits divided by $T$ | Probabilities |
+|---|---|---|
+| 0.5 | 4, 2, 0, −2 | **0.865**, 0.117, 0.016, 0.002 |
+| 1 | 2, 1, 0, −1 | **0.644**, 0.237, 0.087, 0.032 |
+| 2 | 1, 0.5, 0, −0.5 | **0.455**, 0.276, 0.167, 0.102 |
+
+Dividing by 0.5 doubles the gaps between logits, and since the softmax responds to gaps, the top token grows from 0.644 to 0.865. Dividing by 2 halves the gaps and the distribution flattens. As $T$ approaches 0 we get greedy; as $T$ grows very large, every token approaches 1/4.
+
+Pocket TTS has a temperature too, but with no softmax: it scales the starting noise instead ([Temperature without a softmax](/blog/pocket-tts-calm-explained/#temperature-without-a-softmax)).
+
+### Top-k
+
+Keep only the $k$ most likely tokens, set the rest to zero, and renormalise (divide by what is left so they sum to 1). With $k = 2$: keep 0.644 and 0.237, total 0.881, giving $0.644 / 0.881 = $ **0.731** and $0.237 / 0.881 = $ **0.269**. The long tail of strange tokens can never be picked. The weakness: $k$ is fixed. When the model is sure, 2 may already be too many; when it is unsure among 50 good words, 2 is far too few.
+
+### Top-p (nucleus)
+
+Holtzman and colleagues (2020) fixed this with **nucleus sampling**: keep the smallest set of top tokens whose probabilities add up to at least $p$. Sort, then add up: 0.644, then $0.644 + 0.237 = 0.881$, then $0.881 + 0.087 = 0.968$. With $p = 0.9$, two tokens (0.881) are not enough, three (0.968) are, so the nucleus is the top three. Renormalise: $0.644 / 0.968 = $ **0.665**, $0.237 / 0.968 = $ **0.245**, $0.087 / 0.968 = $ **0.090**. The set grows when the model is unsure and shrinks when it is sure. Their paper also showed why we need any of this: always choosing high-probability text produces dull, repetitive language unlike what humans write.
+
+Temperature and top-p are usually combined: first temperature, then cut the tail.
+
+<figure class="blog-figure blog-figure--wide">
+  <SamplingDials alt="Four bars for the logits 2, 1, 0 and minus 1. Sliders for temperature, top-k and top-p reshape the bars live: temperature sharpens or flattens them, top-k and top-p grey out the cut tokens and the survivors grow after renormalising. A cumulative line marks where top-p cuts. A button draws 100 seeded tokens and tallies them." />
+  <figcaption><strong>Figure 7. Three dials on one distribution.</strong> Defaults T = 1, k off, p = 1 show 0.644, 0.237, 0.087, 0.032. Set p = 0.9 to keep exactly three tokens. Top-k at 4 means off.</figcaption>
+</figure>
+
+## Why one token at a time, and the KV cache
+
+Training sees every position at once, but generation cannot: token 6 depends on which token 5 we sampled, so we must sample token 5 first. Writing 500 tokens means 500 trips through the whole network.
+
+Each trip would naively recompute attention for the whole prefix. But the keys and values of earlier tokens never change once computed (the causal mask means later tokens cannot affect them), so we store them: the **key-value (KV) cache**, introduced in [the attention post](/blog/foundations-attention/#the-kv-cache-briefly). Each new token then computes only its own query, key and value and attends over the cache. The price is memory, growing with every token of every request, and managing that memory is most of what serving systems do. My dual-GH200 inference series is about exactly this in practice: [file cache stealing KV space at startup](/blog/grace-hopper-file-cache/), [moving KV to CPU memory without corrupting it](/blog/kv-offload-correctness/), and [high throughput that still left users waiting minutes for the first token](/blog/throughput-versus-usable-latency/). Pocket TTS uses the same trick for voice cloning: the voice prompt's cache is the saved "voice state" ([Pocket TTS post](/blog/pocket-tts-calm-explained/#encoding-the-reference)).
+
+## Bigger models, more data, lower loss
+
+Kaplan and colleagues (2020) found that a language model's test loss falls smoothly and predictably, as a power law, as you increase model size, data and compute, over many orders of magnitude. Hoffmann and colleagues (2022) revisited how to split a fixed compute budget and concluded that model size and training tokens should grow roughly together; their 70-billion-parameter Chinchilla, trained on 1.4 trillion tokens (about **20** tokens per parameter), beat the 280-billion-parameter Gopher trained with the same compute. The loss in those plots is the same next-token cross-entropy we computed by hand on four tokens.
+
+## Speech is next-token prediction too
+
+Nothing in the recipe cares that tokens are text. If you can turn audio into a sequence, you can predict it one step at a time.
+
+- **Discrete codec tokens.** Mimi turns each 80 milliseconds of audio into **8** tokens, each one of **2,048** codebook entries ([Mimi post](/blog/mimi-codec-explained/), [RVQ post](/blog/residual-vector-quantization/)). Moshi predicts them with a softmax, exactly like text, using a big Temporal Transformer that steps across frames and a small Depth Transformer for the 8 tokens inside a frame ([Moshi review](/paper-reviews/moshi/#two-transformers-one-for-time-and-one-for-depth)). It even predicts text tokens alongside its audio, an "inner monologue".
+- **Continuous latents.** Pocket TTS keeps the causal Transformer but removes the vocabulary: each frame is **32** real numbers from a VAE ([post 12](/blog/foundations-autoencoders-vae/)), and since there is no softmax over infinitely many values, a small head generates the next frame from noise ([The continuous alternative](/blog/pocket-tts-calm-explained/#the-continuous-alternative)), using ideas from [post 14](/blog/foundations-diffusion-flow/).
+
+Both are language models in the sense of this post: probability of the next step given the past, one step at a time.
+
+## The whole series in one picture
+
+Here is how the fifteen posts fit into the model we just built.
+
+- **Learning at all.** [Neurons and backprop](/blog/foundations-neurons-backprop/) compute gradients; [loss and gradient descent](/blog/foundations-loss-gradient-descent/) gave us softmax and cross-entropy, the exact loss of a language model; [optimisers](/blog/foundations-optimisers/) (AdamW and schedules) train it.
+- **Learning well.** [Regularisation](/blog/foundations-regularisation/) (weight decay, dropout) keeps it from memorising; [normalisation](/blog/foundations-normalisation/) (layer norm, RMSNorm, pre-norm) keeps deep stacks stable.
+- **Representing tokens.** [Embeddings](/blog/foundations-embeddings/) turn token numbers into vectors and back into logits.
+- **Reading sequences.** [Convolutions](/blog/foundations-convolutions/) read local windows, the way audio codecs do; [recurrent networks](/blog/foundations-recurrent-networks/) and [LSTM and GRU](/blog/foundations-lstm-gru/) carry a memory forward, and showed why long memory is hard.
+- **The modern core.** [Attention](/blog/foundations-attention/) lets every token look back at every earlier one; [the Transformer](/blog/foundations-transformer/) adds residual connections, feed-forward layers and positions.
+- **Generating things that are not tokens.** [Autoencoders and VAEs](/blog/foundations-autoencoders-vae/) compress data into latents; [GANs](/blog/foundations-gans/) and [diffusion and flow](/blog/foundations-diffusion-flow/) generate continuous data, the pieces a speech model like Pocket TTS needs.
+- **Putting it together.** This post: tokens in, next-token probabilities out, cross-entropy to train, sampling to write.
+
+## What to remember
+
+- A language model gives a probability for every possible next token, given the tokens before it.
+- The chain rule turns those guesses into the exact probability of a whole sentence: multiply them.
+- Counting pairs gives a bigram model; it gives zero to anything unseen, which embeddings fix.
+- Perplexity is $e$ to the average surprise: the effective number of choices per token. Four guesses at 0.5, 0.25, 0.5, 0.125 give **3.36**.
+- BPE starts from characters or bytes and repeatedly glues the most frequent neighbouring pair; vocabulary size trades sequence length against table size.
+- A neural language model is embeddings, a causal Transformer, logits and softmax, trained by teacher forcing with cross-entropy at every position.
+- Temperature reshapes the distribution; top-k and top-p cut its tail.
+- Generation is one token at a time, made affordable by the KV cache.
+- Speech models use the same loop over codec tokens or continuous latents.
+
+## Try it yourself
+
+- Figure 1: set the three probabilities to 0.2, 0.2 and 0.5. The product must read **0.02**.
+- Figure 2: step through the whole corpus. Row "the" must read cat 2, dog 1, so P(cat given the) = **0.667**. Score "the dog ran": **0**.
+- Figure 3: set all four sliders to 0.25. Average surprise **1.386** nats, perplexity **4.00**. Set all to 0.9: perplexity **1.11**.
+- Figure 4: run four merges. The counter must read 95, 86, 77, 68, **61**, and "lowest" must tokenize as lo, w, est_.
+- Figure 6: at position 2, the gradient on the "cat" logit must read **−0.75**; the final average **1.213**.
+- Figure 7: set T = 0.5: top bar **0.865**. Set T = 2: **0.455**. Back to T = 1 with k = 2: **0.731** and **0.269**. With k off and p = 0.9: **0.665**, **0.245**, **0.090**.
+
+## Sources
+
+- Shannon, C. E. (1948). A Mathematical Theory of Communication. *Bell System Technical Journal*, 27.
+- Shannon, C. E. (1951). Prediction and Entropy of Printed English. *Bell System Technical Journal*, 30.
+- Bengio, Y., Ducharme, R., Vincent, P. and Jauvin, C. (2003). A Neural Probabilistic Language Model. *Journal of Machine Learning Research*, 3.
+- Gage, P. (1994). A New Algorithm for Data Compression. *C Users Journal*, 12(2).
+- Sennrich, R., Haddow, B. and Birch, A. (2016). Neural Machine Translation of Rare Words with Subword Units. ACL. arXiv:1508.07909.
+- Vaswani, A. et al. (2017). Attention Is All You Need. NeurIPS. arXiv:1706.03762.
+- Radford, A., Wu, J., Child, R., Luan, D., Amodei, D. and Sutskever, I. (2019). Language Models are Unsupervised Multitask Learners. OpenAI technical report.
+- Holtzman, A., Buys, J., Du, L., Forbes, M. and Choi, Y. (2020). The Curious Case of Neural Text Degeneration. ICLR. arXiv:1904.09751.
+- Kaplan, J. et al. (2020). Scaling Laws for Neural Language Models. arXiv:2001.08361.
+- Hoffmann, J. et al. (2022). Training Compute-Optimal Large Language Models. arXiv:2203.15556.
+- Défossez, A. et al. (2024). Moshi: a speech-text foundation model for real-time dialogue. arXiv:2410.00037.
+

@@ -1,0 +1,76 @@
+---
+// Foundations, embeddings post: one gradient step on an embedding table.
+// Score s = e · (1, 2), loss ½(s − y)², y = 1, η = 0.1. Cat's row
+// (0.2, 0.1) → (0.26, 0.22); loss 0.18 → 0.045; every other row gets a
+// gradient of exactly zero. η = 0.5 gives (0.5, 0.7) and s = 1.9.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-rowgrad>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 230" role="img" aria-labelledby="rg-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="rg-title">An embedding table where only the looked-up row receives a gradient and moves</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Word looked up</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-w="0" aria-pressed="true">cat</button>
+      <button type="button" class="fig-chip" data-w="1" aria-pressed="false">dog</button>
+      <button type="button" class="fig-chip" data-w="2" aria-pressed="false">car</button>
+      <button type="button" class="fig-chip" data-w="3" aria-pressed="false">bus</button>
+    </div></div>
+    <label><span class="fig-panel__name">Learning rate η <strong data-v="eta"></strong></span><input class="scrub" data-k="eta" type="range" min="0.01" max="1" step="0.01" value="0.1" /></label>
+    <label><span class="fig-panel__name">Target y <strong data-v="y"></strong></span><input class="scrub" data-k="y" type="range" min="-2" max="2" step="0.1" value="1" /></label>
+    <div><span class="fig-panel__name">Keep training</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-keep>Apply this update and go again</button>
+      <button type="button" class="fig-chip" data-home>Reset table</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt, par } from "../../lib/tiny-net";
+  import { INK, MUTED, JADE, GOLD, TINT, NEG } from "../../lib/net-diagram";
+  import { txt } from "../../lib/plot";
+  const W = ["cat", "dog", "car", "bus"], U = [1, 2], T0 = [[0.2, 0.1], [0.5, -0.3], [-0.4, 0.6], [0.1, -0.2]];
+  const vf = (v: number[]) => `(${v.map((x) => fmt(x, 4)).join(", ")})`;
+  document.querySelectorAll<HTMLElement>("[data-rowgrad]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const p: Record<string, number> = { eta: 0.1, y: 1 };
+    let T = T0.map((r) => [...r]), w = 0, round = 1;
+    const calc = () => { const e = T[w], s = e[0] * U[0] + e[1] * U[1], err = s - p.y, g = U.map((u) => err * u), ne = e.map((x, i) => x - p.eta * g[i]), ns = ne[0] * U[0] + ne[1] * U[1]; return { e, s, err, L: 0.5 * err * err, g, ne, ns, nL: 0.5 * (ns - p.y) ** 2 }; };
+    const steps = () => {
+      const c = calc();
+      return [
+        { say: `Look up ${W[w]}: read its row of the table.`, math: `e = ${vf(c.e)}` },
+        { say: "Score it: the dot product with the fixed vector u = (1, 2).", math: `s = ${par(c.e[0], 4)} × 1 + ${par(c.e[1], 4)} × 2 = ${fmt(c.s, 4)}` },
+        { say: "Loss: half the squared error against the target.", math: `L = ½ × (${fmt(c.s, 4)} − ${par(p.y)})² = ${fmt(c.L, 4)}` },
+        { say: "The slope of the loss with respect to the score is just the error.", math: `dL/ds = ${fmt(c.s, 4)} − ${par(p.y)} = ${fmt(c.err, 4)}` },
+        { say: `Chain rule: each number of ${W[w]}'s row was multiplied by the matching number of u, so its slope is u times the error. Every other row was never used: its gradient is exactly zero.`, math: `gradient for ${W[w]} = ${par(c.err, 4)} × (1, 2) = ${vf(c.g)};  other rows: (0, 0)` },
+        { say: "Step the row against its gradient. Nothing else in the table moves.", math: `${vf(c.e)} − ${fmt(p.eta)} × ${vf(c.g)} = ${vf(c.ne)}` },
+        { say: "Check: the new score is closer to the target.", math: `s = ${fmt(c.ne[0], 4)} × 1 + ${par(c.ne[1], 4)} × 2 = ${fmt(c.ns, 4)},  L = ${fmt(c.L, 4)} → ${fmt(c.nL, 4)}` },
+      ];
+    };
+    function draw(k: number) {
+      const c = calc();
+      let s = txt(30, 22, `Embedding table${round > 1 ? ` (update ${round})` : ""}`, `font-size="12" font-weight="700" fill="${INK}"`) + txt(200, 22, "gradient", `font-size="11" font-weight="700" fill="${MUTED}"`) + txt(330, 22, "after the step", `font-size="11" font-weight="700" fill="${MUTED}"`);
+      W.forEach((name, r) => {
+        const y = 52 + r * 32, on = r === w;
+        if (on && k >= 0) s += `<rect x="24" y="${y - 19}" width="430" height="28" rx="5" fill="${TINT}"/>`;
+        s += txt(30, y, name, `font-size="12.5" font-weight="${on ? 700 : 400}" fill="${INK}"`) + txt(80, y, vf(T[r]), `font-size="12.5" fill="${INK}"`);
+        if (k >= 4) s += txt(200, y, on ? vf(c.g) : "(0, 0)", `font-size="12.5" font-weight="${on ? 700 : 400}" fill="${on ? GOLD : "#B9C0BF"}"`);
+        if (k >= 5) s += txt(330, y, on ? vf(c.ne) : vf(T[r]), `font-size="12.5" font-weight="${on ? 700 : 400}" fill="${on ? JADE : "#B9C0BF"}"`);
+      });
+      const rows: [string, string, number][] = [["score s", fmt(c.s, 4), 1], ["loss", fmt(c.L, 4), 2], ["error s − y", fmt(c.err, 4), 3], ["new score", fmt(c.ns, 4), 6], ["new loss", fmt(c.nL, 4), 6]];
+      rows.forEach(([n, v, at], i) => (s += txt(500, 52 + i * 30, n, `font-size="12" fill="${MUTED}"`) + txt(640, 52 + i * 30, k >= at ? v : "…", `font-size="13" font-weight="700" fill="${i >= 3 && c.nL < c.L ? JADE : i >= 3 ? NEG : INK}"`)));
+      s += txt(30, 204, "u = (1, 2) is fixed; target y and learning rate η are on the sliders.", `font-size="11" fill="${MUTED}"`);
+      $("[data-draw]").innerHTML = s;
+      root.querySelectorAll<HTMLElement>("[data-v]").forEach((el) => (el.textContent = fmt(p[el.dataset.v!], 2)));
+    }
+    const redraw = stepper(root, steps, draw, { delay: 1.6 });
+    root.querySelectorAll<HTMLInputElement>("[data-k]").forEach((inp) => inp.addEventListener("input", () => { p[inp.dataset.k!] = +inp.value; redraw(); }));
+    root.querySelectorAll<HTMLButtonElement>("[data-w]").forEach((b) => b.addEventListener("click", () => { w = +b.dataset.w!; root.querySelectorAll("[data-w]").forEach((o) => o.setAttribute("aria-pressed", String(o === b))); redraw(); }));
+    $("[data-keep]").addEventListener("click", () => { T[w] = calc().ne; round++; redraw(); });
+    $("[data-home]").addEventListener("click", () => { T = T0.map((r) => [...r]); round = 1; redraw(); });
+  });
+</script>

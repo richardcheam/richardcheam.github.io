@@ -1,0 +1,392 @@
+---
+title: "Overfitting and regularisation: dropout, weight decay and early stopping"
+title_key: ["Overfitting", "regularisation"]
+date: 2026-10-15
+category: "deep-learning"
+read_time: "30 min"
+series_order: 4
+series: foundations
+featured: false
+excerpt: "A network can learn its training data perfectly and still be useless on anything new. This post shows that failure on eight noisy points, then works through the standard cures, weight decay, early stopping and dropout, with every number small enough to check by hand."
+question: "Why does a model that gets its training data exactly right often do worse on new data, and what do we do about it?"
+my_work: "A concept note. I built the eight-point polynomial toy, worked every regularisation example by hand and checked all the numbers with a short script."
+result: "On eight noisy points from a sine curve, a degree 7 polynomial drives training error to 0 while its validation error (0.090) is worse than a degree 3 curve's (0.058). A small weight-decay penalty brings the degree 7 fit's validation error down to 0.041, and stopping gradient descent at the best validation epoch reaches 0.040."
+evidence_limit: "This explains textbook methods on one toy dataset with 8 training and 7 validation points. No experiments on real networks; all numbers come from a short script anyone can rerun."
+lesson: "Training error measures memory; validation error measures understanding. Every regulariser trades a little training error for a lot less sensitivity to noise."
+---
+
+import DataSplitter from "../../components/figures/DataSplitter.astro";
+import PolynomialFitter from "../../components/figures/PolynomialFitter.astro";
+import WeightDecayShrink from "../../components/figures/WeightDecayShrink.astro";
+import PenaltyLandscape from "../../components/figures/PenaltyLandscape.astro";
+import RidgeSlider from "../../components/figures/RidgeSlider.astro";
+import EarlyStoppingCurves from "../../components/figures/EarlyStoppingCurves.astro";
+import DropoutStepper from "../../components/figures/DropoutStepper.astro";
+import LabelSmoothingBars from "../../components/figures/LabelSmoothingBars.astro";
+
+In [the first Foundations post](/blog/foundations-neurons-backprop/) we built a tiny network and trained it on one example. In [the second](/blog/foundations-loss-gradient-descent/) we gave it a loss and walked downhill, and in [the third](/blog/foundations-optimisers/) we learned to walk downhill faster. All three posts quietly assumed something: that a smaller training loss is always better.
+
+It is not. A student who memorises last year's exam answers can score 100% on last year's exam and fail this year's. A network can do the same. This post is about telling memory apart from understanding, and about the handful of tricks, together called **regularisation**, that push a network towards understanding.
+
+
+## Why we hold data back
+
+In one sentence: we hide some data from the network during training so we can later check whether it learned the pattern or just the examples.
+
+We split our labelled data into three piles:
+
+- The **training set** is what the network learns from. Gradient descent sees these examples and changes the weights to fit them.
+- The **validation set** (sometimes called the development or "dev" set) is never used to change weights. We use it to make choices *about* training: how big a model, how long to train, how strong a penalty.
+- The **test set** is locked away until the very end. We look at it once, to report how well the finished model does on truly new data.
+
+Everyday picture: the training set is the homework, the validation set is the practice exam you take to decide how to study, and the test set is the real exam. If you peek at the real exam while studying, your score stops meaning anything.
+
+Why three piles and not two? Because every time we use the validation set to make a choice, we leak a little information about it into the model. After choosing among twenty settings by validation score, the best of the twenty looks slightly better on validation than it really is. The test set, untouched, gives the honest number. A common split is roughly **80% / 10% / 10%**, but with very large datasets the validation and test piles can be a much smaller fraction.
+
+One more rule: the split must be random (or, for speech and similar data, split by speaker or recording, so the same voice does not appear on both sides). If the validation set looks different from real use, its score answers the wrong question.
+
+<figure class="blog-figure">
+  <DataSplitter alt="Twenty labelled dots in a row. Pressing Shuffle and split colours them into training (14), validation (3) and test (3) piles; a lock icon sits on the test pile." />
+  <figcaption><strong>Figure 1. Three piles.</strong> Training data changes the weights, validation data guides our choices, test data is opened once at the end.</figcaption>
+</figure>
+
+
+## Our toy: eight noisy points
+
+To see overfitting happen we need a problem small enough to look at whole. Take the curve $y = \sin(2\pi x)$ for $x$ between 0 and 1: one smooth wave, up then down. We pretend we do not know this curve. We only get **8 training points**, evenly spaced at $x = 0, \tfrac17, \tfrac27, \ldots, 1$, and each $y$ has a little random noise added, the way real measurements always do.
+
+| $x$ | 0 | 0.143 | 0.286 | 0.429 | 0.571 | 0.714 | 0.857 | 1 |
+|---|---|---|---|---|---|---|---|---|
+| $y$ (train) | −0.13 | 0.75 | 1.30 | 0.56 | −0.76 | −0.97 | −0.90 | 0.03 |
+
+We also get **7 validation points** halfway between, at $x = \tfrac{1}{14}, \tfrac{3}{14}, \ldots, \tfrac{13}{14}$, with their own noise:
+
+| $x$ | 0.071 | 0.214 | 0.357 | 0.5 | 0.643 | 0.786 | 0.929 |
+|---|---|---|---|---|---|---|---|
+| $y$ (validation) | 0.11 | 1.02 | 0.83 | 0.32 | −0.72 | −0.87 | −0.73 |
+
+Our "model" is a polynomial: a sum of powers of $x$, each with its own weight.
+
+$$
+f(x) = w_0 + w_1 x + w_2 x^2 + \cdots + w_d x^d
+$$
+
+- $x$ is the input; $f(x)$ is the prediction.
+- $w_0, w_1, \ldots, w_d$ are the weights, exactly like a network's weights: numbers we learn.
+- $d$ is the **degree**, the highest power used. It sets how bendy the curve can be: degree 1 is a straight line, degree 3 can bend twice, degree 7 can bend six times.
+
+A polynomial is not a neural network, but it misbehaves in exactly the same way, and with only $d + 1$ weights we can see every one of them. We score each fit with mean squared error (MSE, from [post 2](/blog/foundations-loss-gradient-descent/)): the average of (prediction minus target) squared.
+
+
+## Overfitting and underfitting
+
+Fit each degree to the 8 training points (by finding the weights with the lowest training MSE), then measure MSE on both sets:
+
+| Degree $d$ | Weights | Training MSE | Validation MSE |
+|---|---|---|---|
+| 1 (a line) | 2 | **0.441** | **0.246** |
+| 3 (a cubic) | 4 | **0.036** | **0.058** |
+| 7 | 8 | **0.000** | **0.090** |
+
+Read the table row by row.
+
+- **Degree 1** cannot bend, so it cannot follow a wave. It is bad on both sets. This is **underfitting**: the model is too simple to capture the pattern.
+- **Degree 3** can bend twice, enough for one up-and-down wave. Both errors are small, and close to each other.
+- **Degree 7** has 8 weights for 8 points, so it can pass *exactly* through every training point: training error **0**. But to do that it must also chase the noise, and between the points it swings wildly. Its validation error is worse than the cubic's. This is **overfitting**: the model fits the training data, including its accidents, better than it fits the truth.
+
+Look at the weights the degree 7 fit needs: $w_3 \approx 1166$, $w_4 \approx -4077$, $w_5 \approx 6863$, $w_6 \approx -5479$. Huge numbers of opposite signs, cancelling each other almost perfectly at the training points. The cubic's largest weight is about $-38$. Keep this in mind: **overfit models tend to have huge weights**. That observation is the whole idea behind [weight decay](#weight-decay-shrink-every-weight-a-little).
+
+What would change? With more training points (say 100 instead of 8), the degree 7 curve could no longer pass through all of them, so it would be forced to follow the average trend and its validation error would drop towards the cubic's. More data is the best regulariser of all; the rest of this post is about what to do when you cannot get more.
+
+<figure class="blog-figure blog-figure--wide">
+  <PolynomialFitter alt="The eight training points as filled dots and seven validation points as hollow dots, the true sine curve faint, and the fitted polynomial bold. A degree slider from 0 to 7 redraws the fit. A small chart beside it plots training and validation error against degree." />
+  <figcaption><strong>Figure 2. Bendier is not always better.</strong> Slide the degree from 0 to 7. Training error only ever falls, reaching 0 at degree 7. Validation error is lowest at degree 3 (0.058) and rises again to 0.090.</figcaption>
+</figure>
+
+
+## Bias and variance in plain words
+
+There are two different ways to be wrong, and the table shows both.
+
+- **Bias** is being wrong *on purpose*, in the same way every time, because the model is too stiff. A straight line will miss a wave no matter which 8 points you give it. Everyday picture: a dart player whose throws all land tightly together, but in the wrong place.
+- **Variance** is being wrong *by accident*, differently every time, because the model is so flexible it copies whatever noise it happened to see. Give the degree 7 polynomial a fresh set of 8 noisy points and you would get a completely different wild curve. Everyday picture: a dart player whose throws are centred on the bullseye on average but scattered all over the board.
+
+Simple models have high bias and low variance; flexible models have low bias and high variance. Underfitting is a bias problem; overfitting is a variance problem. Every method in the rest of this post reduces variance and accepts a little extra bias in exchange.
+
+(Very large modern networks complicate this picture: past a certain size, validation error can fall again, a pattern called "double descent". The plain trade-off above is still the right first intuition, and regularisation is still used in those large models.)
+
+
+## Model capacity
+
+**Capacity** means how many different shapes a model can take. A degree 7 polynomial has more capacity than a cubic; a network with more neurons, layers or weights has more capacity than a smaller one.
+
+Two ways to control it:
+
+1. **Change the model**: fewer weights, fewer layers, lower degree. Blunt, and you have to retrain for each choice.
+2. **Keep the big model but restrict how it uses its capacity.** This is regularisation. The degree 7 polynomial can still make a wave, but we discourage it from making wild swings.
+
+Modern practice nearly always chooses the second: build a model with plenty of capacity, then regularise it. The next three sections are the three most common ways.
+
+
+## Weight decay: shrink every weight a little
+
+In one sentence: add a cost for large weights to the loss, so the network only keeps a weight large if it really pays for itself.
+
+$$
+L_{\text{total}}(\mathbf{w}) = L_{\text{data}}(\mathbf{w}) + \frac{\lambda}{2} \sum_{j} w_j^2
+$$
+
+- $L_{\text{data}}$ is the ordinary loss from [post 2](/blog/foundations-loss-gradient-descent/), for example MSE on the training set.
+- $\sum_j w_j^2$ adds up the square of every weight. It is called the **L2 penalty**, because it is the squared L2 length (ordinary straight-line length) of the weight vector.
+- $\lambda$ (the Greek letter lambda) is the **regularisation strength**: how much we care about small weights compared with fitting the data. $\lambda = 0$ switches the penalty off.
+- The $\tfrac12$ is only there so the slope comes out tidy.
+
+By convention we usually leave biases out of the penalty; a bias only shifts the output and does not make the curve wilder.
+
+Everyday picture: a rubber band ties every weight to zero. The data pulls weights away from zero to fit the examples; the band pulls them back. A weight ends up large only if the data pulls hard enough to stretch the band. Noise pulls weakly and inconsistently, so it loses.
+
+### Its gradient
+
+The slope of $\tfrac{\lambda}{2} w^2$ with respect to $w$ is $\lambda w$. So the gradient of the total loss is the data gradient plus $\lambda w$, and one gradient descent step (learning rate $\eta$, as in post 2) becomes:
+
+$$
+w \leftarrow w - \eta \left( \frac{\partial L_{\text{data}}}{\partial w} + \lambda w \right)
+$$
+
+Multiply out the bracket and collect the $w$ terms:
+
+$$
+w \leftarrow (1 - \eta\lambda)\, w - \eta \, \frac{\partial L_{\text{data}}}{\partial w}
+$$
+
+- $(1 - \eta\lambda)$ is a number just below 1. Multiplying by it **shrinks the weight by a fixed fraction every step**, whatever the data says.
+- $-\eta \, \partial L_{\text{data}} / \partial w$ is the ordinary gradient step, unchanged.
+
+This is why the method is called **weight decay**: each step, every weight decays a little towards zero, then the data pushes it back where it is needed.
+
+### Worked by hand
+
+Take one weight $w = 2$, data gradient $0.5$, learning rate $\eta = 0.1$ and strength $\lambda = 0.1$.
+
+1. Shrink factor: $1 - \eta\lambda = 1 - 0.1 \times 0.1 = 0.99$.
+2. Shrink part: $0.99 \times 2 = 1.98$. The weight lost **0.02** just for being large.
+3. Gradient part: $\eta \times 0.5 = 0.1 \times 0.5 = 0.05$.
+4. New weight: $1.98 - 0.05 = $ **1.93**.
+
+Without weight decay the step would give $2 - 0.05 = 1.95$. The difference, $0.02$, is exactly $\eta \lambda w = 0.1 \times 0.1 \times 2$. Notice it is proportional to $w$: a weight of 20 would lose 0.2, a weight of 0.2 only 0.002. Big weights are pulled hardest.
+
+What would change? If the data gradient were 0 (the weight is useless for the data), only the shrink would act: after 10 steps $w = 2 \times 0.99^{10} \approx$ **1.809**, after 100 steps $\approx$ **0.732**, heading steadily to zero. A useless weight fades away. If $\lambda$ were 10 times larger (1.0), the shrink factor would be 0.9 and the weight would lose 0.2 per step instead of 0.02.
+
+A note for the optimiser fans: with plain gradient descent, "add $\lambda w$ to the gradient" and "multiply the weight by $1 - \eta\lambda$" are the same thing. With Adam (from [post 3](/blog/foundations-optimisers/)) they are not, because Adam rescales the gradient. Loshchilov and Hutter (2019) showed the shrink form works better with Adam and called it **AdamW**; it is the default for training transformers today.
+
+The idea has two histories. In statistics and inverse problems it is **Tikhonov regularisation** (Tikhonov, 1963) and, for linear regression, **ridge regression** (Hoerl and Kennard, 1970). For neural networks, Krogh and Hertz (1992) analysed why "a simple weight decay can improve generalization".
+
+<figure class="blog-figure">
+  <WeightDecayShrink alt="A number line from minus 3 to 3 with a weight marker at 2. Step 1 draws a short arrow towards zero labelled shrink, step 2 a second arrow labelled gradient, step 3 moves the marker to the sum. A ghost marker shows where plain gradient descent would land." />
+  <figcaption><strong>Figure 3. One weight-decay step, split in two.</strong> Defaults w = 2, gradient 0.5, η = 0.1, λ = 0.1: shrink to 1.98, step to 1.93, against 1.95 without decay.</figcaption>
+</figure>
+
+
+## Weight decay on our polynomial
+
+Now apply the L2 penalty to the degree 7 polynomial. (Here we can solve for the best weights directly instead of stepping, but the result is the same place gradient descent with weight decay would settle.) With $L_{\text{data}}$ the training MSE:
+
+| $\lambda$ | Training MSE | Validation MSE |
+|---|---|---|
+| 0 (no penalty) | **0.000** | **0.090** |
+| 0.00001 | **0.023** | **0.065** |
+| 0.0001 | **0.039** | **0.044** |
+| 0.0002 | **0.057** | **0.041** |
+| 0.001 | **0.112** | **0.058** |
+| 0.01 | **0.226** | **0.134** |
+| 1 | **0.513** | **0.374** |
+
+The same U shape as the degree table, but now controlled by one smooth dial instead of by deleting weights. A tiny $\lambda$ already tames the wild swings; around $\lambda = 0.0002$ the degree 7 polynomial beats the plain cubic on validation (**0.041** against 0.058). Too much $\lambda$ crushes every weight towards zero and the curve flattens into an underfit line near the average of the data.
+
+Notice that training error only ever *rises* as $\lambda$ grows. That is the trade in one column: we give up training accuracy on purpose.
+
+<figure class="blog-figure blog-figure--wide">
+  <RidgeSlider alt="The same eight training and seven validation points with the degree 7 fit drawn bold. A slider for lambda on a log scale from 0 to 1 smooths the curve from wild swings to a flat line, with live training and validation error and a bar chart of the eight weights shrinking." />
+  <figcaption><strong>Figure 4. One dial from overfit to underfit.</strong> At λ = 0 the curve threads every training point (validation 0.090). Near λ = 0.0002 it is a smooth wave (validation 0.041). At λ = 1 it is almost flat (validation 0.374).</figcaption>
+</figure>
+
+
+## L1: pushing weights to exactly zero
+
+In one sentence: penalise the absolute size of each weight instead of its square, and many weights end up exactly zero.
+
+$$
+L_{\text{total}}(\mathbf{w}) = L_{\text{data}}(\mathbf{w}) + \lambda \sum_j |w_j|
+$$
+
+- $|w_j|$ is the size of the weight ignoring its sign.
+- Everything else is as before.
+
+Why exact zeros? Compare the slopes of the two penalties. The L2 penalty $\tfrac{\lambda}{2} w^2$ has slope $\lambda w$, which **fades as $w$ gets small**: near zero the pull is almost nothing, so a weight drifts towards zero but never quite arrives. The L1 penalty $\lambda |w|$ has slope $\pm\lambda$, a **constant pull** however small the weight is. A weight whose data gradient is weaker than $\lambda$ is dragged all the way to zero and kept there.
+
+Everyday picture: L2 is a tax that is a percentage of your wealth, so small fortunes pay tiny amounts and never quite reach zero. L1 is a flat fee per day: if your income does not cover it, you go to zero.
+
+Worked by hand. Suppose two weights each want to sit at a target, $c_1 = 1$ and $c_2 = 0.3$, with data loss $(w_1 - 1)^2 + (w_2 - 0.3)^2$. Use $\lambda = 0.8$.
+
+- **With L2** (penalty $\tfrac{\lambda}{2}(w_1^2 + w_2^2)$ with $\lambda = 0.8$): setting each slope to zero, $2(w - c) + 0.8w = 0$, gives $w = c / 1.4$. So $w_1 = 1/1.4 \approx$ **0.714** and $w_2 = 0.3/1.4 \approx$ **0.214**. Both shrink by the same fraction; neither is zero.
+- **With L1** (penalty $0.8(|w_1| + |w_2|)$): for a positive weight, $2(w - c) + 0.8 = 0$ gives $w = c - 0.4$. So $w_1 = 1 - 0.4 = $ **0.6**. For $w_2$ that formula gives $0.3 - 0.4 = -0.1$, which is negative, contradicting "positive"; the best value is exactly $w_2 = $ **0**. The small weight is switched off entirely.
+
+What would change? With $\lambda = 0.5$, L1 subtracts 0.25: $w_1 = 0.75$, $w_2 = 0.05$, both survive. The rule is: a weight survives only if its target is bigger than $\lambda / 2$.
+
+L1 on linear regression is called the **lasso** (Tibshirani, 1996). In deep learning L1 is used less than L2, mostly when we *want* sparse weights, for example to prune a network. Strictly, plain gradient descent on $|w|$ makes a weight hop back and forth across zero, since the slope jumps from $-\lambda$ to $+\lambda$; practical L1 solvers clip a weight to zero when a step would carry it across.
+
+<figure class="blog-figure blog-figure--wide">
+  <PenaltyLandscape alt="Two side-by-side contour maps over w1 and w2. Ellipses of the data loss are centred at (1, 0.3). On the left the L2 penalty is a circle, on the right the L1 penalty is a diamond. A lambda slider grows the penalty and a dot marks the combined minimum; on the diamond it lands on the axis w2 equals 0." />
+  <figcaption><strong>Figure 5. Circle against diamond.</strong> Defaults λ = 0.8: L2 lands at (0.714, 0.214), L1 at (0.6, 0). The diamond's corners sit on the axes, so the best point often has a coordinate of exactly zero.</figcaption>
+</figure>
+
+
+## Early stopping
+
+In one sentence: train with gradient descent, watch the validation error, and keep the weights from the moment it was lowest.
+
+Gradient descent does not jump straight to the overfit answer. It starts from small weights (we start the polynomial at all zeros) and the big, easy pattern, the wave, is learned first because it reduces the loss fastest. Fitting the noise needs the huge, carefully cancelling weights we saw earlier, and those take a long time to build. So partway through training there is a moment when the model has learned the pattern but not yet the noise.
+
+Here is the degree 7 polynomial trained by plain gradient descent on training MSE, learning rate $\eta = 0.5$, weights starting at 0:
+
+| Epoch (full pass) | Training MSE | Validation MSE |
+|---|---|---|
+| 1 | 0.564 | 0.396 |
+| 100 | 0.256 | 0.161 |
+| 1,000 | 0.121 | 0.059 |
+| **7,506 (best)** | **0.055** | **0.040** |
+| 30,000 | 0.024 | 0.063 |
+| 200,000 | 0.022 | 0.071 |
+
+Training error keeps falling all the way. Validation error falls, bottoms out at **0.040** around epoch **7,506**, then climbs. Early stopping keeps the epoch 7,506 weights.
+
+In practice we do not know the bottom in advance, so we use **patience**: evaluate on the validation set every so often, save the weights whenever validation error is the best so far, and stop if it has not improved for, say, 10 evaluations. Then reload the saved best weights. Prechelt (1998) compared several such stopping rules in detail.
+
+Everyday picture: baking bread. It gets better in the oven up to a point, then burns. You do not set a timer for "as long as possible"; you watch it and take it out at its best.
+
+Early stopping and weight decay are close cousins: both keep weights from growing large. Stopping early simply does not give them the time to grow.
+
+<figure class="blog-figure blog-figure--wide">
+  <EarlyStoppingCurves alt="A chart of training and validation error against epoch on a log axis. The training runs live when the figure comes into view; an inset shows the polynomial fit now and at the best epoch. A gold marker settles at the lowest validation error, and a patience slider shows where a patience rule would stop." />
+  <figcaption><strong>Figure 6. Take it out before it burns.</strong> Training error keeps falling. Validation error bottoms out at 0.040 near epoch 7,506 and then rises to 0.071 by epoch 200,000. The gold marker is the early-stopping point.</figcaption>
+</figure>
+
+
+## Dropout
+
+In one sentence: during training, switch off a random half (or some other fraction) of the neurons on every step, so no neuron can rely on any particular other neuron being there.
+
+Take a hidden layer with outputs $\mathbf{h}$ (like $h_1, h_2$ in [post 1](/blog/foundations-neurons-backprop/)). On each training step, dropout draws a fresh random **mask** $\mathbf{m}$ of 0s and 1s, one per neuron, and computes:
+
+$$
+\tilde{h}_i = \frac{m_i \, h_i}{1 - p}, \qquad m_i = \begin{cases} 0 & \text{with probability } p \\ 1 & \text{with probability } 1 - p \end{cases}
+$$
+
+- $h_i$ is neuron $i$'s ordinary output.
+- $m_i$ is a coin flip: 0 means "this neuron is off this step", 1 means "on".
+- $p$ is the **dropout rate**, the chance a neuron is dropped; $1 - p$ is the chance it is kept. $p = 0.5$ was the classic choice for hidden layers; $0.1$ is common in transformers.
+- Dividing by $1 - p$ scales the survivors **up**, to make up for the missing ones. This version is called **inverted dropout**.
+
+### Worked by hand
+
+A hidden layer of **4** neurons outputs $\mathbf{h} = [2, 1, 3, 0.5]$. The next layer computes one output with weights $\mathbf{v} = [0.5, 1, -0.5, 2]$. Dropout rate $p = 0.5$.
+
+**Without dropout**: $0.5 \times 2 + 1 \times 1 + (-0.5) \times 3 + 2 \times 0.5 = 1 + 1 - 1.5 + 1 = $ **1.5**.
+
+**One training step with dropout.** The coin flips give the mask $\mathbf{m} = [1, 0, 1, 0]$.
+
+1. Zero the dropped neurons: $[2, 0, 3, 0]$.
+2. Scale survivors by $1/(1 - 0.5) = 2$: $\tilde{\mathbf{h}} = [4, 0, 6, 0]$.
+3. Output: $0.5 \times 4 + 1 \times 0 + (-0.5) \times 6 + 2 \times 0 = 2 - 3 = $ **−1**.
+
+That is very different from 1.5. On a single step dropout is noisy on purpose. But *on average* it is right. There are $2^4 = 16$ possible masks, all equally likely when $p = 0.5$; averaging the output over all 16 gives exactly **1.5**, the no-dropout answer. Here is why: each neuron is kept half the time and doubled when kept, so on average it contributes $\tfrac12 \times 2 h_i = h_i$, its normal amount.
+
+What would change without the scaling? Each neuron would contribute $\tfrac12 h_i$ on average, and the average output would be **0.75**, half the true value. At test time, with every neuron on, the next layer would suddenly receive twice what it was trained on. The $1/(1-p)$ factor exists to stop exactly that mismatch.
+
+### Switching it off at test time
+
+At test time we want a single, stable answer, so dropout is **switched off**: every $m_i = 1$ and no scaling. Because of inverted dropout, the layer already expects outputs of this average size, so nothing else needs to change. The output is **1.5**. (The original papers instead left training unscaled and multiplied the weights by $1 - p$ at test time; the result is the same, inverted dropout just moves the work into training.) In code this is the difference between a model's training mode and evaluation mode; forgetting to switch is a classic bug that makes predictions random.
+
+### Why it works
+
+Two views, both from the original papers.
+
+- **No neuron can lean on another.** If neuron 3 could always count on neuron 1 to fix its mistakes, the two would learn a fragile partnership that fits the training data's quirks. With dropout, any partner might vanish on any step, so each neuron must learn something useful on its own. Hinton and colleagues called these fragile partnerships "co-adaptations" (Hinton et al., 2012).
+- **A huge ensemble for free.** Each mask picks out a smaller "thinned" network. With $n$ neurons there are $2^n$ thinned networks, all sharing weights, and each training step trains one of them. Averaging many models' predictions (an **ensemble**) is a well-known way to cut variance; switching dropout off and using the scaled full network at test time is a cheap approximation to averaging all $2^n$ of them (Srivastava et al., 2014).
+
+Everyday picture: a football team that practises with random players sitting out each drill. Nobody can rely on the star striker always being there, so everyone learns to play every role a bit, and the full team on match day is stronger for it.
+
+<figure class="blog-figure blog-figure--wide">
+  <DropoutStepper alt="Four hidden neurons with values 2, 1, 3 and 0.5 feeding one output through weights 0.5, 1, minus 0.5 and 2. Steps draw a mask, grey out dropped neurons, double the survivors, compute the output and keep a running average over four draws, then average all 16 masks and switch to test mode with all neurons on." />
+  <figcaption><strong>Figure 7. Dropout one operation at a time.</strong> Mask [1, 0, 1, 0] gives [4, 0, 6, 0] and output −1. The average over all 16 masks is 1.5, the same as test mode with every neuron on. Without the ×2 scaling the average would be 0.75.</figcaption>
+</figure>
+
+
+## Data augmentation
+
+In one sentence: make more training data by changing the examples you have in ways that should not change the answer.
+
+A photo of a cat flipped left to right is still a cat. Cropped a little, brightened a little, still a cat. Each change gives the network a "new" example for free, and teaches it which differences do not matter. For sound, you can add quiet background noise, change the volume, or shift the pitch slightly; for speech recognition, a popular trick called SpecAugment (Park et al., 2019) blanks out random strips of time and frequency in the spectrogram (the picture of sound from [the audio basics post](/blog/audio-basics/)), which is dropout applied to the input.
+
+The one rule: the change must not change the label. Flipping a "6" upside down makes a "9"; speeding up speech too much changes who seems to be speaking.
+
+
+## Label smoothing
+
+In one sentence: instead of telling the network the right answer is 100% certain, tell it the right answer is, say, 93% certain and spread the rest over the other classes.
+
+With cross-entropy (from [post 2](/blog/foundations-loss-gradient-descent/)), a one-hot target like $[1, 0, 0]$ can only be matched by probabilities of exactly 1 and 0, which need infinitely large logits. The network keeps pushing its logits further apart forever, becoming overconfident. **Label smoothing** (Szegedy et al., 2016) replaces the target with
+
+$$
+y_k^{\text{smooth}} = (1 - \varepsilon)\, y_k + \frac{\varepsilon}{K}
+$$
+
+- $y_k$ is the original one-hot target for class $k$ (1 for the right class, 0 for the others).
+- $K$ is the number of classes.
+- $\varepsilon$ (epsilon) is the smoothing amount, typically **0.1**.
+
+Worked by hand with post 2's cat, dog, bird example ($K = 3$, true class cat, $\varepsilon = 0.1$): cat gets $0.9 \times 1 + 0.1/3 = $ **0.933**, dog and bird each get $0 + 0.1/3 = $ **0.033**. With the logits $(2, 1, 0)$ the network's probabilities are $(0.665, 0.245, 0.090)$, so the gradient $p - y$ becomes $(0.665 - 0.933,\ 0.245 - 0.033,\ 0.090 - 0.033) = $ **(−0.268, 0.211, 0.057)**, compared with $(-0.335, 0.245, 0.090)$ for the hard target. The push on "cat" is gentler, and once the cat probability passes 0.933 the gradient on it reverses: the network is told to stop growing more confident.
+
+<figure class="blog-figure">
+  <LabelSmoothingBars alt="Three bars for cat, dog and bird showing the hard target, the smoothed target and the network's probabilities, with gradient arrows between them. An epsilon slider from 0 to 0.3 updates every number." />
+  <figcaption><strong>Figure 8. A softer target.</strong> With ε = 0.1 the cat target drops to 0.933 and dog and bird rise to 0.033; the gradient on the logits (2, 1, 0) becomes (−0.268, 0.211, 0.057).</figcaption>
+</figure>
+
+
+## What to remember
+
+- **Training error measures memory, validation error measures understanding.** Hold back a validation set to make choices and a test set to report the final number once.
+- **Underfitting** (high bias): too stiff to follow the pattern. **Overfitting** (high variance): flexible enough to copy the noise. On our 8 points, degree 7 gets training error 0 but validation 0.090, worse than the cubic's 0.058.
+- **Weight decay** adds $\tfrac{\lambda}{2}\sum w^2$ to the loss, which turns each step into $w \leftarrow (1 - \eta\lambda)w - \eta \cdot \text{gradient}$: shrink, then step. Big weights are pulled hardest.
+- **L1** pulls with a constant force, so weakly useful weights land exactly on zero.
+- **Early stopping** keeps the weights from the lowest validation error, before the model has time to learn the noise.
+- **Dropout** zeroes each neuron with probability $p$ during training and scales survivors by $1/(1-p)$, so the average is unchanged; at test time it is switched off.
+- **Data augmentation** and **label smoothing** regularise through the data and the targets instead of the weights.
+
+
+## Try it yourself
+
+- **Figure 2.** Set degree 1: training **0.441**, validation **0.246**. Degree 3: **0.036** and **0.058**. Degree 7: **0.000** and **0.090**.
+- **Figure 3.** Defaults ($w = 2$, gradient 0.5, $\eta = 0.1$, $\lambda = 0.1$): shrink to **1.98**, final **1.93**, ghost at **1.95**. Set the gradient to 0 and press "Run 10 steps": $w$ reads **1.809**.
+- **Figure 4.** Set $\lambda = 0.0002$: training **0.057**, validation **0.041**. Set $\lambda = 1$: validation **0.374**.
+- **Figure 5.** At $\lambda = 0.8$: L2 point **(0.714, 0.214)**, L1 point **(0.6, 0)**. Lower $\lambda$ to 0.5: L1 point **(0.75, 0.05)**.
+- **Figure 6.** Let the training run finish (Replay restarts it): the gold marker sits at epoch **7,506** with validation **0.040**; the last epoch shows validation **0.071**. Move the patience slider to see where a patience rule would have stopped.
+- **Figure 7.** Step through the first mask: output **−1**. Keep stepping to the average over all 16 masks: **1.5**, and test mode: **1.5**. Turn off the scaling: the 16-mask average becomes **0.75**.
+- **Figure 8.** At $\varepsilon = 0.1$: targets **0.933, 0.033, 0.033**; gradient **−0.268, 0.211, 0.057**.
+
+
+## Sources
+
+- A. N. Tikhonov (1963). "Solution of incorrectly formulated problems and the regularization method." *Soviet Mathematics Doklady*, 4, 1035–1038 (English translation of *Doklady Akademii Nauk SSSR*, 151, 501–504).
+- A. E. Hoerl and R. W. Kennard (1970). "Ridge Regression: Biased Estimation for Nonorthogonal Problems." *Technometrics*, 12(1), 55–67.
+- A. Krogh and J. A. Hertz (1992). "A Simple Weight Decay Can Improve Generalization." *Advances in Neural Information Processing Systems 4* (NIPS 1991), 950–957.
+- R. Tibshirani (1996). "Regression Shrinkage and Selection via the Lasso." *Journal of the Royal Statistical Society, Series B*, 58(1), 267–288.
+- L. Prechelt (1998). "Early Stopping, But When?" In G. B. Orr and K.-R. Müller (eds.), *Neural Networks: Tricks of the Trade*, Lecture Notes in Computer Science 1524, Springer, 55–69.
+- G. E. Hinton, N. Srivastava, A. Krizhevsky, I. Sutskever and R. R. Salakhutdinov (2012). "Improving neural networks by preventing co-adaptation of feature detectors." arXiv:1207.0580.
+- N. Srivastava, G. Hinton, A. Krizhevsky, I. Sutskever and R. Salakhutdinov (2014). "Dropout: A Simple Way to Prevent Neural Networks from Overfitting." *Journal of Machine Learning Research*, 15(56), 1929–1958.
+- C. Szegedy, V. Vanhoucke, S. Ioffe, J. Shlens and Z. Wojna (2016). "Rethinking the Inception Architecture for Computer Vision." CVPR 2016. arXiv:1512.00567. Introduces label smoothing.
+- I. Loshchilov and F. Hutter (2019). "Decoupled Weight Decay Regularization." ICLR 2019. arXiv:1711.05101. AdamW.
+- D. S. Park, W. Chan, Y. Zhang, C.-C. Chiu, B. Zoph, E. D. Cubuk and Q. V. Le (2019). "SpecAugment: A Simple Data Augmentation Method for Automatic Speech Recognition." Interspeech 2019. arXiv:1904.08779.
+- M. Belkin, D. Hsu, S. Ma and S. Mandal (2019). "Reconciling modern machine-learning practice and the classical bias–variance trade-off." *PNAS*, 116(32), 15849–15854. Double descent.
+- I. Goodfellow, Y. Bengio and A. Courville (2016). *Deep Learning*, MIT Press, chapters 5.2 and 7. Textbook treatment of all of the above.
+

@@ -1,0 +1,103 @@
+---
+// Figure 5: Theorem 3 in 1-D. A Gaussian blob N(mu_t, sigma_t^2) heading to
+// x1 = 2, five grains psi_t(x0) = sigma_t x0 + mu_t, each with its Eq 15
+// velocity. OT: Eq 20 with sigma_min = 0. VP: Eq 18 with the App E.1 schedule.
+// VE: Eq 16 with a toy schedule sigma_s = 3 s.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram gp" role="region" aria-label={alt} data-gp>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 400" role="img" aria-labelledby="gp-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="gp-title">A moving, shrinking Gaussian blob and the velocity of five grains inside it</title>
+    <line data-x1 y1="30" y2="200" stroke="#4F5D3A" stroke-dasharray="4 3" />
+    <text data-x1t y="24" font-size="10.5" font-weight="700" text-anchor="middle" fill="#4F5D3A">data point x₁ = 2</text>
+    <path data-blob d="" fill="#594578" fill-opacity="0.12" stroke="#594578" stroke-width="1.5" />
+    <line x1="40" x2="740" y1="170" y2="170" stroke="#2b2b30" />
+    <g data-ticks></g>
+    <g data-grains></g>
+    <text data-r1 x="40" y="232" font-size="12.5" fill="#2b2b30"></text>
+    <text data-r2 x="40" y="252" font-size="12.5" fill="#2b2b30"></text>
+    <text data-r3 x="40" y="272" font-size="12.5" font-weight="700" fill="#a33b3b"></text>
+    <text x="440" y="232" font-size="11.5" font-weight="700" fill="#2b2b30">Centre μ and width σ over time</text>
+    <rect x="440" y="242" width="300" height="130" fill="none" stroke="#ececf1" />
+    <path data-mu d="" fill="none" stroke="#4F5D3A" stroke-width="2" />
+    <path data-sg d="" fill="none" stroke="#594578" stroke-width="2" />
+    <line data-cur y1="242" y2="372" stroke="#a33b3b" />
+    <text x="440" y="390" font-size="10.5" fill="#5f5f66">t = 0</text>
+    <text x="740" y="390" font-size="10.5" text-anchor="end" fill="#5f5f66">t = 1</text>
+    <text data-axmax x="436" y="250" font-size="10" text-anchor="end" fill="#5f5f66"></text>
+    <text x="436" y="375" font-size="10" text-anchor="end" fill="#5f5f66">0</text>
+    <text x="40" y="320" font-size="11" fill="#4F5D3A">— centre μ</text>
+    <text x="40" y="338" font-size="11" fill="#594578">— width σ</text>
+    <text data-say x="40" y="370" font-size="11.5" fill="#5f5f66"></text>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Path</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-path="ot" aria-pressed="true">Optimal transport</button>
+      <button type="button" class="fig-chip" data-path="vp" aria-pressed="false">Diffusion (VP)</button>
+      <button type="button" class="fig-chip" data-path="ve" aria-pressed="false">Diffusion (VE)</button>
+    </div></div>
+    <label><span class="fig-panel__name">Time t<strong data-vt></strong></span><input class="scrub" data-t type="range" min="0" max="0.99" step="0.01" value="0.5" /></label>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { setupFigure, tween } from "../../lib/figure-motion";
+  import { coeffs } from "../../lib/flow-math";
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-gp]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const ts = $<HTMLInputElement>("[data-t]");
+    const X = (x: number) => 40 + ((x + 4.5) / 13) * 700;
+    for (let x = -4; x <= 8; x += 2) {
+      const l = document.createElementNS(NS, "text"); l.setAttribute("x", String(X(x))); l.setAttribute("y", "186"); l.setAttribute("font-size", "10.5"); l.setAttribute("text-anchor", "middle"); l.setAttribute("fill", "#2b2b30"); l.textContent = String(x); $("[data-ticks]").append(l);
+    }
+    for (const k of ["x1", "x1t"]) { const e = $(`[data-${k}]`); e.setAttribute(k === "x1" ? "x1" : "x", String(X(2))); if (k === "x1") e.setAttribute("x2", String(X(2))); }
+    const X1 = 2, X0S = [-2, -1, 0, 1, 2];
+    type P = "ot" | "vp" | "ve";
+    let path: P = "ot";
+    // mu, sigma and their time derivatives for each path, all heading to x1 = 2.
+    const ms = (p: P, t: number) => {
+      if (p === "ot") return { mu: t * X1, dmu: X1, s: 1 - t, ds: -1 };
+      if (p === "vp") { const c = coeffs("vp", t, 0); return { mu: c.a * X1, dmu: c.da * X1, s: c.s, ds: c.ds }; }
+      return { mu: X1, dmu: 0, s: 3 * (1 - t), ds: -3 };
+    };
+    const say = { ot: "Straight and steady: the centre moves at one speed, the width shrinks at one speed.", vp: "The centre barely moves until late, then rushes: most of the trip happens at the end.", ve: "The centre sits on the data from the start; only the width shrinks." };
+    function draw(t: number) {
+      const { mu, dmu, s, ds } = ms(path, t), H = 120;
+      let d = `M${X(-4.5)} 170`;
+      for (let i = 0; i <= 300; i++) { const x = -4.5 + (13 * i) / 300, y = Math.exp(-((x - mu) ** 2) / (2 * s * s)); d += `L${X(x).toFixed(1)} ${(170 - H * y * Math.min(1, 0.6 / s + 0.25)).toFixed(1)}`; }
+      $("[data-blob]").setAttribute("d", d + `L${X(8.5)} 170Z`);
+      const g = $("[data-grains]"); g.replaceChildren();
+      X0S.forEach((x0) => {
+        const x = s * x0 + mu, u = (ds / s) * (x - mu) + dmu, px = X(x), len = Math.max(-120, Math.min(120, u * 18));
+        const l = document.createElementNS(NS, "line"); l.setAttribute("x1", String(px)); l.setAttribute("x2", String(px + len)); l.setAttribute("y1", "150"); l.setAttribute("y2", "150"); l.setAttribute("stroke", x0 === -1 ? "#a33b3b" : "#2b2b30"); l.setAttribute("stroke-width", "2");
+        const c = document.createElementNS(NS, "circle"); c.setAttribute("cx", String(px)); c.setAttribute("cy", "150"); c.setAttribute("r", "5"); c.setAttribute("fill", x0 === -1 ? "#a33b3b" : "#2b2b30");
+        g.append(l, c);
+        if (Math.abs(len) > 5) { const h = document.createElementNS(NS, "path"), sg = Math.sign(len); h.setAttribute("d", `M${px + len + sg * 2} 150 l${-sg * 8} -5 v10 z`); h.setAttribute("fill", x0 === -1 ? "#a33b3b" : "#2b2b30"); g.append(h); }
+      });
+      const xr = s * -1 + mu, ur = (ds / s) * (xr - mu) + dmu;
+      $("[data-r1]").textContent = `μ = ${mu.toFixed(3)},  μ′ = ${dmu.toFixed(3)}`;
+      $("[data-r2]").textContent = `σ = ${s.toFixed(3)},  σ′ = ${ds.toFixed(3)}`;
+      $("[data-r3]").textContent = `Red grain (x₀ = −1): at ${xr.toFixed(3)}, velocity ${(ds / s).toFixed(3)} × (${xr.toFixed(3)} − ${mu.toFixed(3)}) + ${dmu.toFixed(3)} = ${ur.toFixed(2)}`;
+      // Inset: mu and sigma over the whole trip.
+      const top = path === "ve" ? 3 : 2, IX = (tt: number) => 440 + tt * 300, IY = (v: number) => 372 - (v / top) * 125;
+      let a = "", b = "";
+      for (let i = 0; i <= 100; i++) { const tt = i / 100, m = ms(path, Math.min(tt, 0.999)); a += `${i ? "L" : "M"}${IX(tt).toFixed(1)} ${IY(m.mu).toFixed(1)}`; b += `${i ? "L" : "M"}${IX(tt).toFixed(1)} ${IY(m.s).toFixed(1)}`; }
+      $("[data-mu]").setAttribute("d", a); $("[data-sg]").setAttribute("d", b);
+      const cur = $("[data-cur]"); cur.setAttribute("x1", String(IX(t))); cur.setAttribute("x2", String(IX(t)));
+      $("[data-axmax]").textContent = String(top);
+      $("[data-say]").textContent = say[path];
+      ts.value = String(t); ts.style.setProperty("--p", `${(t / 0.99) * 100}%`);
+      $("[data-vt]").textContent = t.toFixed(2);
+    }
+    ts.addEventListener("input", () => draw(+ts.value));
+    root.querySelectorAll<HTMLButtonElement>("[data-path]").forEach((b) => b.addEventListener("click", () => {
+      path = b.dataset.path as P; root.querySelectorAll("[data-path]").forEach((o) => o.setAttribute("aria-pressed", String(o === b))); draw(+ts.value);
+    }));
+    draw(0.5);
+    setupFigure(root, () => draw(0), async (alive) => {
+      await tween(3, (e) => { if (alive()) draw(Math.round(e * 50) / 100); });
+    });
+  });
+</script>

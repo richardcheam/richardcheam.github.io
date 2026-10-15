@@ -1,0 +1,57 @@
+---
+// Foundations, attention post: a sequence-to-sequence encoder squeezes the
+// whole sentence into its last state; with attention the decoder reaches
+// every encoder state. Schematic: line thicknesses are illustrative.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-s2s>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 250" role="img" aria-labelledby="s2-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="s2-title">An encoder funnelling a sentence into one vector, or a decoder looking back at every word</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Design</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-m="0" aria-pressed="true">One squeezed vector</button>
+      <button type="button" class="fig-chip" data-m="1" aria-pressed="false">Attention</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { INK, MUTED, GOLD, TINT, JADE } from "../../lib/net-diagram";
+  import { txt, arrow } from "../../lib/plot";
+  const W = ["the", "cat", "sat", "on", "mats"];
+  // Illustrative attention: each decoder step mostly looks at one source word.
+  const FOCUS = [[0.6, 0.2, 0.1, 0.05, 0.05], [0.1, 0.65, 0.15, 0.05, 0.05], [0.05, 0.15, 0.6, 0.1, 0.1], [0.05, 0.05, 0.1, 0.3, 0.5]];
+  document.querySelectorAll<HTMLElement>("[data-s2s]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    let att = false;
+    const steps = () => [
+      ...W.map((w, i) => ({ say: i === 0 ? "The encoder reads the first word into its state h1." : `h${i + 1} = f(h${i}, "${w}"): each new state folds in one more word.` })),
+      att ? { say: "With attention, every encoder state stays available. Nothing has to squeeze through one vector." } : { say: "Only the last state h5 is passed on: one fixed-size vector for the whole sentence. The earliest words have faded the most." },
+      ...FOCUS.map((_, j) => ({ say: att ? `Decoder step ${j + 1} draws a line to every encoder state and takes most from the one it needs now.` : `Decoder step ${j + 1} can only use that single vector.` })),
+    ];
+    function draw(k: number) {
+      const ex = (i: number) => 70 + i * 120, dx = (j: number) => 130 + j * 140;
+      let s = txt(30, 22, att ? "Attention: the decoder looks back at every encoder state" : "Sequence to sequence: everything through one vector", `font-size="12" font-weight="700" fill="${INK}"`);
+      W.forEach((w, i) => {
+        const on = k >= i, fade = !att && k >= 5 && i < 4 ? 0.25 + i * 0.12 : 1;
+        s += `<rect x="${ex(i) - 34}" y="52" width="68" height="34" rx="6" fill="${k === i ? TINT : "#fff"}" stroke="${on ? JADE : "#cfd5d4"}" stroke-opacity="${fade}"/>` + txt(ex(i), 74, `h${i + 1}`, `font-size="12.5" font-weight="700" text-anchor="middle" fill="${on ? INK : "#B9C0BF"}" fill-opacity="${fade}"`) + txt(ex(i), 106, w, `font-size="11.5" text-anchor="middle" fill="${MUTED}"`);
+        if (i > 0) s += arrow(ex(i - 1) + 34, 69, ex(i) - 36, 69, on ? MUTED : "#e3e7e6", 1.3);
+      });
+      if (!att && k >= 5) s += `<path d="M${ex(4) + 34} 69 C 690 69 690 140 600 150" fill="none" stroke="${GOLD}" stroke-width="3"/>` + txt(700, 110, "one vector", `font-size="11" fill="${GOLD}" font-weight="700"`);
+      FOCUS.forEach((f, j) => {
+        const on = k >= 6 + j;
+        s += `<rect x="${dx(j) - 34}" y="180" width="68" height="34" rx="6" fill="${k === 6 + j ? TINT : "#fff"}" stroke="${on ? INK : "#cfd5d4"}"/>` + txt(dx(j), 202, `d${j + 1}`, `font-size="12.5" font-weight="700" text-anchor="middle" fill="${on ? INK : "#B9C0BF"}"`);
+        if (on && att) f.forEach((wgt, i) => (s += `<line x1="${dx(j)}" y1="180" x2="${ex(i)}" y2="88" stroke="${GOLD}" stroke-width="${0.6 + wgt * 7}" stroke-opacity="${k === 6 + j ? 0.9 : 0.25}"/>`));
+        if (on && !att) s += `<line x1="${dx(j)}" y1="180" x2="600" y2="152" stroke="${GOLD}" stroke-opacity="0.5"/>`;
+      });
+      s += txt(30, 240, "Line thickness is illustrative.", `font-size="10.5" fill="${MUTED}"`);
+      $("[data-draw]").innerHTML = s;
+    }
+    const redraw = stepper(root, steps, draw, { delay: 1 });
+    root.querySelectorAll<HTMLButtonElement>("[data-m]").forEach((b) => b.addEventListener("click", () => { att = b.dataset.m === "1"; root.querySelectorAll("[data-m]").forEach((o) => o.setAttribute("aria-pressed", String(o === b))); redraw(); }));
+  });
+</script>

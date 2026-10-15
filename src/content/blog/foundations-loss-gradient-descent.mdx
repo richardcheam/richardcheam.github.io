@@ -1,0 +1,390 @@
+---
+title: "Loss functions and gradient descent"
+title_key: ["Loss functions", "gradient descent"]
+date: 2026-10-15
+category: "deep-learning"
+read_time: "30 min"
+series_order: 2
+series: foundations
+featured: false
+excerpt: "Training needs two things: one number that says how wrong the network is, and a rule for nudging every weight to make that number smaller. This post builds both, with every step small enough to check by hand."
+question: "How does a network turn 'you got it wrong' into a precise change for each of its weights?"
+my_work: "A concept note. I worked every example by hand and specified the figures from the standard formulas."
+result: "Mean squared error, mean absolute error and cross-entropy each score mistakes differently. Gradient descent on a simple bowl shrinks the distance to the bottom by a fixed factor each step, and that factor tells you exactly when a learning rate crawls, lands, bounces or explodes."
+evidence_limit: "This explains textbook methods on toy functions. No experiments; all numbers are simple arithmetic."
+lesson: "The loss decides what 'good' means; the gradient only tells you which way is downhill from where you stand. The learning rate decides whether that local hint helps or hurts."
+---
+
+import LossTrio from "../../components/figures/LossTrio.astro";
+import SoftmaxCalculator from "../../components/figures/SoftmaxCalculator.astro";
+import DescentStepper from "../../components/figures/DescentStepper.astro";
+import ContourDescent from "../../components/figures/ContourDescent.astro";
+import LearningRateRace from "../../components/figures/LearningRateRace.astro";
+import BatchNoisePaths from "../../components/figures/BatchNoisePaths.astro";
+import SaddleEscape from "../../components/figures/SaddleEscape.astro";
+
+In [the first Foundations post](/blog/foundations-neurons-backprop/) we built a tiny network, ran it forward, and used backpropagation to find how much each weight affected the output. That left two questions open. Affected *what*, exactly? And once we know, what do we do with it?
+
+The answer to the first is the **loss**: one number that says how wrong the network is. The answer to the second is **gradient descent**: take a small step in the direction that makes the loss smaller, then repeat. Almost every model you have heard of, from image classifiers to the speech models in [Pocket TTS](/blog/pocket-tts-calm-explained/), is trained this way.
+
+
+## Why we need one number
+
+Imagine teaching a child to throw a ball into a bucket. After each throw you could say many things: "too far", "a bit left", "nice arc". But if you had to give a single score, you would probably say how far from the bucket the ball landed. One number. Smaller is better.
+
+A network is the same. It makes thousands of predictions, each a little right or wrong. To improve it, we need to squash all of that into **one number** called the **loss** (also called the cost or the objective). Why one? Because "better" only makes sense when you can compare. With one number, every change to the weights is either an improvement (loss went down) or not.
+
+The loss has two jobs:
+
+1. **Score.** It says how bad the current predictions are.
+2. **Steer.** It must change smoothly as the weights change, so that we can ask "if I nudge this weight a little, does the loss go up or down?" That question is the gradient, and backpropagation from post 1 is how we answer it.
+
+Choosing a loss is choosing what "wrong" means. The next two sections show that different choices really do lead to different answers.
+
+
+## Losses for numbers: squared and absolute error
+
+Suppose the network predicts a number, like tomorrow's temperature or the price of a house. We call the true answer the **target** $y$ and the network's guess the **prediction** $\hat{y}$ (read "y hat").
+
+### Mean squared error
+
+In one sentence: square each miss, then average.
+
+$$
+\text{MSE} = \frac{1}{n} \sum_{i=1}^{n} (\hat{y}_i - y_i)^2
+$$
+
+- $n$ is how many examples we have.
+- $i$ counts through them, from 1 to $n$.
+- $\hat{y}_i$ is the prediction for example $i$; $y_i$ is its target.
+- $\hat{y}_i - y_i$ is the miss (positive if we guessed too high).
+- $\sum$ means "add up"; $\frac{1}{n}$ turns the sum into an average.
+
+**MSE** stands for **mean squared error**. Everyday picture: a fine that grows fast. Miss by 1, pay 1. Miss by 2, pay 4. Miss by 10, pay 100. Big mistakes are punished far more than small ones.
+
+Worked example. Targets $3, 5$; predictions $4, 2$. Misses are $4 - 3 = 1$ and $2 - 5 = -3$. Squares are $1$ and $9$. Average: $(1 + 9) / 2 =$ **5**.
+
+If the second prediction moved from 2 to 4, its miss would shrink to $-1$, its square to $1$, and the MSE to $(1 + 1)/2 =$ **1**. Fixing the big miss helped a lot, because it was squared.
+
+### Mean absolute error
+
+In one sentence: drop the sign of each miss, then average.
+
+$$
+\text{MAE} = \frac{1}{n} \sum_{i=1}^{n} \lvert \hat{y}_i - y_i \rvert
+$$
+
+The bars $\lvert \cdot \rvert$ mean "absolute value": throw away the minus sign. **MAE** stands for **mean absolute error**. Everyday picture: a flat fee per unit of distance. Miss by 10, pay 10.
+
+Same example: $\lvert 1 \rvert = 1$, $\lvert -3 \rvert = 3$, average **2**.
+
+### Outliers: where the two disagree
+
+Here is the clearest way to see the difference. Suppose the network is very simple: it must give the **same** guess $c$ for every example. The targets are $2, 3, 4, 15$. The 15 is an **outlier**, a value far from the rest (maybe a typo).
+
+- The $c$ that makes **MSE** smallest is the **mean**: $(2 + 3 + 4 + 15) / 4 =$ **6**. The outlier drags the guess far from where most of the data sits.
+- The $c$ that makes **MAE** smallest is the **median**, the middle value. With four values any $c$ from 3 to 4 ties; take **3.5**. The outlier barely matters.
+
+Check at $c = 6$: squared misses are $16, 9, 4, 81$, MSE $= 110/4 =$ **27.5**. At $c = 3.5$: squared misses $2.25, 0.25, 0.25, 132.25$, MSE $= 135/4 =$ **33.75**, worse, so MSE prefers 6. For MAE, at $c = 3.5$ the misses are $1.5, 0.5, 0.5, 11.5$, MAE $=$ **3.5**; at $c = 6$ they are $4, 3, 2, 9$, MAE $=$ **4.5**, so MAE prefers 3.5.
+
+Neither is "right". MSE says "never be very wrong about anything"; MAE says "be right about most things". If the 15 is a typo, MAE is the safer choice. If it is real and costly to miss, MSE is.
+
+The steering job matters too. The slope of the squared miss $(\hat{y} - y)^2$ with respect to $\hat{y}$ is $2(\hat{y} - y)$: big misses push hard, small misses push gently, so steps naturally shrink near the answer. The slope of $\lvert \hat{y} - y \rvert$ is just $+1$ or $-1$: the same push whether you are off by 0.01 or by 100. We will see why that matters when we [take steps](#gradient-descent-in-one-dimension).
+
+<figure class="blog-figure blog-figure--wide">
+  <LossTrio alt="Three curves against the prediction: squared error, absolute error, and cross-entropy. A slider moves the prediction and a dot rides each curve, with the value and slope printed beside it." />
+  <figcaption><strong>Figure 1. Three ways to score a miss.</strong> Drag the prediction and watch each loss and its slope. Squared error is gentle near the target and harsh far away; absolute error is a V; cross-entropy shoots up as the probability of the right answer falls to zero.</figcaption>
+</figure>
+
+
+## Losses for choices: probabilities and cross-entropy
+
+Many tasks are not "predict a number" but "pick one of several options": is this picture a cat, a dog or a bird? This is called **classification**, and each option is a **class**.
+
+### Turning scores into probabilities with softmax
+
+The last layer of a classifier outputs one raw score per class. These scores are called **logits**. They can be any number, negative or positive, and they do not add up to anything in particular. We want **probabilities** instead: numbers between 0 and 1 that add up to 1.
+
+In one sentence: softmax makes every score positive with $e^{z}$, then divides by the total so they add to 1.
+
+$$
+p_k = \frac{e^{z_k}}{\sum_{j=1}^{K} e^{z_j}}
+$$
+
+- $K$ is the number of classes.
+- $z_k$ is the logit for class $k$.
+- $e \approx 2.718$; $e^{z}$ is always positive and grows fast as $z$ grows.
+- The bottom adds up $e^{z}$ for every class, so the $p$'s sum to 1.
+- $p_k$ is the probability the network gives class $k$.
+
+Everyday picture: sharing sweets. Each class gets a pile of sweets whose size is $e^{\text{its score}}$, then we report each pile as a share of all the sweets. A score one higher means a pile about 2.7 times bigger.
+
+Worked example. Cat, dog, bird with logits $z = (2, 1, 0)$.
+
+- $e^{2} \approx 7.389$, $e^{1} \approx 2.718$, $e^{0} = 1$.
+- Total: $7.389 + 2.718 + 1 = 11.107$.
+- $p_{\text{cat}} = 7.389 / 11.107 \approx$ **0.665**, $p_{\text{dog}} = 2.718 / 11.107 \approx$ **0.245**, $p_{\text{bird}} = 1 / 11.107 \approx$ **0.090**.
+- Check: $0.665 + 0.245 + 0.090 = 1.000$.
+
+What changes if a number changes? Add the same amount to every logit, say $(12, 11, 10)$, and the probabilities do not move at all: every pile is multiplied by the same $e^{10}$. Only the **differences** between logits matter. Widen the gaps, say $(4, 2, 0)$, and the top class takes almost everything: $0.867, 0.117, 0.016$.
+
+The name "softmax" comes from Bridle (1990): it is a soft version of "pick the maximum".
+
+### Surprise, and why the loss is minus log
+
+Now the true answer is "cat". How should we score the probabilities $0.665, 0.245, 0.090$?
+
+Think about **surprise**. If you were sure it would rain ($p = 1$) and it rains, you are not surprised at all. If you gave rain a 1 in 100 chance and it rains, you are very surprised. A good measure of surprise should:
+
+- be **0** when $p = 1$;
+- grow without limit as $p$ falls towards 0;
+- **add up** for independent events: the surprise of two coin flips both landing heads should be twice the surprise of one.
+
+The one function that does all three is $-\log p$. (The third rule is the key one: $\log(a \times b) = \log a + \log b$, so probabilities that multiply become surprises that add.) This idea comes from Claude Shannon's 1948 paper that founded information theory. We use the natural log, $\ln$.
+
+| Probability given to what happened | Surprise $-\ln p$ |
+|---|---|
+| 1 | **0** |
+| 0.5 | **0.693** |
+| 0.1 | **2.303** |
+| 0.01 | **4.605** |
+
+Each time the probability shrinks by a factor of 10, the surprise grows by the same **2.303**.
+
+**Cross-entropy loss** is simply: the surprise the network feels at the right answer.
+
+$$
+L_{\text{CE}} = -\sum_{k=1}^{K} y_k \ln p_k
+$$
+
+- $y_k$ is 1 for the true class and 0 for every other class. This list of one 1 and many 0s is called a **one-hot** vector.
+- Because all the other $y_k$ are 0, the sum keeps only one term: $L_{\text{CE}} = -\ln p_{\text{true}}$.
+
+Worked example. True class cat, $p_{\text{cat}} = 0.665$: loss $= -\ln 0.665 \approx$ **0.408**. If the true class were bird, $p_{\text{bird}} = 0.090$: loss $= -\ln 0.090 \approx$ **2.408**. Confidently wrong costs a lot.
+
+Why not just use squared error on the probabilities? You could, but cross-entropy punishes confident mistakes much harder (it goes to infinity as $p_{\text{true}} \to 0$, while squared error tops out at 1), and, as the next part shows, it gives a beautifully simple gradient.
+
+### The neat gradient: p minus y
+
+We want to know: if I nudge logit $z_k$ up a little, how does the loss change? Working through the chain rule from [post 1](/blog/foundations-neurons-backprop/) for softmax followed by cross-entropy, almost everything cancels and leaves:
+
+$$
+\frac{\partial L_{\text{CE}}}{\partial z_k} = p_k - y_k
+$$
+
+- $\frac{\partial L}{\partial z_k}$ reads "how much the loss changes per unit nudge of $z_k$".
+- $p_k$ is what the network said; $y_k$ is what it should have said.
+
+In plain words: **the push on each logit is "what you predicted minus what was true"**.
+
+Worked example with $z = (2, 1, 0)$, true class cat, $y = (1, 0, 0)$:
+
+- cat: $0.665 - 1 =$ **−0.335** (negative slope, so increasing the cat logit lowers the loss);
+- dog: $0.245 - 0 =$ **0.245** (lower the dog logit);
+- bird: $0.090 - 0 =$ **0.090** (lower the bird logit, a little).
+
+The three numbers add to zero. And notice: when the network is already right and sure ($p_{\text{cat}}$ near 1), every push is near 0, so it stops changing what already works.
+
+Here is the short reason, for two classes. With logits $z_1, z_2$, $p_1 = e^{z_1}/(e^{z_1} + e^{z_2})$. If class 1 is true, $L = -\ln p_1 = -z_1 + \ln(e^{z_1} + e^{z_2})$. The slope of $-z_1$ with respect to $z_1$ is $-1$; the slope of $\ln(e^{z_1} + e^{z_2})$ is $e^{z_1}/(e^{z_1} + e^{z_2}) = p_1$. Together: $p_1 - 1 = p_1 - y_1$. The same two lines work for any number of classes.
+
+<figure class="blog-figure blog-figure--wide">
+  <SoftmaxCalculator alt="Three logit sliders for cat, dog and bird. Step buttons show exponentiating, summing, dividing, taking minus log of the true class, and the gradient p minus y, with the arithmetic written out." />
+  <figcaption><strong>Figure 2. Softmax and cross-entropy, one operation at a time.</strong> Move the logits or pick a different true class; every number below updates. Add the same amount to all three logits and see that nothing changes.</figcaption>
+</figure>
+
+
+## The loss landscape
+
+Now put the network's weights on the map. Every possible setting of the weights gives one loss value. If the network had just two weights, we could draw this as a hilly terrain: east-west is weight 1, north-south is weight 2, and the height of the ground is the loss. Training means **finding a low valley**.
+
+Real networks have millions of weights, so the terrain has millions of directions we cannot draw. But the picture still works: at any spot, the ground slopes some way, and we want to walk downhill.
+
+The catch is that we are walking in **thick fog**. We cannot see the whole terrain. We can only feel the slope right under our feet. That is exactly what backpropagation gives us.
+
+### The gradient: the steepest-uphill arrow
+
+In one sentence: the gradient lists, for each weight, how fast the loss rises when you nudge that weight.
+
+$$
+\nabla L(\mathbf{w}) = \left( \frac{\partial L}{\partial w_1}, \frac{\partial L}{\partial w_2}, \ldots \right)
+$$
+
+- $\mathbf{w}$ is the list of all weights; $w_1, w_2$ are single weights.
+- $\nabla$ (read "nabla" or "grad") means "the gradient of".
+- Each entry is a slope in one direction, holding the others fixed.
+
+Taken together, these slopes form an arrow that points in the **steepest uphill** direction, and its length says how steep. So to go down, we walk the **opposite** way.
+
+Worked example. On the bowl $L = w_1^2 + 4 w_2^2$, the slopes are $2 w_1$ and $8 w_2$. At the point $(4, 1)$ the gradient is $(8, 8)$: the ground rises just as fast eastward as northward. At $(1, 1)$ it is $(2, 8)$: much steeper northward, because the $4 w_2^2$ term makes the bowl narrow in that direction.
+
+
+## Gradient descent in one dimension
+
+In one sentence: move each weight a small step against its slope, then repeat.
+
+$$
+w_{\text{new}} = w - \eta \, \frac{dL}{dw}
+$$
+
+- $w$ is the weight now; $w_{\text{new}}$ is the weight after one step.
+- $\frac{dL}{dw}$ is the slope of the loss at $w$.
+- $\eta$ (the Greek letter eta) is the **learning rate**: how big a step to take per unit of slope.
+- The minus sign turns "uphill" into "downhill".
+
+Everyday picture: walking down a hill in fog by feel. Where it is steep, you take a bigger stride; where it is nearly flat, a small shuffle.
+
+The method is old: Augustin-Louis Cauchy described it in **1847**.
+
+Worked example. The loss is $L(w) = (w - 3)^2$, a bowl with its bottom at $w = 3$. Its slope is $2(w - 3)$. Start at $w = 0$ with $\eta = 0.1$.
+
+| Step | $w$ | Loss $(w-3)^2$ | Slope $2(w-3)$ | Update |
+|---|---|---|---|---|
+| 0 | 0 | **9** | −6 | $0 - 0.1 \times (-6) = 0.6$ |
+| 1 | 0.6 | **5.76** | −4.8 | $0.6 - 0.1 \times (-4.8) = 1.08$ |
+| 2 | 1.08 | **3.6864** | −3.84 | $1.08 - 0.1 \times (-3.84) = 1.464$ |
+| 3 | 1.464 | **2.3593** | −3.072 | $1.464 + 0.3072 = 1.7712$ |
+
+Look at the distance to the bottom: $3, 2.4, 1.92, 1.536, \ldots$ Each step multiplies it by **0.8**. Here is why. The update is $w - 0.1 \times 2(w - 3)$, so the new distance is $(w - 3) - 0.2(w - 3) = 0.8(w - 3)$. In general, on this bowl, every step multiplies the distance by $1 - 2\eta$. Keep that number in mind; the whole [learning-rate section](#the-learning-rate) follows from it.
+
+Also notice the steps shrink on their own (0.6, then 0.48, then 0.384) even though $\eta$ is fixed, because the slope shrinks near the bottom. With absolute error, whose slope is always $\pm 1$, the step would stay $\eta$ forever and hop back and forth across the bottom.
+
+<figure class="blog-figure blog-figure--wide">
+  <DescentStepper alt="The curve (w minus 3) squared with a ball at w equals 0. Each press of Step draws the tangent, shows the slope, writes the update arithmetic and moves the ball. A table logs every step." />
+  <figcaption><strong>Figure 3. One step of gradient descent at a time.</strong> Each press measures the slope, multiplies by the learning rate, and moves the ball. Each update takes three presses: feel the slope, scale it, step. Change the start or the learning rate and the numbers update.</figcaption>
+</figure>
+
+
+## Gradient descent in two dimensions
+
+With two weights we do exactly the same thing, once per weight, at the same time.
+
+Take $L = w_1^2 + 4 w_2^2$, start at $(4, 1)$, $\eta = 0.1$. The slopes are $(2 w_1, 8 w_2)$.
+
+- Step 1: gradient $(8, 8)$. New point $(4 - 0.8, \; 1 - 0.8) = (3.2, 0.2)$. Loss $10.24 + 0.16 =$ **10.4** (from **20**).
+- Step 2: gradient $(6.4, 1.6)$. New point $(2.56, 0.04)$. Loss **6.56**.
+- Step 3: gradient $(5.12, 0.32)$. New point $(2.048, 0.008)$. Loss **4.1946**.
+
+Per step, $w_1$ is multiplied by $1 - 2\eta = 0.8$ and $w_2$ by $1 - 8\eta = 0.2$. The steep direction is fixed almost at once; the gentle direction crawls. That is the typical shape of real training: quick progress at first, then a long slow slide along a valley floor.
+
+Now try $\eta = 0.2$. The factors become $0.6$ and $1 - 1.6 = -0.6$. The minus sign means $w_2$ **flips side** each step: $(4, 1) \to (2.4, -0.6) \to (1.44, 0.36) \to (0.864, -0.216)$. The path zigzags across the narrow valley. Push to $\eta = 0.25$ and $w_2$'s factor is exactly $-1$: it bounces between $1$ and $-1$ forever. The narrowest direction sets the speed limit for every direction.
+
+<figure class="blog-figure blog-figure--wide">
+  <ContourDescent alt="Contour lines of the bowl w1 squared plus 4 w2 squared. Click to place a start point; each Step draws the gradient arrow, the step taken, and the new loss." />
+  <figcaption><strong>Figure 4. Walking downhill on a map.</strong> Click anywhere to start. The red arrow is the gradient (uphill); the step goes the other way. Raise the learning rate to 0.2 and watch the zigzag.</figcaption>
+</figure>
+
+
+## The learning rate
+
+The learning rate is the most important number you choose in training. On our 1-D bowl $L = (w - 3)^2$, each step multiplies the distance to the bottom by $1 - 2\eta$. That single factor sorts every learning rate into one of five cases. Start at $w = 0$ (distance 3) each time.
+
+| $\eta$ | Factor $1 - 2\eta$ | $w$ after steps 1, 2, 3 | What happens |
+|---|---|---|---|
+| 0.01 | 0.98 | 0.06, 0.1188, 0.1764 | **Too small**: crawls; after 100 steps still 0.4 away |
+| 0.4 | 0.2 | 2.4, 2.88, 2.976 | **Just right**: within 0.024 after 3 steps |
+| 0.5 | 0 | 3, 3, 3 | Lands exactly in one step (only on a perfect bowl) |
+| 1.0 | −1 | 6, 0, 6 | Bounces forever between 0 and 6 |
+| 1.1 | −1.2 | 6.6, −1.32, 8.184 | **Too large**: diverges, distance 3, 3.6, 4.32, 5.18, ... |
+
+Check the "after 100 steps" claim: $3 \times 0.98^{100} \approx 3 \times 0.133 \approx$ **0.40**.
+
+And the divergence: at $\eta = 1.1$, losses go $9, 12.96, 18.66, 26.87$, each step **1.44** times worse ($1.2^2$). In real training this is the dreaded loss that shoots to "NaN" (not a number) after a few hundred steps.
+
+The rule: as long as the factor's size is below 1, that is $0 < \eta < 1$ here, we get closer. In general the limit depends on how curved the steepest direction is, which is why the 2-D bowl's narrow direction set a tighter limit of $0.25$. Real networks do not tell you their curvature, so people try a few rates and watch the loss. [Post 3](/blog/foundations-optimisers/) covers methods (momentum, Adam, schedules) that make this choice much less fragile.
+
+<figure class="blog-figure blog-figure--wide">
+  <LearningRateRace alt="Three copies of the bowl (w minus 3) squared side by side, with learning rates 0.01, 0.4 and 1.1. One Step button advances all three; each shows its w, loss and update arithmetic." />
+  <figcaption><strong>Figure 5. A learning-rate race.</strong> Same bowl, same start, three step sizes. One crawls, one arrives, one flies off the chart.</figcaption>
+</figure>
+
+
+## Full-batch, stochastic and mini-batch
+
+So far the loss was one formula. In real training it is an **average over the training data**: the loss on example 1, plus on example 2, and so on, divided by $n$. The true gradient is therefore an average of per-example gradients, and computing it means running **every** example through the network. With a million examples, that is a million forward and backward passes for one step.
+
+There are three ways to handle this.
+
+- **Full-batch gradient descent**: use every example for each step. Exact, but slow.
+- **Stochastic gradient descent** (SGD): use **one** random example per step. "Stochastic" means "random". Each step is cheap but noisy, since one example's opinion is not everyone's. This idea goes back to Robbins and Monro (1951).
+- **Mini-batch gradient descent**: use a small random group, say 32 or 256 examples, per step. This is what nearly everyone does; people often still call it SGD.
+
+A toy you can follow. We want one point $\mathbf{w} = (w_1, w_2)$ that is close to four data points: A $(2, 0)$, B $(4, 2)$, C $(2, 4)$, D $(0, 2)$. The loss for one point is its squared distance $\lvert \mathbf{w} - \text{point} \rvert^2$; the full loss is the average over four. The best $\mathbf{w}$ is the centre, $(2, 2)$, where the loss is **4** (every point is 2 away, squared is 4). It cannot reach 0, because no single spot sits on all four points.
+
+The gradient of one point's loss is $2(\mathbf{w} - \text{point})$. With $\eta = 0.25$, the update $\mathbf{w} - 0.25 \times 2(\mathbf{w} - \text{target})$ simply moves **halfway** towards the target. That makes every step easy:
+
+- **Full batch** (target is the average of all four, $(2, 2)$), from $(0, 0)$: $(1, 1)$, $(1.5, 1.5)$, $(1.75, 1.75)$. A straight line.
+- **Stochastic**, points in the shuffled order B, D, A, C: halfway to B gives $(2, 1)$; halfway to D gives $(1, 1.5)$; halfway to A gives $(1.5, 0.75)$; halfway to C gives $(1.75, 2.375)$. A wobbly path that ends near the centre after one pass through the data, using the same total work as **one** full-batch step.
+- **Mini-batch** of two, batches B and A (average $(3, 1)$) then D and C (average $(1, 3)$): $(1.5, 0.5)$, then $(1.25, 1.75)$. Less wobbly than one-at-a-time.
+
+The noise is not only a cost. It can shake the weights out of small dents in the terrain, and it means the weights never settle perfectly; with a fixed learning rate, SGD keeps jittering around the bottom. That is one reason learning rates are usually lowered as training goes on.
+
+<figure class="blog-figure blog-figure--wide">
+  <BatchNoisePaths alt="Four data points on a grid with contour lines of the average loss. One Step button advances three paths from the origin: full batch, stochastic, and mini-batch of two, each annotated with its target and the halfway arithmetic." />
+  <figcaption><strong>Figure 6. Same landscape, three ways to estimate the slope.</strong> The data order is fixed (B, D, A, C, and mini-batches B + A then D + C) so the numbers match the text; "Reshuffle" draws new orders.</figcaption>
+</figure>
+
+
+## Valleys, saddles and plateaus
+
+Our bowls had one bottom. Real loss landscapes are messier.
+
+- A **local minimum** is a dip that is lower than everything nearby but not the lowest point overall. Gradient descent, feeling only the slope underfoot, stops there happily.
+- A **saddle point** is flat in every direction but is a dip in some directions and a hump in others, like the middle of a horse's saddle or a mountain pass. The gradient there is zero, so a ball placed exactly on it does not move.
+- A **plateau** is a large, nearly flat region. The slope is tiny, so steps are tiny, and training looks stuck for a long time before it suddenly finds a slope again.
+
+For big networks, saddles and plateaus are thought to be a bigger nuisance than bad local minima: Dauphin and colleagues (2014) argued that in very many dimensions, most zero-slope points are saddles, since it is unlikely that the surface curves upward in **every** one of millions of directions at once.
+
+Worked saddle. $L = w_1^2 - w_2^2$: a valley along $w_1$, a hump along $w_2$. Slopes are $(2 w_1, -2 w_2)$. With $\eta = 0.25$, each step multiplies $w_1$ by $1 - 0.5 = 0.5$ and $w_2$ by $1 + 0.5 = 1.5$.
+
+- Start at $(2, 0)$: $(1, 0)$, $(0.5, 0)$, $(0.25, 0)$, ... The ball slides into the saddle and stays. Exactly zero in $w_2$ means it never feels the downhill side.
+- Start at $(2, 0.01)$: $(1, 0.015)$, $(0.5, 0.0225)$, $(0.25, 0.0338)$, $(0.125, 0.0506)$, $(0.0625, 0.0759)$, ... For several steps it looks stuck near the centre, losses barely changing ($3.9999$, $0.9998$, $0.2495$, $0.0614$, $0.0131$, $-0.0019$), then $w_2$ grows by half each step and the ball rolls away down the hump. By step 12, $w_2 \approx 1.30$.
+
+That tiny 0.01 is exactly what the noise from mini-batches provides for free.
+
+<figure class="blog-figure blog-figure--wide">
+  <SaddleEscape alt="Contour map of w1 squared minus w2 squared. Two balls start at (2, 0) and (2, 0.01). Step advances both, printing coordinates and loss; one stays on the saddle, the other escapes." />
+  <figcaption><strong>Figure 7. Stuck on a saddle, and escaping it.</strong> A nudge of 0.01 is enough, but it takes several steps to show. Turn on "Add noise each step" to give both balls small random kicks, like mini-batch noise.</figcaption>
+</figure>
+
+
+## Convexity in simple terms
+
+Some landscapes are guaranteed to be easy. A function is **convex** if, whenever you stretch a straight string between any two points on its surface, the string never dips below the surface. A bowl is convex; an egg carton is not.
+
+Why care? On a convex landscape, **every** dip is the lowest point. There are no false valleys and no saddles, so gradient descent with a small enough learning rate always reaches the bottom.
+
+Quick check with the string. On $L = (w - 3)^2$, take $w = 0$ (height 9) and $w = 6$ (height 9). The string's midpoint is at height 9 above $w = 3$, and the curve there is at 0. String above curve: fine. On $L = w_1^2 - w_2^2$, along the $w_2$ direction take $w_2 = -1$ and $w_2 = 1$ (both height $-1$). The string's middle is at $-1$, but the surface at $w_2 = 0$ is at $0$, **above** the string. Not convex.
+
+Mean squared error on a model that is a straight line in its weights (linear regression) is convex, and so is cross-entropy on a single softmax layer (logistic regression). As soon as we stack layers with nonlinear activations, as in [post 1](/blog/foundations-neurons-backprop/), convexity is lost. Deep learning trains on non-convex landscapes anyway, and it works far better in practice than the theory promises.
+
+
+## What to remember
+
+- The **loss** is one number that scores the whole network. MSE punishes big misses hard and is pulled by outliers (it chooses the mean); MAE treats every unit of miss the same (it chooses the median).
+- **Softmax** turns logits into probabilities; only differences between logits matter. **Cross-entropy** is the surprise $-\ln p$ at the right answer, and its gradient with respect to the logits is simply $p - y$.
+- The **gradient** points steepest uphill. **Gradient descent** steps against it: $w \leftarrow w - \eta \, dL/dw$.
+- On a simple bowl, each step multiplies the distance to the bottom by $1 - 2\eta$: tiny $\eta$ crawls, a factor between −1 and 1 converges, a factor beyond −1 diverges. The steepest direction sets the limit.
+- **Mini-batches** trade exact gradients for many cheap, noisy steps. The noise helps escape **saddles** and flat **plateaus**.
+- **Convex** landscapes have one bottom; deep networks are not convex, and train well anyway.
+
+
+## Try it yourself
+
+- **Figure 1.** Set target 3 and prediction 5: squared error shows **4** with slope **4**, absolute error **2** with slope **1**. Set the probability of the true class to 0.1: cross-entropy shows **2.303**. Switch to "Outlier data" and set c to 6: MSE **27.5**, MAE **4.5**; at 3.5: MSE **33.75**, MAE **3.5**.
+- **Figure 2.** Set logits cat 2, dog 1, bird 0, true class cat. You should see probabilities **0.665, 0.245, 0.090**, loss **0.408**, gradient **−0.335, 0.245, 0.090**. Now set all three logits 10 higher (12, 11, 10): nothing changes.
+- **Figure 3.** Start 0, learning rate 0.1. After three steps $w$ should read **1.464** and the loss **2.359**.
+- **Figure 4.** Click (4, 1), learning rate 0.1. After three steps: **(2.048, 0.008)**, loss **4.194**. Change to 0.2 and confirm the zigzag $(2.4, -0.6)$, $(1.44, 0.36)$.
+- **Figure 5.** After three steps: **0.1764**, **2.976**, **8.184**.
+- **Figure 6.** After four steps: full batch at **(1.875, 1.875)**, stochastic at **(1.75, 2.375)**, mini-batch (two steps per pass, so after four steps it has seen the data twice) at **(1.5625, 2.1875)**.
+- **Figure 7.** After five steps from $(2, 0.01)$ the ball is at **(0.0625, 0.0759)**; the other is at **(0.0625, 0)**.
+
+
+## Sources
+
+- A.-L. Cauchy (1847). "Méthode générale pour la résolution des systèmes d'équations simultanées." *Comptes Rendus de l'Académie des Sciences*, 25, 536–538. The first description of gradient descent.
+- H. Robbins and S. Monro (1951). "A Stochastic Approximation Method." *The Annals of Mathematical Statistics*, 22(3), 400–407. The root of stochastic gradient descent.
+- C. E. Shannon (1948). "A Mathematical Theory of Communication." *Bell System Technical Journal*, 27, 379–423 and 623–656. Information, surprise and entropy.
+- J. S. Bridle (1990). "Probabilistic Interpretation of Feedforward Classification Network Outputs, with Relationships to Statistical Pattern Recognition." In *Neurocomputing* (NATO ASI Series F68), Springer, 227–236. The name "softmax".
+- Y. Dauphin, R. Pascanu, C. Gulcehre, K. Cho, S. Ganguli and Y. Bengio (2014). "Identifying and attacking the saddle point problem in high-dimensional non-convex optimization." NeurIPS 2014. arXiv:1406.2572.
+- I. Goodfellow, Y. Bengio and A. Courville (2016). *Deep Learning*, MIT Press, chapters 4, 6.2 and 8. Textbook treatment of all of the above.
+

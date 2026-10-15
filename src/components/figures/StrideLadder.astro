@@ -1,0 +1,60 @@
+---
+// SoundStream review, Figure 1: the encoder's strides. One second at 24 kHz
+// shrinks block by block; the total stride M is the product of the strides,
+// frames per second = 24000 / M, and the built-in delay = M / 24000 s.
+// Default strides (2, 4, 5, 8): 320, 75 Hz, 13.3 ms (Sec III-A, p. 3).
+const { alt } = Astro.props;
+---
+<div class="blog-diagram sld" role="region" aria-label={alt} data-sld>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 340" role="img" aria-labelledby="sld-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="sld-title">One second of audio squeezed by four strided blocks into a few dozen embeddings</title>
+    <g data-rungs></g>
+    <text data-r1 x="20" y="290" font-size="13" font-weight="700" fill="#2b2b30"></text>
+    <text data-r2 x="20" y="312" font-size="12" fill="#2b2b30"></text>
+    <text data-r3 x="20" y="332" font-size="11.5" fill="#5f5f66"></text>
+  </svg>
+  <div class="fig-panel">
+    {[0, 1, 2, 3].map((i) => (
+      <label><span class="fig-panel__name">Block {i + 1} stride</span>
+        <select class="fig-select" data-s={i}>{[1, 2, 4, 5, 8].map((v) => <option value={v} selected={v === [2, 4, 5, 8][i]}>{v}</option>)}</select>
+      </label>
+    ))}
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<style>
+  .fig-select { font: inherit; font-size: 0.85rem; padding: 0.15rem 0.4rem; border: 1px solid var(--line, #d5d5dc); border-radius: 4px; background: transparent; color: inherit; }
+</style>
+
+<script>
+  import { setupFigure, tween } from "../../lib/figure-motion";
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-sld]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const sels = [...root.querySelectorAll<HTMLSelectElement>("[data-s]")];
+    const mk = (g: Element, tag: string, a: Record<string, string | number>, txt?: string) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, String(a[k])); if (txt !== undefined) e.textContent = txt; g.append(e); return e; };
+    function draw(prog = 4) {
+      const st = sels.map((s) => +s.value), g = $("[data-rungs]"); g.replaceChildren();
+      let n = 24000;
+      const counts = [n, ...st.map((s) => (n = n / s))];
+      counts.forEach((c, r) => {
+        const y = 24 + r * 52, on = r <= prog, shown = r < prog ? c : r === Math.ceil(prog) ? c : c;
+        mk(g, "text", { x: 20, y: y + 14, "font-size": 11.5, "font-weight": 700, fill: on ? "#2b2b30" : "#c9c9d0" }, r === 0 ? "samples" : `after block ${r}`);
+        mk(g, "text", { x: 760, y: y + 14, "font-size": 12, "font-weight": 700, "text-anchor": "end", fill: on ? (r === 4 ? "#594578" : "#2b2b30") : "#c9c9d0", "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace" }, Number.isInteger(shown) ? shown.toLocaleString("en") : shown.toFixed(2));
+        // A strip: one tick per item when there are few, a dense band when many.
+        const W = 560, x0 = 120;
+        if (c > 280) mk(g, "rect", { x: x0, y, width: W, height: 18, fill: on ? "#2b2b30" : "#ececf1", "fill-opacity": on ? Math.min(0.85, 0.25 + Math.log10(c) / 8) : 1 });
+        else for (let i = 0; i < Math.floor(c); i++) mk(g, "rect", { x: x0 + (i * W) / c, y, width: Math.max(1, W / c - 1.5), height: 18, rx: 1, fill: on ? (r === 4 ? "#594578" : "#2b2b30") : "#ececf1" });
+        if (r > 0) mk(g, "text", { x: 112, y: y - 8, "font-size": 10, "text-anchor": "end", fill: on ? "#a33b3b" : "#c9c9d0" }, `÷ ${st[r - 1]}`);
+      });
+      const M = st.reduce((a, b) => a * b, 1), fps = 24000 / M, ms = (1000 * M) / 24000;
+      $("[data-r1]").textContent = `M = ${st.join(" × ")} = ${M} samples per embedding`;
+      $("[data-r2]").textContent = `${(24000).toLocaleString("en")} ÷ ${M} = ${Number.isInteger(fps) ? fps : fps.toFixed(2)} embeddings a second; the encoder must wait ${M} samples = ${ms.toFixed(1)} ms before each one.`;
+      $("[data-r3]").textContent = M === 320 ? "SoundStream's default: 75 Hz and 13.3 ms (Sec III-A, p. 3; Sec V-D, p. 9)." : "Bigger M: fewer embeddings, more bits needed per embedding, longer wait (see Figure 7).";
+    }
+    sels.forEach((s) => s.addEventListener("change", () => draw()));
+    draw();
+    setupFigure(root, () => draw(0), async (alive) => { await tween(3, (e) => { if (alive()) draw(Math.floor(e * 4.99)); }); });
+  });
+</script>

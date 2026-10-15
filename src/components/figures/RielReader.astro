@@ -1,0 +1,77 @@
+---
+// Khmer script post, Figure 7: a number becomes words. Khmer digits
+// U+17E0 to U+17E9 (or 0 to 9) map to values, values to place values, and a
+// small rule table turns them into Khmer number words. The riel sign U+17DB
+// is read after the amount. Handles 0 to 999,999,999.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram rrd" role="region" aria-label={alt} data-rrd>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Number</span><input class="fig-text" data-in type="text" value="៥០០០៛" /></label>
+    <div><span class="fig-panel__name">Read it as</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-k="amount" aria-pressed="true">An amount</button>
+      <button type="button" class="fig-chip" data-k="digits" aria-pressed="false">Digit by digit (a phone number)</button>
+    </div></div>
+    <div><span class="fig-panel__name">Try</span><div class="fig-chips">
+      {["៥០០០៛", "២០២៤", "១៥", "២៥០០០០", "012345"].map((s) => <button type="button" class="fig-chip" data-try={s}>{s}</button>)}
+    </div></div>
+  </div>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 300" role="img" aria-labelledby="rrd-title" class="blog-diagram-svg" font-family="Inter, 'Noto Sans Khmer', 'Khmer Sangam MN', sans-serif">
+    <title id="rrd-title">Khmer digits turned into values, place values and spoken words</title>
+    <g data-steps></g>
+  </svg>
+</div>
+
+<style>
+  .rrd .fig-text { font: inherit; font-size: 1.1rem; padding: 0.25rem 0.5rem; border: 1px solid var(--line, #d5d5dc); border-radius: 4px; background: transparent; color: inherit; width: 12rem; }
+</style>
+
+<script>
+  import { tween } from "../../lib/figure-motion";
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-rrd]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const inp = $<HTMLInputElement>("[data-in]");
+    const mk = (g: Element, tag: string, a: Record<string, string | number>, txt?: string) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, String(a[k])); if (txt !== undefined) e.textContent = txt; g.append(e); return e; };
+    const ONES = ["សូន្យ", "មួយ", "ពីរ", "បី", "បួន", "ប្រាំ", "ប្រាំមួយ", "ប្រាំពីរ", "ប្រាំបី", "ប្រាំបួន"];
+    const TENS = ["", "ដប់", "ម្ភៃ", "សាមសិប", "សែសិប", "ហាសិប", "ហុកសិប", "ចិតសិប", "ប៉ែតសិប", "កៅសិប"];
+    // Below 1,000,000: ones, tens, រយ (100), ពាន់ (1,000), ម៉ឺន (10,000), សែន (100,000).
+    const UNITS: [number, string][] = [[100000, "សែន"], [10000, "ម៉ឺន"], [1000, "ពាន់"], [100, "រយ"]];
+    function words(n: number): string {
+      if (n === 0) return ONES[0];
+      if (n >= 1e6) return words(Math.floor(n / 1e6)) + "លាន" + (n % 1e6 ? words(n % 1e6) : "");
+      let out = "";
+      for (const [u, w] of UNITS) if (n >= u) { out += ONES[Math.floor(n / u)] + w; n %= u; }
+      if (n >= 10) { out += TENS[Math.floor(n / 10)]; n %= 10; }
+      if (n > 0) out += ONES[n];
+      return out;
+    }
+    let kind = "amount";
+    function draw(e = 1) {
+      const raw = inp.value.trim(), riel = raw.includes("៛"), digits = [...raw].filter((c) => /[0-9០-៩]/.test(c));
+      const vals = digits.map((c) => { const k = c.codePointAt(0)!; return k >= 0x17e0 ? k - 0x17e0 : k - 48; });
+      const g = $("[data-steps]"); g.replaceChildren();
+      const row = (y: number, label: string, f: (g: Element) => void, show: boolean) => { mk(g, "text", { x: 20, y, "font-size": 11, "font-weight": 700, fill: show ? "#2b2b30" : "#d5d5dc" }, label); if (show) f(g); };
+      const n = vals.length;
+      row(26, "1. Digits", (gg) => digits.forEach((c, i) => { mk(gg, "rect", { x: 160 + i * 50, y: 8, width: 44, height: 30, rx: 4, fill: "#f2f2f5" }); mk(gg, "text", { x: 182 + i * 50, y: 30, "font-size": 18, "text-anchor": "middle", fill: "#2b2b30" }, c); mk(gg, "text", { x: 182 + i * 50, y: 52, "font-size": 9, "text-anchor": "middle", fill: "#8a8a94", "font-family": "ui-monospace, monospace" }, "U+" + c.codePointAt(0)!.toString(16).toUpperCase()); }), true);
+      row(86, "2. Values", (gg) => vals.forEach((v, i) => mk(gg, "text", { x: 182 + i * 50, y: 86, "font-size": 18, "font-weight": 700, "text-anchor": "middle", fill: "#594578" }, String(v))), e > 0.25);
+      const value = n ? Number(vals.join("")) : 0;
+      if (kind === "amount") {
+        row(130, "3. Place values", (gg) => { const parts = vals.map((v, i) => [v, 10 ** (n - 1 - i)]).filter(([v]) => v); mk(gg, "text", { x: 160, y: 130, "font-size": 14, fill: "#2b2b30" }, parts.length ? parts.map(([v, p]) => `${v} × ${p.toLocaleString("en")}`).join(" + ") + ` = ${value.toLocaleString("en")}` : "0"); }, e > 0.5);
+        row(184, "4. Spoken", (gg) => { mk(gg, "text", { x: 160, y: 186, "font-size": 26, fill: "#4F5D3A" }, words(value) + (riel ? " រៀល" : "")); }, e > 0.75);
+      } else {
+        row(130, "3. One word per digit", () => {}, e > 0.5);
+        row(184, "4. Spoken", (gg) => mk(gg, "text", { x: 160, y: 186, "font-size": 22, fill: "#4F5D3A" }, vals.map((v) => ONES[v]).join(" ")), e > 0.75);
+      }
+      mk(g, "text", { x: 20, y: 236, "font-size": 12, fill: "#2b2b30" }, riel ? "The riel sign ៛ is written after the number and also read after it: “… រៀល”." : n ? `${n} digit${n > 1 ? "s" : ""}, value ${value.toLocaleString("en")}.` : "Type a number in Khmer or Western digits.");
+      mk(g, "text", { x: 20, y: 260, "font-size": 11.5, fill: "#5f5f66" }, "The same digits read differently as an amount, a year, a time or a phone number: the frontend has to decide which.");
+      mk(g, "text", { x: 20, y: 282, "font-size": 11.5, fill: "#5f5f66" }, "Rule table: ones, ដប់ to កៅសិប, រយ 100, ពាន់ 1,000, ម៉ឺន 10,000, សែន 100,000, លាន 1,000,000.");
+      root.querySelectorAll("[data-k]").forEach((b) => b.setAttribute("aria-pressed", String(b.getAttribute("data-k") === kind)));
+    }
+    const go = async () => { await tween(1.4, (e) => draw(e)); draw(1); };
+    inp.addEventListener("input", () => draw(1));
+    root.querySelectorAll<HTMLButtonElement>("[data-k]").forEach((b) => b.addEventListener("click", () => { kind = b.dataset.k!; go(); }));
+    root.querySelectorAll<HTMLButtonElement>("[data-try]").forEach((b) => b.addEventListener("click", () => { inp.value = b.dataset.try!; go(); }));
+    draw(1);
+  });
+</script>

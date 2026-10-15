@@ -1,0 +1,26 @@
+---
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" tabindex="0" role="region" aria-label={alt}>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 300" role="img" aria-labelledby="csc-title csc-desc" class="blog-diagram-svg" font-family="Inter, sans-serif">
+<title id="csc-title">Causal strided convolution and its transposed counterpart</title><desc id="csc-desc">Top: sixteen input samples with four padding cells on the left. Four brackets of width eight, four apart, each produce one output. Every bracket ends at or before the newest sample it covers. Bottom: three input frames each stamp an eight-wide kernel into the output, four apart, so neighbouring stamps overlap by four samples and are added. The final four samples are held over for the next chunk.</desc>
+<text x="20" y="22" font-size="12" fill="#5f5f66" letter-spacing="1">ENCODER · CONV, 16 SAMPLES → 4 FRAMES</text>
+<g stroke="#d5d5dc">
+<rect x="20" y="40" width="20" height="22" fill="#ececf1" stroke-dasharray="3 2"/><rect x="40" y="40" width="20" height="22" fill="#ececf1" stroke-dasharray="3 2"/><rect x="60" y="40" width="20" height="22" fill="#ececf1" stroke-dasharray="3 2"/><rect x="80" y="40" width="20" height="22" fill="#ececf1" stroke-dasharray="3 2"/>
+</g>
+<g fill="#fff" stroke="#5f5f66" stroke-width="0.8">
+<rect x="100" y="40" width="20" height="22"/><rect x="120" y="40" width="20" height="22"/><rect x="140" y="40" width="20" height="22"/><rect x="160" y="40" width="20" height="22"/><rect x="180" y="40" width="20" height="22"/><rect x="200" y="40" width="20" height="22"/><rect x="220" y="40" width="20" height="22"/><rect x="240" y="40" width="20" height="22"/><rect x="260" y="40" width="20" height="22"/><rect x="280" y="40" width="20" height="22"/><rect x="300" y="40" width="20" height="22"/><rect x="320" y="40" width="20" height="22"/><rect x="340" y="40" width="20" height="22"/><rect x="360" y="40" width="20" height="22"/><rect x="380" y="40" width="20" height="22"/><rect x="400" y="40" width="20" height="22"/>
+</g>
+<g fill="none" stroke="#594578" stroke-width="1.6">
+<path d="M22 70 v8 h156 v-8"/><path d="M102 86 v8 h156 v-8"/><path d="M182 102 v8 h156 v-8"/><path d="M262 118 v8 h156 v-8"/>
+</g>
+<g fill="#594578" fill-opacity="0.3" stroke="#594578"><rect x="440" y="66" width="22" height="22"/><rect x="440" y="90" width="22" height="22"/><rect x="440" y="114" width="22" height="22"/><rect x="440" y="138" width="22" height="22"/></g>
+<g font-size="12" fill="#5f5f66"><text x="20" y="176">k − s = 4 cells of left padding (or the previous chunk's tail)</text><text x="476" y="82">y₀ sees x₋₄ … x₃</text><text x="476" y="106">y₁ sees x₀ … x₇</text><text x="476" y="130">y₂ sees x₄ … x₁₁</text><text x="476" y="154">y₃ sees x₈ … x₁₅</text></g>
+<text x="20" y="196" font-size="12" fill="#5f5f66" letter-spacing="1">DECODER · TRANSPOSED CONV, 3 FRAMES → 12 SAMPLES + 4 CARRIED</text>
+<g fill="#594578" fill-opacity="0.3" stroke="#594578"><rect x="20" y="205" width="22" height="22"/><rect x="46" y="205" width="22" height="22"/><rect x="72" y="205" width="22" height="22"/></g>
+<g fill="#594578" fill-opacity="0.18" stroke="#594578" stroke-width="0.8"><rect x="140" y="205" width="160" height="16"/><rect x="220" y="225" width="160" height="16"/><rect x="300" y="245" width="160" height="16"/></g>
+<rect x="380" y="265" width="80" height="16" fill="#ececf1" stroke="#5f5f66" stroke-dasharray="3 2"/>
+<g font-size="12" fill="#5f5f66"><text x="490" y="218">each frame stamps an 8-wide kernel</text><text x="490" y="238">stamps start 4 apart and overlap by 4</text><text x="490" y="258">overlaps are added</text><text x="490" y="278">last 4 samples wait for the next frame</text></g>
+</svg>
+</div>
+<p class="blog-figure-reading">Kernel twice the stride is the pattern at every resampling layer in Mimi. Each output depends on exactly two strides of input, and none of it from the future.</p>

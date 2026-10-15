@@ -1,0 +1,73 @@
+---
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" tabindex="0" role="region" aria-label={alt} data-spec>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 52 780 238" role="img" aria-labelledby="eigenvalue-spectrum-title eigenvalue-spectrum-desc" class="blog-diagram-svg" font-family="Inter, sans-serif">
+<title id="eigenvalue-spectrum-title">Two eigenvalue spectra on a log axis</title><desc id="eigenvalue-spectrum-desc">One curve decays gradually across every index. The other falls off a cliff after the first few indices and then flattens near the numerical floor, which is dimensional collapse.</desc>
+<line x1="100" y1="80" x2="100" y2="250" stroke="#5f5f66" /><line x1="100" y1="250" x2="600" y2="250" stroke="#5f5f66" />
+<polyline data-green points="100,92 160,104 220,115 280,125 340,135 400,145 460,156 520,168 600,184" fill="none" stroke="#4F5D3A" stroke-width="2" stroke-linejoin="round" />
+<polyline data-red points="100,90 140,100 180,118 220,160 260,196 310,218 380,228 600,232" fill="none" stroke="#A8503A" stroke-width="2" stroke-linejoin="round" />
+<text x="100" y="72" fill="#5f5f66" font-size="14">log λᵢ</text>
+<text data-lg x="610" y="188" fill="#4F5D3A" font-size="14">gradual decay</text>
+<text data-lr x="610" y="236" fill="#A8503A" font-size="14">rank cliff</text>
+<g data-inset fill="#A8503A"><circle data-dot data-x="0.350" data-y="0.000" cx="710.5" cy="112.4" r="2.6" /><circle data-dot data-x="-0.455" data-y="0.417" cx="686.9" cy="126.3" r="2.6" /><circle data-dot data-x="0.077" data-y="-0.882" cx="701.2" cy="114.6" r="2.6" /><circle data-dot data-x="0.283" data-y="0.369" cx="709.0" cy="114.4" r="2.6" /><circle data-dot data-x="-0.721" data-y="-0.128" cx="678.2" cy="129.2" r="2.6" /><circle data-dot data-x="0.844" data-y="-0.537" cx="724.6" cy="103.2" r="2.6" /><circle data-dot data-x="-0.150" data-y="0.560" cx="696.2" cy="121.7" r="2.6" /><circle data-dot data-x="-0.390" data-y="-0.752" cx="687.3" cy="122.4" r="2.6" /><circle data-dot data-x="0.401" data-y="0.146" cx="712.2" cy="112.0" r="2.6" /><circle data-dot data-x="-0.642" data-y="0.265" cx="681.1" cy="128.9" r="2.6" /><circle data-dot data-x="0.408" data-y="-0.871" cx="711.1" cy="109.4" r="2.6" /><circle data-dot data-x="0.162" data-y="0.516" cx="705.5" cy="116.7" r="2.6" /><circle data-dot data-x="-0.700" data-y="-0.406" cx="678.5" cy="128.2" r="2.6" /><circle data-dot data-x="0.379" data-y="-0.083" cx="711.3" cy="111.7" r="2.6" /><circle data-dot data-x="-0.377" data-y="0.537" cx="689.4" cy="125.3" r="2.6" /><circle data-dot data-x="-0.119" data-y="-0.916" cx="695.3" cy="117.7" r="2.6" /><circle data-dot data-x="0.385" data-y="0.324" cx="712.0" cy="112.6" r="2.6" /><circle data-dot data-x="-0.770" data-y="0.032" cx="676.9" cy="130.4" r="2.6" /></g>
+<text data-il x="700" y="72" fill="#5f5f66" font-size="12" text-anchor="middle">the red cloud</text>
+<text x="350" y="274" fill="#5f5f66" font-size="14" text-anchor="middle">eigenvalue index i</text>
+</svg>
+<button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+<p class="blog-figure-reading">The cliff is dimensional collapse: a handful of directions carry everything</p>
+<p class="blog-figure-reading">Log scale is not cosmetic. On a linear axis the whole tail is flattened against zero by the first eigenvalue.</p>
+
+<script>
+  import { animate, drawStroke, dur, hideStroke, setupFigure, wait } from "../../lib/figure-motion";
+
+  // Collapse, as it happens: the red spectrum starts identical to the healthy
+  // one and falls into a cliff while its cloud (inset) flattens onto a line.
+  // A handful of directions keep their variance; the rest drop to the floor.
+  document.querySelectorAll<HTMLElement>("[data-spec]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const green = $<SVGPolylineElement>("[data-green]"), red = $<SVGPolylineElement>("[data-red]");
+    const parse = (el: SVGPolylineElement) => el.getAttribute("points")!.trim().split(/\s+/).map((p) => p.split(",").map(Number));
+    const g = parse(green), cliff = parse(red);
+    const gy = (x: number) => { for (let i = 1; i < g.length; i++) if (x <= g[i][0]) { const [x0, y0] = g[i - 1], [x1, y1] = g[i]; return y0 + ((x - x0) / (x1 - x0)) * (y1 - y0); } return g[g.length - 1][1]; };
+    const healthy = cliff.map(([x]) => [x, gy(x)]);
+    const dots = Array.from(root.querySelectorAll<SVGCircleElement>("[data-dot]"));
+    const labels = ["[data-lg]", "[data-lr]", "[data-il]"].map((q) => $<SVGElement>(q));
+    const ang = (-28 * Math.PI) / 180;
+    function collapse(u: number) {
+      red.setAttribute("points", healthy.map(([x, y], i) => `${x},${(y + (cliff[i][1] - y) * u).toFixed(1)}`).join(" "));
+      const k = 1 - 0.92 * u;
+      dots.forEach((d) => {
+        const x = +d.dataset.x!, y = +d.dataset.y! * k;
+        d.setAttribute("cx", (700 + 34 * (x * Math.cos(ang) - y * Math.sin(ang))).toFixed(1));
+        d.setAttribute("cy", (118 + 34 * (x * Math.sin(ang) + y * Math.cos(ang))).toFixed(1));
+      });
+    }
+    const tween = (seconds: number, step: (u: number) => void, alive: () => boolean) =>
+      new Promise<void>((res) => {
+        const d = dur(seconds) * 1000;
+        if (!d) { step(1); return res(); }
+        const t0 = performance.now();
+        const f = (now: number) => { if (!alive()) return res(); const u = Math.min(1, (now - t0) / d); step(u); u < 1 ? requestAnimationFrame(f) : res(); };
+        requestAnimationFrame(f);
+      });
+    setupFigure(
+      root,
+      () => { hideStroke(green); red.style.opacity = "0"; collapse(0); labels.forEach((l) => (l.style.opacity = "0")); dots.forEach((d) => (d.style.opacity = "0")); },
+      async (alive) => {
+        await drawStroke(green, 1.0, "linear");
+        animate(labels[0], { opacity: [0, 1] }, { duration: dur(0.3) });
+        red.style.opacity = "1";
+        dots.forEach((d) => animate(d, { opacity: [0, 1] }, { duration: dur(0.3) }));
+        animate(labels[2], { opacity: [0, 1] }, { duration: dur(0.3) });
+        await wait(0.7);
+        if (!alive()) return;
+        await tween(2.2, (u) => collapse(1 - Math.pow(1 - u, 3)), alive);
+        if (!alive()) return;
+        collapse(1);
+        animate(labels[1], { opacity: [0, 1] }, { duration: dur(0.3) });
+      },
+    );
+  });
+</script>

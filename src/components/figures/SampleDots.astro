@@ -1,0 +1,75 @@
+---
+// Figure 2: a 440 Hz wave over 5 ms, measured at a chosen sample rate. Each
+// dot is one sample; the strip lists the first 12 as 16-bit whole numbers.
+const { alt } = Astro.props;
+const RATES = [2, 4, 8, 16, 24, 44.1];
+---
+<div class="blog-diagram sd" role="region" aria-label={alt} data-sd>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 330" role="img" aria-labelledby="sd-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="sd-title">A 440 hertz wave and its samples at the chosen sample rate</title>
+    <line x1="50" x2="740" y1="140" y2="140" stroke="#ececf1" />
+    <path data-true d="" fill="none" stroke="#b9b9c2" stroke-width="2" />
+    <path data-join d="" fill="none" stroke="#594578" stroke-width="1.5" style="opacity:0" />
+    <g data-dots></g>
+    <text x="50" y="250" font-size="10.5" fill="#5f5f66">0 ms</text>
+    <text x="740" y="250" font-size="10.5" text-anchor="end" fill="#5f5f66">5 ms</text>
+    <text data-r1 x="50" y="276" font-size="12.5" fill="#2b2b30"></text>
+    <text x="50" y="304" font-size="10.5" fill="#5f5f66">what the computer stores, first 12 samples (16-bit, see section 4):</text>
+    <text data-list x="50" y="322" font-size="11.5" fill="#2b2b30" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"></text>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Sample rate</span><div class="fig-chips">
+      {RATES.map((r) => <button type="button" class="fig-chip" data-rate={r} aria-pressed={r === 24 ? "true" : "false"}>{r} kHz</button>)}
+    </div></div>
+    <div><span class="fig-panel__name">View</span><div class="fig-chips"><button type="button" class="fig-chip" data-hide aria-pressed="false">Hide the true wave</button></div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { animate, dur, setupFigure } from "../../lib/figure-motion";
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-sd]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const F = 440, MS = 5, sx = (s: number) => 50 + (s / (MS / 1000)) * 690, sy = (v: number) => 140 - v * 90;
+    let d = "";
+    for (let px = 0; px <= 690; px += 2) d += `${px ? "L" : "M"}${50 + px} ${sy(Math.sin((2 * Math.PI * F * (px / 690) * MS) / 1000)).toFixed(1)}`;
+    $("[data-true]").setAttribute("d", d);
+    let rate = 24, hide = false;
+    function draw(stagger: boolean) {
+      const g = $("[data-dots]"); g.replaceChildren();
+      const sr = rate * 1000, n = Math.floor(sr * MS / 1000) + 1;
+      const r = n > 150 ? 2.2 : 3.2;
+      let join = "";
+      for (let i = 0; i < n; i++) {
+        const t = i / sr, v = Math.sin(2 * Math.PI * F * t), x = sx(t), y = sy(v);
+        join += `${i ? "L" : "M"}${x.toFixed(1)} ${y.toFixed(1)}`;
+        const st = document.createElementNS(NS, "line");
+        st.setAttribute("x1", String(x)); st.setAttribute("x2", String(x)); st.setAttribute("y1", "140"); st.setAttribute("y2", String(y));
+        st.setAttribute("stroke", "#594578"); st.setAttribute("stroke-opacity", "0.45");
+        const dot = document.createElementNS(NS, "circle");
+        dot.setAttribute("cx", String(x)); dot.setAttribute("cy", String(y)); dot.setAttribute("r", String(r)); dot.setAttribute("fill", "#594578");
+        g.append(st, dot);
+        if (stagger) [st, dot].forEach((e) => animate(e, { opacity: [0, 1] }, { duration: dur(0.25), delay: dur(Math.min(1.6, i * (1.6 / n))) }));
+      }
+      $("[data-join]").setAttribute("d", join);
+      const per = sr / F, inWin = Math.round(sr * MS / 1000);
+      $("[data-r1]").innerHTML = `<tspan font-weight="700">${sr.toLocaleString("en")}</tspan> samples per second, <tspan font-weight="700">${inWin}</tspan> in these 5 ms, <tspan font-weight="700">${per.toFixed(1)}</tspan> per wave`;
+      $("[data-list]").textContent = Array.from({ length: 12 }, (_, i) => Math.round(0.5 * 32767 * Math.sin((2 * Math.PI * F * i) / sr)).toLocaleString("en")).join(", ") + ", …";
+    }
+    function view() {
+      $<SVGElement>("[data-true]").style.opacity = hide ? "0" : "1";
+      $<SVGElement>("[data-join]").style.opacity = hide ? "1" : "0";
+    }
+    root.querySelectorAll<HTMLButtonElement>("[data-rate]").forEach((b) => b.addEventListener("click", () => {
+      rate = +b.dataset.rate!;
+      root.querySelectorAll("[data-rate]").forEach((o) => o.setAttribute("aria-pressed", String(o === b)));
+      draw(true);
+    }));
+    $<HTMLButtonElement>("[data-hide]").addEventListener("click", (e) => {
+      hide = !hide; (e.currentTarget as HTMLElement).setAttribute("aria-pressed", String(hide)); view();
+    });
+    setupFigure(root, () => { draw(false); view(); }, async () => { draw(true); });
+    draw(false); view();
+  });
+</script>

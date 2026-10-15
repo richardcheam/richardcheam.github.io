@@ -1,0 +1,87 @@
+---
+// RVQ post, Figure 8: quantizer dropout. Each training example rolls n_q
+// uniformly in 1..Q (SoundStream) and uses only the first n_q stages; DAC
+// keeps all stages half the time (p = 0.5). The histogram counts how often
+// each stage is trained: stage i is used with probability (Q - i + 1) / Q.
+// Bottom: the toy frame (3, 1.5) rebuilt from its first n_q stages.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram qd" role="region" aria-label={alt} data-qd>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 380" role="img" aria-labelledby="qd-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="qd-title">Training with a random number of codebook stages, and what each prefix of stages rebuilds</title>
+    <text x="20" y="22" font-size="11.5" font-weight="700" fill="#2b2b30">Training examples: each rolls how many of the 8 stages it may use</text>
+    <g data-roll></g>
+    <text x="420" y="22" font-size="11.5" font-weight="700" fill="#2b2b30">How often each stage got trained</text>
+    <g data-hist></g>
+    <text x="20" y="262" font-size="11.5" font-weight="700" fill="#2b2b30">At test time, keep the first n_q stages of the toy frame (3, 1.5)</text>
+    <g data-toy></g>
+    <text data-r1 x="20" y="356" font-size="12.5" font-weight="700" fill="#2b2b30"></text>
+    <text data-r2 x="20" y="374" font-size="11.5" fill="#5f5f66"></text>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Training rule</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-rule="ss" aria-pressed="true">Uniform 1 to 8 (SoundStream)</button>
+      <button type="button" class="fig-chip" data-rule="dac" aria-pressed="false">Dropout half the time (DAC, p = 0.5)</button>
+      <button type="button" class="fig-chip" data-rule="none" aria-pressed="false">No dropout</button>
+    </div></div>
+    <div><span class="fig-panel__name">Roll</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-roll20>20 examples</button>
+      <button type="button" class="fig-chip" data-roll1k>1,000 examples</button>
+    </div></div>
+    <label><span class="fig-panel__name">Stages kept n_q<strong data-vn></strong></span><input class="scrub" data-n type="range" min="1" max="3" step="1" value="1" /></label>
+  </div>
+</div>
+
+<script>
+  import { setupFigure, wait } from "../../lib/figure-motion";
+  import { rng } from "../../lib/flow-math";
+  import { rvq, TOY_BOOKS } from "../../lib/vq-math";
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-qd]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const nIn = $<HTMLInputElement>("[data-n]"), Q = 8;
+    const mk = (g: Element, tag: string, a: Record<string, string | number>, txt?: string) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, String(a[k])); if (txt !== undefined) e.textContent = txt; g.append(e); return e; };
+    let rule = "ss", r = rng(12), rolls: number[] = [], hist = Array(Q).fill(0), total = 0;
+    const roll = () => (rule === "none" ? Q : rule === "dac" && r() < 0.5 ? Q : 1 + Math.floor(r() * Q));
+    const add = (n: number) => { rolls.push(n); if (rolls.length > 12) rolls.shift(); for (let i = 0; i < n; i++) hist[i]++; total++; };
+    function draw() {
+      const gr = $("[data-roll]"); gr.replaceChildren();
+      rolls.forEach((n, k) => {
+        const y = 36 + k * 17;
+        for (let i = 0; i < Q; i++) mk(gr, "rect", { x: 60 + i * 34, y, width: 30, height: 13, rx: 2, fill: i < n ? (i === 0 ? "#594578" : "#8a7aa8") : "#ececf1" });
+        mk(gr, "text", { x: 52, y: y + 11, "font-size": 10.5, "text-anchor": "end", fill: "#2b2b30", "font-weight": 700 }, String(n));
+      });
+      if (rolls.length) mk(gr, "text", { x: 20, y: 252 - 8, "font-size": 10, fill: "#5f5f66" }, "rolled n_q, then stages 1 to 8");
+      const gh = $("[data-hist]"); gh.replaceChildren();
+      for (let i = 0; i < Q; i++) {
+        const share = total ? hist[i] / total : 0, exact = rule === "none" ? 1 : rule === "dac" ? 0.5 + 0.5 * (Q - i) / Q : (Q - i) / Q, x = 430 + i * 40;
+        mk(gh, "rect", { x, y: 220 - share * 180, width: 30, height: share * 180, fill: "#594578", "fill-opacity": 0.85 });
+        mk(gh, "line", { x1: x - 3, x2: x + 33, y1: 220 - exact * 180, y2: 220 - exact * 180, stroke: "#a33b3b", "stroke-width": 2 });
+        mk(gh, "text", { x: x + 15, y: 236, "font-size": 10.5, "text-anchor": "middle", fill: "#2b2b30" }, String(i + 1));
+        if (total) mk(gh, "text", { x: x + 15, y: 214 - share * 180, "font-size": 9.5, "text-anchor": "middle", fill: "#2b2b30" }, `${Math.round(share * 100)}%`);
+      }
+      mk(gh, "text", { x: 760, y: 252, "font-size": 10, "text-anchor": "end", fill: "#a33b3b" }, `red line: exact share; ${total.toLocaleString("en")} examples rolled`);
+      // Toy frame rebuilt from its first n_q stages.
+      const n = +nIn.value, ch = rvq([3, 1.5], TOY_BOOKS), gt = $("[data-toy]"); gt.replaceChildren();
+      ch.forEach((c, i) => {
+        const x = 20 + i * 250, on = i < n;
+        mk(gt, "rect", { x, y: 276, width: 236, height: 52, rx: 4, fill: on ? "#f1eef6" : "#f7f7f9", stroke: on ? "#594578" : "#ececf1" });
+        mk(gt, "text", { x: x + 10, y: 296, "font-size": 11.5, "font-weight": 700, fill: on ? "#2b2b30" : "#b9b9c2" }, `${i + 1} stage${i ? "s" : ""}: rebuild (${c.zh[0]}, ${c.zh[1]})`);
+        mk(gt, "text", { x: x + 10, y: 316, "font-size": 11.5, fill: on ? "#2b2b30" : "#b9b9c2" }, `error ${c.err}, ${2 * (i + 1)} bits`);
+      });
+      $("[data-r1]").textContent = `Kept ${n} of 3: error ${ch[n - 1].err} at ${2 * n} bits. On SoundStream's scale, each stage is 75 × 10 = 750 bits/s, so ${n} = ${750 * n} bits/s.`;
+      $("[data-r2]").textContent = rule === "none" ? "Without dropout every example uses all stages, so the decoder never practises with fewer." : "Stage 1 is trained on every example, so short prefixes learn to sound good on their own.";
+      $("[data-vn]").textContent = String(n); nIn.style.setProperty("--p", `${((n - 1) / 2) * 100}%`);
+    }
+    let token = 0;
+    async function many(k: number, slow: boolean, alive = () => true) { for (let i = 0; i < k; i++) { if (!alive()) return; add(roll()); if (slow || i % 50 === 0) { draw(); await wait(slow ? 0.18 : 0.01); } } draw(); }
+    $("[data-roll20]").addEventListener("click", () => { const my = ++token; many(20, true, () => my === token); });
+    $("[data-roll1k]").addEventListener("click", () => { const my = ++token; many(1000, false, () => my === token); });
+    root.querySelectorAll<HTMLButtonElement>("[data-rule]").forEach((b) => b.addEventListener("click", () => {
+      rule = b.dataset.rule!; root.querySelectorAll("[data-rule]").forEach((o) => o.setAttribute("aria-pressed", String(o === b))); token++; r = rng(12); rolls = []; hist = Array(Q).fill(0); total = 0; draw();
+    }));
+    nIn.addEventListener("input", draw);
+    draw();
+    setupFigure(root, () => { token++; r = rng(12); rolls = []; hist = Array(Q).fill(0); total = 0; draw(); }, async (alive) => { await many(12, true, alive); await many(988, false, alive); });
+  });
+</script>

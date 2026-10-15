@@ -1,0 +1,106 @@
+---
+// Foundations, loss post: softmax then cross-entropy, one operation per step.
+// Defaults: logits cat 2, dog 1, bird 0, true class cat: e^z = 7.389, 2.718,
+// 1; total 11.107; p = 0.665, 0.245, 0.090; loss 0.408; gradient p − y =
+// −0.335, 0.245, 0.090. Adding 10 to every logit changes nothing.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-softmax>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 290" role="img" aria-labelledby="sm-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="sm-title">Logits become probabilities, a loss and a gradient, one column at a time</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Cat logit <strong data-v="0"></strong></span><input class="scrub" data-z="0" type="range" min="-4" max="4" step="0.1" value="2" /></label>
+    <label><span class="fig-panel__name">Dog logit <strong data-v="1"></strong></span><input class="scrub" data-z="1" type="range" min="-4" max="4" step="0.1" value="1" /></label>
+    <label><span class="fig-panel__name">Bird logit <strong data-v="2"></strong></span><input class="scrub" data-z="2" type="range" min="-4" max="4" step="0.1" value="0" /></label>
+    <div><span class="fig-panel__name">True class</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-true="0" aria-pressed="true">Cat</button>
+      <button type="button" class="fig-chip" data-true="1" aria-pressed="false">Dog</button>
+      <button type="button" class="fig-chip" data-true="2" aria-pressed="false">Bird</button>
+    </div></div>
+    <div><span class="fig-panel__name">Shift every logit</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-shift aria-pressed="false">Add 10 to all three</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt } from "../../lib/tiny-net";
+  import { INK, MUTED, JADE, NEG, GOLD, TINT } from "../../lib/net-diagram";
+  import { txt } from "../../lib/plot";
+  const NAMES = ["cat", "dog", "bird"], COL = ["#2F6E5F", "#3E6E9E", "#B5533C"];
+  const f3 = (v: number) => fmt(v, 3);
+  document.querySelectorAll<HTMLElement>("[data-softmax]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    let z = [2, 1, 0], tr = 0, shift = 0;
+    const calc = () => {
+      const zz = z.map((v) => v + shift), m = Math.max(...zz);
+      // Exact e^z for the display; the stable form (subtract the max) for the probabilities.
+      const ex = zz.map((v) => Math.exp(v)), st = zz.map((v) => Math.exp(v - m)), tot = st.reduce((a, b) => a + b, 0);
+      const p = st.map((v) => v / tot), y = [0, 1, 2].map((k) => (k === tr ? 1 : 0));
+      return { zz, ex, total: ex.reduce((a, b) => a + b, 0), p, L: -Math.log(p[tr]), g: p.map((v, k) => v - y[k]), y };
+    };
+    const big = (v: number) => (v >= 1e4 ? v.toExponential(3).replace("e+", " × 10^") : f3(v));
+    const steps = () => {
+      const c = calc();
+      return [
+        { say: "Make every score positive: raise e to the power of each logit. A logit one higher gives a pile about 2.7 times bigger.", math: c.zz.map((v, k) => `${NAMES[k]}: e^${fmt(v)} = ${big(c.ex[k])}`).join("\n") },
+        { say: "Add up the three piles.", math: `total = ${c.ex.map(big).join(" + ")} = ${big(c.total)}` },
+        { say: "Divide each pile by the total. Now the three numbers are probabilities: each between 0 and 1, and they add up to 1.", math: c.p.map((v, k) => `p(${NAMES[k]}) = ${big(c.ex[k])} / ${big(c.total)} = ${f3(v)}`).join("\n") + `\nsum = ${f3(c.p.reduce((a, b) => a + b, 0))}` },
+        { say: `The true class is ${NAMES[tr]}. The loss is the surprise at the right answer: minus the log of its probability.`, math: `L = −ln p(${NAMES[tr]}) = −ln ${f3(c.p[tr])} = ${f3(c.L)}` },
+        { say: "The push on each logit is what the network predicted minus what was true. The three pushes add up to zero.", math: c.g.map((v, k) => `${NAMES[k]}: ${f3(c.p[k])} − ${c.y[k]} = ${f3(v)}`).join("\n") },
+      ];
+    };
+    function draw(k: number) {
+      const c = calc();
+      // Columns: logit, e^z, probability, loss, gradient.
+      const cols = [["logit z", 40], ["e^z", 190], ["probability p", 330], ["push p − y", 560]] as const;
+      let s = "";
+      cols.forEach(([h, x], i) => { const on = i === 0 || k >= [0, 0, 2, 4][i]; s += txt(x, 24, h, `font-size="11.5" font-weight="700" fill="${on ? INK : "#B9C0BF"}"`); });
+      const lit = (col: number) => (k === 0 && col === 1) || (k === 1 && col === 1) || (k === 2 && col === 2) || (k === 4 && col === 3);
+      [0, 1, 2].forEach((r) => {
+        const y = 60 + r * 62, isT = r === tr;
+        s += txt(12, y + 4, "", "");
+        // Logit bar, centred on zero.
+        s += `<line x1="100" x2="100" y1="${y - 18}" y2="${y + 18}" stroke="#cfd5d4"/>`;
+        const zw = (z[r] / 4) * 50;
+        s += `<rect x="${Math.min(100, 100 + zw)}" y="${y - 10}" width="${Math.abs(zw)}" height="20" fill="${COL[r]}" fill-opacity="0.85"/>`;
+        s += txt(40, y + 4, `${NAMES[r]}${isT ? " ✓" : ""}`, `font-size="12.5" font-weight="${isT ? 700 : 400}" fill="${INK}"`);
+        s += txt(158, y + 4, fmt(c.zz[r], 2), `font-size="12.5" font-weight="700" text-anchor="end" fill="${INK}"`);
+        // e^z pile.
+        if (k >= 0) {
+          const w = Math.max(2, (Math.exp(z[r]) / Math.exp(Math.max(...z))) * 72);
+          s += `<rect x="190" y="${y - 10}" width="${w}" height="20" fill="${COL[r]}" fill-opacity="0.35" stroke="${lit(1) ? GOLD : "none"}" stroke-width="2"/>`;
+          s += txt(310, y + 4, big(c.ex[r]), `font-size="12.5" font-weight="700" text-anchor="end" fill="${INK}"`);
+        }
+        if (k >= 2) {
+          s += `<rect x="330" y="${y - 10}" width="${c.p[r] * 150}" height="20" fill="${COL[r]}" stroke="${lit(2) ? GOLD : "none"}" stroke-width="2"/>`;
+          s += txt(490, y + 4, f3(c.p[r]), `font-size="12.5" font-weight="700" text-anchor="end" fill="${INK}"`);
+        }
+        if (k >= 4) {
+          const gw = c.g[r] * 70;
+          s += `<line x1="640" x2="640" y1="${y - 18}" y2="${y + 18}" stroke="#cfd5d4"/><rect x="${Math.min(640, 640 + gw)}" y="${y - 10}" width="${Math.abs(gw)}" height="20" fill="${c.g[r] < 0 ? JADE : NEG}" stroke="${GOLD}" stroke-width="2"/>`;
+          s += txt(745, y + 4, f3(c.g[r]), `font-size="12.5" font-weight="700" text-anchor="end" fill="${INK}"`);
+        }
+      });
+      if (k >= 1) s += txt(190, 248, `total ${big(c.total)}`, `font-size="12" font-weight="${k === 1 ? 700 : 400}" fill="${k === 1 ? GOLD : MUTED}"`);
+      if (k >= 3) {
+        s += `<rect x="330" y="232" width="190" height="40" rx="6" fill="${k === 3 ? TINT : "#fff"}" stroke="${k === 3 ? JADE : INK}" stroke-width="${k === 3 ? 2.5 : 1.2}"/>`;
+        s += txt(342, 257, `loss = −ln ${f3(c.p[tr])} = ${f3(c.L)}`, `font-size="12.5" font-weight="700" fill="${INK}"`);
+      }
+      if (k >= 4) s += txt(560, 257, "green: raise this logit; red: lower it", `font-size="11" fill="${MUTED}"`);
+      if (shift) s += txt(40, 282, "Every logit is 10 higher, yet every probability, the loss and the pushes are unchanged.", `font-size="11.5" font-weight="700" fill="${GOLD}"`);
+      $("[data-draw]").innerHTML = s;
+      root.querySelectorAll<HTMLElement>("[data-v]").forEach((el) => (el.textContent = fmt(z[+el.dataset.v!], 2)));
+    }
+    const redraw = stepper(root, steps, draw, { delay: 2.2 });
+    root.querySelectorAll<HTMLInputElement>("[data-z]").forEach((inp) => inp.addEventListener("input", () => { z[+inp.dataset.z!] = +inp.value; redraw(); }));
+    root.querySelectorAll<HTMLButtonElement>("[data-true]").forEach((b) => b.addEventListener("click", () => {
+      tr = +b.dataset.true!; root.querySelectorAll("[data-true]").forEach((o) => o.setAttribute("aria-pressed", String(o === b))); redraw();
+    }));
+    $<HTMLButtonElement>("[data-shift]").addEventListener("click", (e) => { shift = shift ? 0 : 10; (e.currentTarget as HTMLElement).setAttribute("aria-pressed", String(!!shift)); redraw(); });
+  });
+</script>

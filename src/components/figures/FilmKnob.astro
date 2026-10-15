@@ -1,0 +1,75 @@
+---
+// SoundStream review, Figure 4: FiLM (Eq 7, p. 6) as a mixing desk. A toy
+// layer with 8 channels: 1 to 4 carry speech, 5 to 8 carry noise. Each mode
+// has its own scale gamma and shift beta per channel (toy values). The output
+// is the sum of the modulated channels; the switch can flip mid-clip.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram fk" role="region" aria-label={alt} data-fk>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 380" role="img" aria-labelledby="fk-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="fk-title">A denoise switch moving eight channel faders at once, and the output turning clean</title>
+    <text x="20" y="22" font-size="11.5" font-weight="700" fill="#2b2b30">Eight channels of one layer: ã = γ a + β</text>
+    <g data-faders></g>
+    <text x="20" y="232" font-size="11.5" font-weight="700" fill="#2b2b30">Output over one second</text>
+    <rect data-onzone y="242" height="96" fill="#4F5D3A" fill-opacity="0.07" />
+    <path data-wave d="" fill="none" stroke="#2b2b30" stroke-width="1" />
+    <line data-flip y1="238" y2="342" stroke="#4F5D3A" stroke-width="2" stroke-dasharray="4 3" />
+    <line data-head y1="238" y2="342" stroke="#a33b3b" stroke-width="1.5" />
+    <text data-r1 x="20" y="364" font-size="12" fill="#2b2b30"></text>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Denoise switches on at<strong data-vf></strong></span><input class="scrub" data-f type="range" min="0" max="1" step="0.05" value="0.5" /></label>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { setupFigure, tween } from "../../lib/figure-motion";
+  import { gauss } from "../../lib/flow-math";
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-fk]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const fIn = $<HTMLInputElement>("[data-f]");
+    const mk = (g: Element, tag: string, a: Record<string, string | number>, txt?: string) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, String(a[k])); if (txt !== undefined) e.textContent = txt; g.append(e); return e; };
+    // Toy settings: off = pass everything; on = keep speech, mute noise.
+    const OFF = { g: [1, 1, 1, 1, 1, 1, 1, 1], b: [0, 0, 0, 0, 0, 0, 0, 0] };
+    const ON = { g: [1.1, 1, 1.05, 1, 0.1, 0.05, 0.1, 0.05], b: [0, 0, 0, 0, -0.02, 0, 0.02, 0] };
+    const N = 600, g = gauss(21);
+    const chans = Array.from({ length: 8 }, (_, c) => Float64Array.from({ length: N }, (_, i) => {
+      const t = i / N;
+      if (c < 4) { const env = Math.max(0, Math.sin(Math.PI * ((t * 3) % 1))) ** 2; return 0.22 * env * Math.sin(2 * Math.PI * (18 + 7 * c) * t * 3); }
+      return 0.12 * g();
+    }));
+    let head = 1;
+    const mode = (t: number) => (t >= +fIn.value ? ON : OFF);
+    function draw() {
+      const flip = +fIn.value, gf = $("[data-faders]"); gf.replaceChildren();
+      const now = mode(Math.min(head, 0.999));
+      for (let c = 0; c < 8; c++) {
+        const x = 40 + c * 90, gam = now.g[c], bet = now.b[c];
+        mk(gf, "line", { x1: x + 20, x2: x + 20, y1: 40, y2: 170, stroke: "#d5d5dc", "stroke-width": 4 });
+        mk(gf, "rect", { x: x + 6, y: 170 - gam * 110 - 7, width: 28, height: 14, rx: 3, fill: c < 4 ? "#4F5D3A" : "#a33b3b" });
+        mk(gf, "text", { x: x + 20, y: 190, "font-size": 10.5, "font-weight": 700, "text-anchor": "middle", fill: c < 4 ? "#4F5D3A" : "#a33b3b" }, c < 4 ? `speech ${c + 1}` : `noise ${c - 3}`);
+        mk(gf, "text", { x: x + 20, y: 206, "font-size": 10, "text-anchor": "middle", fill: "#2b2b30", "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace" }, `γ ${gam.toFixed(2)}`);
+        mk(gf, "text", { x: x + 20, y: 220, "font-size": 10, "text-anchor": "middle", fill: "#5f5f66", "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace" }, `β ${bet >= 0 ? "+" : ""}${bet.toFixed(2)}`);
+      }
+      const X = (t: number) => 40 + t * 700;
+      let d = "";
+      for (let i = 0; i < N; i++) {
+        const t = i / N; if (t > head) break;
+        const m = mode(t); let y = 0;
+        for (let c = 0; c < 8; c++) y += m.g[c] * chans[c][i] + m.b[c];
+        d += `${i ? "L" : "M"}${X(t).toFixed(1)} ${(290 - y * 70).toFixed(1)}`;
+      }
+      $("[data-wave]").setAttribute("d", d);
+      const z = $("[data-onzone]"); z.setAttribute("x", String(X(flip))); z.setAttribute("width", String(Math.max(0, X(1) - X(flip))));
+      const fl = $("[data-flip]"); fl.setAttribute("x1", String(X(flip))); fl.setAttribute("x2", String(X(flip)));
+      const h = $("[data-head]"); h.setAttribute("x1", String(X(head))); h.setAttribute("x2", String(X(head)));
+      $("[data-r1]").textContent = head < flip ? "Denoise off: γ = 1, β = 0 everywhere, so the noise channels pass through." : "Denoise on: the same weights, new γ and β. Noise channels drop to γ ≈ 0.1 at once, with no extra delay.";
+      $("[data-vf]").textContent = `${flip.toFixed(2)} s`; fIn.style.setProperty("--p", `${flip * 100}%`);
+    }
+    fIn.addEventListener("input", () => { head = 1; draw(); });
+    draw();
+    setupFigure(root, () => { head = 0; draw(); }, async (alive) => { await tween(4, (e) => { if (alive()) { head = 1 - Math.cbrt(1 - e); draw(); } }); });
+  });
+</script>

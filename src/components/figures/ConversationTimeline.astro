@@ -1,0 +1,113 @@
+---
+import { LANE_Y, T_MAX, X0, render, scenario, x } from "../../lib/conversation-scenarios";
+
+const { alt } = Astro.props;
+const initial = render(scenario(false));
+const ticks = Array.from({ length: T_MAX + 1 }, (_, s) => s);
+---
+<div class="blog-diagram ct" role="region" aria-label={alt} data-ct>
+  <div class="ct__controls" role="group" aria-label="Scenario">
+    <button type="button" data-scenario="turn" aria-pressed="true">Answer a question</button>
+    <button type="button" data-scenario="interrupt" aria-pressed="false">Simulate interruption</button>
+  </div>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 300" role="img" aria-labelledby="ct-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="ct-title">Cascade and full-duplex conversation timelines</title>
+    <text x="16" y="28" font-size="11" letter-spacing="1" fill="#5f5f66">CASCADE · ASR → LLM → TTS</text>
+    <text x="16" y="160" font-size="11" letter-spacing="1" fill="#5f5f66">FULL DUPLEX · ONE MODEL, TWO STREAMS</text>
+    <g font-size="12" fill="#2b2b30">
+      <text x="16" y={LANE_Y["c-user"] + 4}>you</text>
+      <text x="16" y={LANE_Y["c-ai"] + 4}>assistant</text>
+      <text x="16" y={LANE_Y["d-user"] + 4}>you</text>
+      <text x="16" y={LANE_Y["d-ai"] + 4}>assistant</text>
+    </g>
+    <g stroke="#ececf1">
+      {Object.values(LANE_Y).map((y) => <line x1={X0} y1={y} x2={x(T_MAX)} y2={y} />)}
+    </g>
+    <line x1="16" y1="140" x2="764" y2="140" stroke="#d5d5dc" stroke-dasharray="3 4" />
+    <g font-size="10" fill="#5f5f66" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">
+      {ticks.map((s) => (
+        <g>
+          <line x1={x(s)} y1="276" x2={x(s)} y2="281" stroke="#c9c9d1" />
+          <text x={x(s)} y="294" text-anchor="middle">{s} s</text>
+        </g>
+      ))}
+    </g>
+    <g data-layer set:html={initial} />
+    <line data-playhead x1={X0} y1="40" x2={X0} y2="276" stroke="#2b2b30" stroke-width="1" opacity="0" />
+  </svg>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<style>
+  .ct__controls { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.6rem; }
+  .ct__controls button {
+    min-height: 34px;
+    padding: 0 0.85rem;
+    border: 1px solid var(--border-strong);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: 0.85rem;
+    cursor: pointer;
+  }
+  .ct__controls button[aria-pressed="true"] { background: var(--text); color: var(--bg); border-color: var(--text); }
+</style>
+
+<script>
+  import { animate, dur, setupFigure } from "../../lib/figure-motion";
+  import { T_MAX, PX, render, scenario } from "../../lib/conversation-scenarios";
+
+  // A playhead sweeps the 9 s timeline at 0.6x real time; each piece appears as
+  // the playhead reaches it, so the cascade's waiting is felt, not just shown.
+  const SPEED = 0.6;
+  document.querySelectorAll<HTMLElement>("[data-ct]").forEach((root) => {
+    const layer = root.querySelector<SVGGElement>("[data-layer]")!;
+    const head = root.querySelector<SVGLineElement>("[data-playhead]")!;
+    const buttons = Array.from(root.querySelectorAll<HTMLButtonElement>("[data-scenario]"));
+    let interrupt = false;
+
+    const items = () => Array.from(layer.children) as SVGElement[];
+    const prep = (el: SVGElement) => {
+      if (el.dataset.kind === "speech") {
+        el.setAttribute("pathLength", "1");
+        el.style.strokeDasharray = "1";
+        el.style.strokeDashoffset = "1";
+      } else {
+        el.style.opacity = "0";
+      }
+    };
+
+    setupFigure(
+      root,
+      () => {
+        layer.innerHTML = render(scenario(interrupt));
+        items().forEach(prep);
+        head.style.opacity = "0";
+        head.style.transform = "translateX(0px)";
+      },
+      async (alive) => {
+        head.style.opacity = "1";
+        const total = T_MAX * SPEED;
+        const sweep = animate(head, { transform: ["translateX(0px)", `translateX(${T_MAX * PX}px)`] }, { duration: dur(total), ease: "linear" });
+        for (const el of items()) {
+          const t0 = +el.dataset.t0!, t1 = +el.dataset.t1!;
+          const delay = dur(t0 * SPEED);
+          if (el.dataset.kind === "speech") animate(el, { strokeDashoffset: [1, 0] }, { duration: dur((t1 - t0) * SPEED), delay, ease: "linear" });
+          else if (el.dataset.kind === "mark") animate(el, { opacity: [0, 1] }, { duration: dur(0.25), delay: dur(t1 * SPEED) });
+          else animate(el, { opacity: [0, 1] }, { duration: dur(0.15), delay });
+        }
+        await sweep;
+        if (alive()) animate(head, { opacity: [1, 0] }, { duration: dur(0.3) });
+      },
+    );
+    buttons.forEach((b) =>
+      b.addEventListener("click", () => {
+        interrupt = b.dataset.scenario === "interrupt";
+        buttons.forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+        // Replay re-renders the chosen scenario (instantly under reduced motion).
+        root.querySelector<HTMLButtonElement>("[data-replay]")!.click();
+      }),
+    );
+  });
+</script>

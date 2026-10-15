@@ -1,0 +1,98 @@
+---
+// Foundations, GANs post: one whole training round of a one-number GAN.
+// Generator G(z) = a z + b (a = 0.5, b = 0); detective
+// D(x) = σ(w₁ x² + w₂ x + c) with (w₁, w₂, c) = (0.1, 0.2, −1). Noise z = 0.8,
+// real sample 3.4. The detective takes one step (η 0.01) on its binary
+// cross-entropy, then the forger one step (η 0.5) on the non-saturating loss.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-gan-arch>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 360" role="img" aria-labelledby="ga2-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="ga2-title">A GAN: noise into the generator, real and fake samples into the detective, and both updates</title>
+    <g data-draw></g>
+  </svg>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt, par } from "../../lib/tiny-net";
+  import { INK, MUTED, NEG, JADE, GOLD, TINT } from "../../lib/net-diagram";
+  import { txt, arrow } from "../../lib/plot";
+  const sig = (s: number) => 1 / (1 + Math.exp(-s));
+  const Z = 0.8, XR = 3.4, A0 = 0.5, B0 = 0, W0 = [0.1, 0.2, -1], ETA_D = 0.01, ETA_G = 0.5;
+  const score = (w: number[], x: number) => w[0] * x * x + w[1] * x + w[2];
+  // One round, all intermediate numbers.
+  const R = (() => {
+    const xf = A0 * Z + B0, sr = score(W0, XR), sf = score(W0, xf), Dr = sig(sr), Df = sig(sf);
+    const LD = -Math.log(Dr) - Math.log(1 - Df);
+    const gs = [Dr - 1, Df]; // dL/ds for the real and the fake score
+    const gw = [gs[0] * XR * XR + gs[1] * xf * xf, gs[0] * XR + gs[1] * xf, gs[0] + gs[1]];
+    const W1 = W0.map((w, i) => w - ETA_D * gw[i]);
+    const sf2 = score(W1, xf), Df2 = sig(sf2), LG = -Math.log(Df2);
+    const dsdx = 2 * W1[0] * xf + W1[1], dLdx = (Df2 - 1) * dsdx;
+    const ga = dLdx * Z, gb = dLdx, A1 = A0 - ETA_G * ga, B1 = B0 - ETA_G * gb, xf2 = A1 * Z + B1;
+    return { xf, sr, sf, Dr, Df, LD, gs, gw, W1, sf2, Df2, LG, dsdx, dLdx, ga, gb, A1, B1, xf2, Dnew: sig(score(W1, xf2)) };
+  })();
+  document.querySelectorAll<HTMLElement>("[data-gan-arch]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const f3 = (v: number) => fmt(v, 3), w3 = (w: number[]) => `(${w.map(f3).join(", ")})`;
+    const steps = () => [
+      { say: "Start with noise: one random number z from a standard bell curve. It is the generator's only input.", math: `z = ${Z}` },
+      { say: "The generator (the forger) turns noise into a fake sample. Here it is tiny: a line with two weights a and b.", math: `x_fake = a z + b = ${A0} × ${Z} + ${B0} = ${f3(R.xf)}` },
+      { say: "Draw one real sample from the data. The real data sit around 3.", math: `x_real = ${XR}` },
+      { say: "The detective (the discriminator) scores both: the chance each one is real. It sees only the number, not where it came from.", math: `D(x) = σ(w₁ x² + w₂ x + c),  (w₁, w₂, c) = ${w3(W0)}\nD(${XR}) = σ(${f3(R.sr)}) = ${f3(R.Dr)}   D(${f3(R.xf)}) = σ(${f3(R.sf)}) = ${f3(R.Df)}` },
+      { say: "The detective's loss is binary cross-entropy: it wants D(real) near 1 and D(fake) near 0.", math: `L_D = −ln D(real) − ln(1 − D(fake)) = −ln ${f3(R.Dr)} − ln ${f3(1 - R.Df)} = ${f3(R.LD)}` },
+      { say: "Detective's turn to learn. The generator is frozen. One gradient step on the detective's three weights.", math: `∂L/∂w₁ = (D_r − 1) x_r² + D_f x_f² = ${f3(R.gw[0])},  ∂L/∂w₂ = ${f3(R.gw[1])},  ∂L/∂c = ${f3(R.gw[2])}\nnew (w₁, w₂, c) = old − ${ETA_D} × gradient = ${w3(R.W1)}` },
+      { say: "Forger's turn. The detective is frozen now. Score the same fake with the updated detective. The forger wants this score high, so its loss is −ln D(fake): the non-saturating loss.", math: `D(${f3(R.xf)}) = σ(${f3(R.sf2)}) = ${f3(R.Df2)},  L_G = −ln ${f3(R.Df2)} = ${f3(R.LG)}` },
+      { say: "The gradient flows back through the detective to the fake sample: which way should x_fake move to look more real?", math: `∂L_G/∂x = (D − 1) × (2 w₁ x + w₂) = ${par(R.Df2 - 1, 3)} × ${f3(R.dsdx)} = ${f3(R.dLdx)}  (negative: move right)` },
+      { say: "…and on through the generator to its weights. One step, and the same z now makes a fake closer to the real data.", math: `∂L/∂a = ∂L/∂x × z = ${f3(R.ga)},  ∂L/∂b = ${f3(R.gb)}\na = ${A0} − ${ETA_G} × ${par(R.ga, 3)} = ${f3(R.A1)},  b = ${f3(R.B1)}  →  x_fake = ${f3(R.xf2)}, D = ${f3(R.Dnew)}` },
+      { say: "Training repeats these two turns thousands of times on batches. To generate, keep only the generator: draw z, compute G(z). The detective is thrown away.", math: "generation: z → G(z), nothing else" },
+    ];
+    function draw(k: number) {
+      let s = "";
+      const box = (x: number, y: number, w: number, h: number, title: string, sub: string, on: boolean, frozen: boolean, col = INK) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="8" fill="${on ? TINT : "#fff"}" stroke="${col}" stroke-width="${on ? 2.2 : 1.2}" stroke-dasharray="${frozen ? "5 4" : ""}"/>` + txt(x + w / 2, y + 20, title, `font-size="12" font-weight="700" text-anchor="middle" fill="${INK}"`) + txt(x + w / 2, y + 37, sub, `font-size="10.5" text-anchor="middle" fill="${MUTED}"`) + (frozen ? txt(x + w / 2, y + h + 14, "frozen this turn", `font-size="9.5" text-anchor="middle" fill="${MUTED}"`) : "");
+      const genFrozen = k >= 5 && k <= 5, detFrozen = k >= 6 && k <= 8;
+      const a = k >= 8 ? R.A1 : A0, b = k >= 8 ? R.B1 : B0, w = k >= 5 ? R.W1 : W0;
+      // Noise.
+      s += box(16, 40, 92, 56, "noise z", k >= 0 ? `z = ${Z}` : "", k === 0, false, GOLD);
+      // Generator.
+      s += box(140, 34, 150, 68, "generator", `x = ${fmt(a, 3)} z + ${fmt(b, 3)}`, k === 1 || k === 8, genFrozen, JADE);
+      s += arrow(110, 68, 138, 68, k >= 1 ? INK : "#cfd5d4", 1.5);
+      // Fake and real.
+      s += `<rect x="320" y="46" width="90" height="44" rx="6" fill="#fff" stroke="${NEG}"/>` + txt(365, 64, "fake", `font-size="10.5" text-anchor="middle" fill="${NEG}"`) + txt(365, 82, k >= 1 ? fmt(k >= 8 ? R.xf2 : R.xf, 3) : "", `font-size="13" font-weight="700" text-anchor="middle" fill="${INK}"`);
+      s += arrow(292, 68, 318, 68, k >= 1 ? INK : "#cfd5d4", 1.5);
+      s += box(140, 150, 150, 56, "real data", "samples around 3", k === 2, false, "#3E6E9E");
+      s += `<rect x="320" y="156" width="90" height="44" rx="6" fill="#fff" stroke="#3E6E9E"/>` + txt(365, 174, "real", `font-size="10.5" text-anchor="middle" fill="#3E6E9E"`) + txt(365, 192, k >= 2 ? String(XR) : "", `font-size="13" font-weight="700" text-anchor="middle" fill="${INK}"`);
+      s += arrow(292, 178, 318, 178, k >= 2 ? INK : "#cfd5d4", 1.5);
+      // Detective.
+      s += box(446, 90, 150, 68, "detective", `σ(${fmt(w[0], 3)}x² + ${fmt(w[1], 3)}x ${w[2] < 0 ? "−" : "+"} ${fmt(Math.abs(w[2]), 3)})`, k === 3 || k === 5, detFrozen, INK);
+      s += arrow(412, 68, 444, 108, k >= 3 ? INK : "#cfd5d4", 1.5) + arrow(412, 178, 444, 142, k >= 3 ? INK : "#cfd5d4", 1.5);
+      // Scores and losses.
+      if (k >= 3) {
+        const Df = k >= 8 ? R.Dnew : k >= 6 ? R.Df2 : R.Df;
+        s += txt(620, 108, `D(fake) = ${fmt(Df, 3)}`, `font-size="12" font-weight="700" fill="${NEG}"`) + txt(620, 146, `D(real) = ${fmt(k >= 6 ? sig(score(R.W1, XR)) : R.Dr, 3)}`, `font-size="12" font-weight="700" fill="#3E6E9E"`);
+        s += arrow(598, 124, 614, 124, INK, 1.2);
+      }
+      if (k >= 4) s += txt(620, 186, `detective loss ${fmt(R.LD, 3)}`, `font-size="11.5" fill="${k === 4 || k === 5 ? GOLD : MUTED}"`);
+      if (k >= 6) s += txt(620, 204, `forger loss ${fmt(R.LG, 3)}`, `font-size="11.5" fill="${k >= 6 && k <= 8 ? GOLD : MUTED}"`);
+      // Gradient arrows.
+      if (k === 5) s += `<path d="M640,192 C660,240 560,240 540,162" fill="none" stroke="${NEG}" stroke-width="2" marker-end=""/>` + arrow(545, 175, 540, 161, NEG, 2) + txt(600, 250, "gradient → detective weights", `font-size="10.5" text-anchor="middle" fill="${NEG}"`);
+      if (k >= 7 && k <= 8) s += arrow(500, 88, 412, 58, NEG, 2) + txt(468, 52, "∂L/∂x", `font-size="10.5" fill="${NEG}"`);
+      if (k === 8) s += arrow(320, 52, 292, 44, NEG, 2) + txt(300, 30, "∂L/∂a, ∂L/∂b", `font-size="10.5" text-anchor="middle" fill="${NEG}"`);
+      // Number line.
+      const X = (v: number) => 40 + ((v + 1) / 6) * 680;
+      s += `<line x1="40" x2="720" y1="320" y2="320" stroke="#cfd5d4" stroke-width="2"/>`;
+      [-1, 0, 1, 2, 3, 4, 5].forEach((v) => (s += txt(X(v), 338, String(v), `font-size="10" text-anchor="middle" fill="${MUTED}"`)));
+      let pth = ""; for (let v = 1.4; v <= 4.6; v += 0.05) pth += `${pth ? "L" : "M"}${X(v).toFixed(1)},${(320 - 40 * Math.exp(-((v - 3) ** 2) / (2 * 0.25))).toFixed(1)}`;
+      s += `<path d="${pth}" fill="none" stroke="#3E6E9E" stroke-width="1.5"/>` + txt(X(3), 268, "real data", `font-size="10" text-anchor="middle" fill="#3E6E9E"`);
+      // Detective's opinion along the line.
+      if (k >= 3) { let d = ""; for (let v = -1; v <= 5; v += 0.05) d += `${d ? "L" : "M"}${X(v).toFixed(1)},${(320 - 50 * sig(score(w, v))).toFixed(1)}`; s += `<path d="${d}" fill="none" stroke="${INK}" stroke-dasharray="3 3" stroke-width="1.2"/>` + txt(X(-0.9), 282, "D(x): the detective's belief", `font-size="9.5" fill="${MUTED}"`); }
+      if (k >= 1) s += `<circle cx="${X(R.xf)}" cy="320" r="6" fill="${NEG}" fill-opacity="${k >= 8 ? 0.3 : 1}"/>`;
+      if (k >= 8) s += `<circle cx="${X(R.xf2)}" cy="320" r="6" fill="${NEG}"/>` + arrow(X(R.xf) + 6, 308, X(R.xf2) - 2, 308, NEG, 1.5);
+      if (k >= 2) s += `<circle cx="${X(XR)}" cy="320" r="5" fill="#3E6E9E"/>`;
+      $("[data-draw]").innerHTML = s;
+    }
+    stepper(root, steps, draw, { delay: 2.6 });
+  });
+</script>

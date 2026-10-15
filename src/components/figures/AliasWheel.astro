@@ -1,0 +1,94 @@
+---
+// Figure 3: aliasing twice. Left, a wheel filmed at 24 pictures a second.
+// Right, a tone sampled at 24 kHz; above 12 kHz the dots trace a slower,
+// false wave at |f - 24·round(f/24)| kHz.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram aw" role="region" aria-label={alt} data-aw>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 360" role="img" aria-labelledby="aw-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="aw-title">A wheel filmed too slowly spins backwards; a tone sampled too slowly looks like a lower tone</title>
+    <text x="20" y="24" font-size="11.5" font-weight="700" fill="#2b2b30">A wheel, filmed at 24 pictures a second</text>
+    <g transform="translate(130 150)">
+      <circle r="78" fill="none" stroke="#2b2b30" stroke-width="3" />
+      <circle r="6" fill="#2b2b30" />
+      <g data-spokes>
+        {[0, 1, 2, 3, 4, 5].map((i) => <line x1="0" y1="0" x2={74 * Math.cos((i * Math.PI) / 3)} y2={74 * Math.sin((i * Math.PI) / 3)} stroke={i === 0 ? "#a33b3b" : "#2b2b30"} stroke-width={i === 0 ? 4 : 1.5} />)}
+      </g>
+    </g>
+    <text data-w1 x="20" y="262" font-size="12" fill="#2b2b30"></text>
+    <text data-w2 x="20" y="282" font-size="12" font-weight="700" fill="#a33b3b"></text>
+
+    <line x1="270" x2="270" y1="10" y2="340" stroke="#ececf1" />
+    <text x="290" y="24" font-size="11.5" font-weight="700" fill="#2b2b30">A tone, sampled 24,000 times a second</text>
+    <line x1="290" x2="760" y1="120" y2="120" stroke="#ececf1" />
+    <path data-true d="" fill="none" stroke="#b9b9c2" stroke-width="1.5" />
+    <path data-fake d="" fill="none" stroke="#a33b3b" stroke-width="2" stroke-dasharray="5 4" />
+    <g data-dots></g>
+    <text x="290" y="206" font-size="10.5" fill="#5f5f66">0 ms</text>
+    <text x="760" y="206" font-size="10.5" text-anchor="end" fill="#5f5f66">1 ms</text>
+    <line x1="290" x2="760" y1="240" y2="240" stroke="#2b2b30" />
+    <rect x="290" y="232" width="235" height="16" fill="#4F5D3A" fill-opacity="0.12" />
+    <rect x="525" y="232" width="235" height="16" fill="#a33b3b" fill-opacity="0.1" />
+    <line x1="525" x2="525" y1="226" y2="254" stroke="#2b2b30" stroke-width="2" />
+    <text x="525" y="270" font-size="10.5" text-anchor="middle" font-weight="700" fill="#2b2b30">12 kHz: the Nyquist limit</text>
+    <text x="290" y="270" font-size="10.5" fill="#5f5f66">0</text>
+    <text x="760" y="270" font-size="10.5" text-anchor="end" fill="#5f5f66">24 kHz</text>
+    <path data-mark d="" fill="#594578" />
+    <text data-t1 x="290" y="302" font-size="12" fill="#2b2b30"></text>
+    <text data-t2 x="290" y="322" font-size="12" font-weight="700"></text>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Wheel speed<strong data-vw></strong></span><input class="scrub" data-ws type="range" min="0" max="30" step="0.5" value="23" /></label>
+    <label><span class="fig-panel__name">Tone<strong data-vt></strong></span><input class="scrub" data-tone type="range" min="1" max="23" step="0.5" value="15" /></label>
+  </div>
+</div>
+
+<script>
+  import { whileVisible } from "../../lib/figure-motion";
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-aw]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const ws = $<HTMLInputElement>("[data-ws]"), tone = $<HTMLInputElement>("[data-tone]");
+    const fill = (el: HTMLInputElement) => el.style.setProperty("--p", `${((+el.value - +el.min) / (+el.max - +el.min)) * 100}%`);
+    // The wheel the camera sees: angle only updates 24 times a second.
+    const wheel = (t: number) => {
+      const v = +ws.value, shot = Math.floor(t * 24) / 24;
+      $("[data-spokes]").setAttribute("transform", `rotate(${(360 * v * shot) % 360})`);
+      const seen = v - 24 * Math.round(v / 24);
+      $("[data-w1]").textContent = `Real speed: ${v} turns a second`;
+      const w2 = $("[data-w2]");
+      w2.textContent = Math.abs(seen) < 1e-9 ? "On film: frozen" : seen < 0 ? `On film: backwards, ${Math.abs(seen)} turn${Math.abs(seen) === 1 ? "" : "s"} a second` : seen === v ? `On film: forwards, ${seen} turns a second (correct)` : `On film: forwards, only ${seen} turns a second`;
+      w2.setAttribute("fill", seen === v && v > 0 ? "#4F5D3A" : "#a33b3b");
+      $("[data-vw]").textContent = `${v} turns/s`;
+    };
+    const X = (ms: number) => 290 + ms * 470, Y = (v: number) => 120 - v * 60;
+    const wave = () => {
+      const f = +tone.value, fa = f - 24 * Math.round(f / 24);
+      let a = "", b = "";
+      for (let px = 0; px <= 470; px += 1) {
+        const ms = px / 470;
+        a += `${px ? "L" : "M"}${290 + px} ${Y(Math.sin(2 * Math.PI * f * ms)).toFixed(1)}`;
+        b += `${px ? "L" : "M"}${290 + px} ${Y(Math.sin(2 * Math.PI * fa * ms)).toFixed(1)}`;
+      }
+      $("[data-true]").setAttribute("d", a);
+      const fake = $<SVGElement>("[data-fake]"); fake.setAttribute("d", b); fake.style.opacity = f > 12 ? "1" : "0";
+      const g = $("[data-dots]"); g.replaceChildren();
+      for (let i = 0; i <= 24; i++) {
+        const ms = i / 24, c = document.createElementNS(NS, "circle");
+        c.setAttribute("cx", String(X(ms))); c.setAttribute("cy", String(Y(Math.sin(2 * Math.PI * f * ms)))); c.setAttribute("r", "3.5"); c.setAttribute("fill", "#594578");
+        g.append(c);
+      }
+      const mx = 290 + (f / 24) * 470;
+      $("[data-mark]").setAttribute("d", `M${mx} 230 l-6 -10 h12 z`);
+      $("[data-t1]").textContent = `True tone: ${f} kHz (${(24 / f).toFixed(1)} samples per wave)`;
+      const t2 = $("[data-t2]");
+      t2.textContent = f <= 12 ? "Recorded correctly" : `Heard as ${Math.abs(fa)} kHz (24 − ${f} = ${24 - f}): a fake, lower tone`;
+      t2.setAttribute("fill", f <= 12 ? "#4F5D3A" : "#a33b3b");
+      $("[data-vt]").textContent = `${f} kHz`;
+    };
+    const redraw = whileVisible(root, wheel);
+    fill(ws); fill(tone); wave();
+    ws.addEventListener("input", () => { fill(ws); redraw(); });
+    tone.addEventListener("input", () => { fill(tone); wave(); });
+  });
+</script>

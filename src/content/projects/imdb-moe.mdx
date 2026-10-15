@@ -1,0 +1,27 @@
+---
+title: "Customer Feedback Intelligence"
+area: "NLP"
+date: "April 2026"
+order: 5
+headline: "A sentiment model that scores 90% on movie reviews drops to 86% on product reviews. The dashboard is built to keep that gap visible to the people using it."
+question: "How much of a sentiment model's benchmark score survives the move from movie reviews to real customer feedback, and how should a tool handle the gap?"
+approach: "A reproducible IMDb baseline, transfer checks on Amazon reviews and a fixed feedback set, and a public dashboard that scores, triages and flags uncertain items for review."
+stack: "Python · scikit-learn · Hugging Face · Gradio"
+links:
+  - { label: "Live dashboard", url: "https://ric912-customer-feedback-intelligence-demo.hf.space" }
+  - { label: "Source code", url: "https://github.com/richardcheam/customer-feedback-intelligence" }
+numbers:
+  - { value: "90.15%", label: "IMDb test accuracy, TF-IDF + logistic regression" }
+  - { value: "85.65%", label: "Amazon product reviews, same model, no retraining" }
+---
+
+## What I did
+
+I rebuilt an earlier IMDb sentiment project around three parts. A reproducible baseline on IMDb: TF-IDF features with logistic regression as the saved model, with a RoBERTa fine-tuning path for larger runs. Transfer checks on Amazon product reviews and on a fixed 200-example customer-feedback set, without retraining. And a Gradio dashboard, deployed on Hugging Face Spaces, that takes pasted text or uploaded files, keeps metadata such as channel and product, scores the whole batch and exports the results as CSV.
+
+On top of the raw sentiment, the dashboard adds confidence, an uncertainty flag that sends doubtful items to manual review, a priority score and exploratory theme clustering.
+
+## What I found
+
+- **The benchmark transfers, but only partly.** Accuracy fell from 90.15% on IMDb to 85.65% on Amazon reviews: movie language is not product language.
+- **Showing uncertainty matters more than a better model** for this use. Routing low-confidence items to a person makes the cross-domain limit something the user can act on, instead of a hidden error.

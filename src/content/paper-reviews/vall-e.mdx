@@ -1,0 +1,481 @@
+---
+title: "VALL-E: Text to Speech as Next-Token Prediction"
+published: true
+date: 2026-10-14
+question: "Can you make a computer speak in a stranger's voice, from three seconds of them, by treating speech like text for a language model?"
+excerpt: "VALL-E turns speech into a grid of EnCodec tokens, predicts the first row word-by-word like GPT and fills the other seven rows in seven parallel passes. Trained on 60K hours of audiobooks with machine transcripts, it copies a new voice from a 3-second clip and beats YourTTS on speaker similarity and naturalness."
+type: paper
+topic: [speech, generative]
+tags: [Speech, TTS, Zero-shot TTS, VALL-E, EnCodec, Codec language model, Microsoft]
+org: "Microsoft"
+authors: "Chengyi Wang, Sanyuan Chen, Yu Wu, Ziqiang Zhang, Long Zhou, Shujie Liu, Zhuo Chen, Yanqing Liu, Huaming Wang, Jinyu Li, Lei He, Sheng Zhao, Furu Wei"
+source_url: https://arxiv.org/abs/2301.02111
+source_label: "Read the paper (arXiv)"
+source_date: 2023-01-05
+links:
+  - label: "Demo"
+    url: https://aka.ms/valle
+math: true
+tldr:
+  - "**Authors' claim:** VALL-E is the first language-model-based TTS framework, trained on 60K hours of English, and it clones an unseen speaker from a 3-second enrolled recording (Abstract, p. 1; Sec 1, p. 2)."
+  - "**The trick:** speech becomes an 8-row grid of EnCodec tokens. An autoregressive model writes row 1 one token at a time; a non-autoregressive model fills rows 2 to 8, one whole row per pass (Sec 4.2, pp. 5 to 6, Eq 3)."
+  - "**Evidence:** on LibriSpeech test-clean, word error rate 5.9 vs 7.7 for YourTTS and speaker similarity 0.580 vs 0.337 (Table 2, p. 9); SMOS 4.38 vs 3.45 and CMOS +0.12 (Table 3, p. 9)."
+  - "**My reading:** the recipe (tokenise, then predict the next token) is what lasted. The weak spot the authors name, words skipped or repeated by the autoregressive part, is what most follow-up work went after."
+---
+import TokenGridCounter from "../../components/figures/TokenGridCounter.astro";
+import PassCounter from "../../components/figures/PassCounter.astro";
+import AutoregressiveRowWriter from "../../components/figures/AutoregressiveRowWriter.astro";
+import LayerFiller from "../../components/figures/LayerFiller.astro";
+import BeamLoopDice from "../../components/figures/BeamLoopDice.astro";
+import ValleReportCard from "../../components/figures/ValleReportCard.astro";
+import PromptLengthLadder from "../../components/figures/PromptLengthLadder.astro";
+import AlignmentSlip from "../../components/figures/AlignmentSlip.astro";
+
+## The question and why it matters
+
+Picture a parrot that has listened to thousands of audiobooks. You play it three seconds of your grandmother saying "pass the salt", then hand it a sentence she never said. Could it say that sentence in her voice?
+
+That is **zero-shot text to speech (TTS)**: a machine reads text aloud in the voice of a speaker it never trained on, from a tiny sample. "Zero-shot" means zero extra training for the new voice.
+
+Before VALL-E, most TTS systems were a two-step relay: an **acoustic model** turned text into a **mel spectrogram** (a picture of which pitches are loud at each moment; see [/blog/audio-basics/](/blog/audio-basics/)), then a **vocoder** turned that picture into sound (Sec 1, p. 2). They learned by **regression**: draw the picture, measure how far each pixel is from the right one, nudge. They needed clean studio data, and the paper says their speaker similarity and naturalness "decline dramatically" for unseen speakers (Sec 1, p. 2).
+
+VALL-E's bet: text language models like GPT-3 got good by eating huge, messy data and predicting the next token. Do the same for speech. Turn sound into tokens with an off-the-shelf codec, then train a language model on **60K hours** of English from about **7,000** speakers (Sec 5.1, p. 8). The paper's Table 1 (p. 2) frames it as: mel spectrogram vs audio codec code, continuous regression vs language model, at most **600 hours** of data vs **60K hours**, no in-context learning vs yes.
+
+**In-context learning** is the GPT-3 trick of picking up a task from the prompt alone, with no weight updates (Sec 4.3, p. 7). Here the "task" is "keep talking in this voice". See [the prompt section](#the-prompt-three-seconds-of-a-stranger).
+
+Why it matters for this site: VALL-E is the ancestor of the codec language models I study, including the token grids in [Moshi](/paper-reviews/moshi/) and the continuous rethink in [Pocket TTS and CALM](/blog/pocket-tts-calm-explained/).
+
+
+## The pieces, before the details
+
+Four parts, like a kitchen:
+
+1. **G2P** (grapheme to phoneme): turns letters into speech sounds, "cat" into /k/ /æ/ /t/ (Fig 3, p. 6). The recipe card.
+2. **EnCodec**: Meta's neural audio codec, used frozen as a tokenizer (Sec 3, p. 5). It turns a waveform into a grid of small integers, and back. The freezer that packs and unpacks food.
+3. **The AR model**: an **autoregressive** (one-at-a-time, each step looking at everything before) transformer that writes the first row of the grid. The head chef, slow and careful. See [the AR section](#row-one-the-autoregressive-model).
+4. **The NAR model**: a **non-autoregressive** (whole row at once) transformer that fills rows 2 to 8. The kitchen crew that works in parallel. See [the NAR section](#rows-two-to-eight-the-non-autoregressive-model).
+
+Both transformers are the same size: **12** layers, **16** attention heads, embedding size **1024**, feed-forward size **4096**, dropout **0.1** (Sec 5.1, p. 8).
+
+
+## Speech as a grid of tokens
+
+### EnCodec in one paragraph
+
+Full story in [/blog/mimi-codec-explained/](/blog/mimi-codec-explained/) (Mimi is a later cousin of EnCodec) and [/blog/residual-vector-quantization/](/blog/residual-vector-quantization/). Here only the numbers VALL-E uses:
+
+- Input and output audio at **24 kHz** (24,000 samples per second) (Sec 3, p. 5).
+- The encoder makes one embedding every **1/75 s**, so **75 Hz**, a **320-fold** reduction (Sec 3, p. 5).
+- Each embedding is quantised by **residual vector quantisation (RVQ)** with **8** quantisers of **1024** entries each, matching EnCodec at **6 kbps** (Sec 3, p. 5; Fig 2, p. 4).
+
+RVQ is like paying an exact price with coins: the first coin gets close, each later coin pays the leftover. The paper's Fig 2 caption (p. 4): "the first quantizer plays the most important role in reconstruction, and the impact from others gradually decreases." See it happen in the [RVQ post](/blog/residual-vector-quantization/#quantize-what-is-left-over).
+
+### Counting the grid
+
+$$
+T = \frac{f_s \cdot d}{h}
+$$
+
+- $T$: number of frames (columns of the grid).
+- $f_s$: sample rate, 24,000 samples per second.
+- $d$: duration in seconds.
+- $h$: hop, 320 samples per frame.
+
+Intuition: chop the recording into slices of 320 samples; count slices.
+
+Worked example (the paper's own, Sec 3, p. 5): $d = 10$ s gives $T = 24{,}000 \cdot 10 / 320 = 750$. With 8 rows that is $750 \times 8 = 6{,}000$ tokens. A 3-second prompt is $24{,}000 \cdot 3 / 320 = 225$ frames (my arithmetic).
+
+Bitrate check (my arithmetic, matches the paper's "6K"): each token picks one of $1024 = 2^{10}$ entries, so 10 bits. $75 \text{ frames/s} \times 8 \times 10 \text{ bits} = 6{,}000$ bits per second.
+
+### The notation
+
+The paper writes the codes of one utterance as a matrix $C$ with $T$ rows and 8 columns, $\text{Encodec}(y) = C^{T \times 8}$ (Sec 4.1, p. 5):
+
+- $y$: the audio waveform.
+- $x = \{x_0, \dots, x_L\}$: its phoneme sequence.
+- $c_{t,:}$: the 8 codes of frame $t$ (one time slice, all quantisers).
+- $c_{:,j}$: the whole sequence from quantiser $j$, $j \in \{1, \dots, 8\}$.
+- $\tilde{C}^{T' \times 8}$: the grid of the **enrolled recording** (the voice sample), $T'$ frames long.
+- $\text{Decodec}(C) \approx \hat{y}$: the decoder turns codes back into sound.
+
+On this site I draw the grid lying down (time left to right, quantiser 1 on top) so "row 1" means $c_{:,1}$.
+
+<figure class="blog-figure blog-figure--wide">
+  <TokenGridCounter alt="A waveform of the first second above a grid of codec tokens, one column per 320 samples and 8 rows, filling left to right. A slider sets the clip length and a toggle switches between 8 and 16 quantizers; readouts give columns, tokens and bitrate." />
+  <figcaption><strong>Figure 1. Speech as a grid.</strong> 24 kHz, 75 columns a second, 8 rows of 1,024-entry codes (Sec 3, p. 5). The waveform is synthetic; counts are arithmetic.</figcaption>
+</figure>
+
+
+## Coarse first, fine later
+
+Why split the grid between two models at all? Because RVQ makes rows unequal. Row 1 carries the big picture (what is said, roughly who says it); later rows add detail (Sec 4.2, p. 5: "tokens from previous quantizers recover acoustic properties like speaker identity, while the consecutive quantizers learn fine acoustic details").
+
+So the paper splits the probability of the whole grid into two jobs (Eq 3, p. 6):
+
+$$
+p(C \mid x, \tilde{C}; \theta) = p(c_{:,1} \mid \tilde{C}_{:,1}, x; \theta_{AR}) \prod_{j=2}^{8} p(c_{:,j} \mid c_{:,<j}, x, \tilde{C}; \theta_{NAR})
+$$
+
+- $p(C \mid x, \tilde{C}; \theta)$: how likely the model thinks grid $C$ is, given the phonemes $x$ and the prompt grid $\tilde{C}$.
+- $\theta$, $\theta_{AR}$, $\theta_{NAR}$: the weights of the whole system, the AR model and the NAR model.
+- $c_{:,1}$: row 1 of the new speech; $\tilde{C}_{:,1}$: row 1 of the prompt.
+- $\prod_{j=2}^{8}$: multiply the terms for rows 2, 3, ..., 8.
+- $c_{:,<j}$: all rows above row $j$.
+
+(The paper writes a capital $X$ in Eq 3 where Eq 1 has $x$; same thing.)
+
+Intuition: "probability of the whole drawing = probability of the sketch × probability of each colouring layer given the layers already done".
+
+Worked example: if the sketch has probability 0.5 and each of the seven colour layers has probability 0.9 given what is above it, the grid has probability $0.5 \times 0.9^7 \approx 0.5 \times 0.478 = 0.239$.
+
+Speed (Sec 4.2, p. 6): the AR part needs one pass per frame; the NAR part needs one pass per row, "O(T) to O(1)" in the paper's words. For 10 s: $750$ AR passes $+ 7$ NAR passes $= 757$, versus $6{,}000$ if every token were written one by one (my arithmetic, not a measured speed; the paper reports no timings).
+
+You can watch the coarse-to-fine split itself in the [residual zoom figure of the RVQ post](/blog/residual-vector-quantization/#quantize-what-is-left-over): each extra codebook fixes a smaller leftover.
+
+<figure class="blog-figure blog-figure--wide">
+  <PassCounter alt="Three lanes fill the same 8-row strip of tokens: one token per pass, VALL-E with row 1 one token per pass and then one row per pass, and every row at once. Counters show passes for the strip and for a chosen clip length." />
+  <figcaption><strong>Figure 2. Counting passes.</strong> 8T, T + 7 and 8 (Sec 4.2, p. 6). Counts, not timings: the paper reports none.</figcaption>
+</figure>
+
+
+## Row one: the autoregressive model
+
+### What it predicts
+
+Eq 1 (p. 5):
+
+$$
+p(c_{:,1} \mid x, \tilde{C}_{:,1}; \theta_{AR}) = \prod_{t=0}^{T} p(c_{t,1} \mid c_{<t,1}, \tilde{c}_{:,1}, x; \theta_{AR})
+$$
+
+- $c_{t,1}$: the row-1 token at frame $t$, one of 1024 values.
+- $c_{<t,1}$: the row-1 tokens already written before frame $t$.
+- $\tilde{c}_{:,1}$: row 1 of the prompt.
+- $x$: the phonemes.
+
+Intuition: this is the chain rule, the same as GPT predicting a sentence word by word. The chance of a whole row is the chance of the first token, times the chance of the second given the first, and so on.
+
+Worked example: three tokens with step probabilities 0.5, 0.4 and 0.8 give $0.5 \times 0.4 \times 0.8 = 0.16$. Training maximises this (in practice the sum of logs: $\ln 0.5 + \ln 0.4 + \ln 0.8 \approx -0.693 - 0.916 - 0.223 = -1.833$, and $e^{-1.833} \approx 0.16$).
+
+### How the input is laid out
+
+The input is one long line: phonemes, an end-of-sequence marker `<EOS>`, then row-1 audio tokens, then another `<EOS>` (Sec 4.2.1, p. 6). Position numbers restart for the audio part ("sinuous position embedding separately", p. 6; they mean sinusoidal). Each audio token may look at all phonemes and at the audio tokens to its left, never to its right (Fig 3, p. 6). The output layer shares weights with the audio embedding $W_a$ (p. 6).
+
+**The length problem it solves.** The AR model decides when to stop by emitting `<EOS>`. That matters because people talk at different speeds and the paper says a length predictor "for different speakers" is hard to train (Sec 4.2, p. 6). So the AR model also sets the rhythm. The NAR model then just fills the same number of columns.
+
+### No special prompt during training
+
+Training is "pure casual [causal] language model training" on random crops of **10 to 20 seconds** (LibriLight utterances average **60 s**) (Sec 4.2.1, p. 6; Sec 5.1, p. 8). There is no separate "prompt" slot: any earlier stretch of the crop acts as a prompt for the later stretch. At inference, the real prompt is simply placed first. This is the whole in-context learning trick: the model only ever learnt "keep going the way this audio was going".
+
+<figure class="blog-figure blog-figure--wide">
+  <AutoregressiveRowWriter alt="A line of cells: phonemes, an end marker, the voice prompt’s row-1 tokens, then new tokens written one at a time. Lines show which cells the next token may look at; a bar shows the toy probabilities for the next token and a readout gives the running product." />
+  <figcaption><strong>Figure 3. Writing row 1.</strong> Layout from Sec 4.2.1 and Fig 3 (p. 6). Token values and probabilities are toy numbers; the running product is Eq 1, reaching 0.5 × 0.4 × 0.8 = 0.16 after three tokens.</figcaption>
+</figure>
+
+
+## Rows two to eight: the non-autoregressive model
+
+### What it predicts
+
+Eq 2 (p. 6):
+
+$$
+p(C_{:,2:8} \mid x, \tilde{C}; \theta_{NAR}) = \prod_{j=2}^{8} p(c_{:,j} \mid C_{:,<j}, x, \tilde{C}; \theta_{NAR})
+$$
+
+- $C_{:,2:8}$: rows 2 to 8 of the new speech.
+- $c_{:,j}$: the whole row $j$, all $T$ frames at once.
+- $C_{:,<j}$: rows 1 to $j-1$, already known.
+- $\tilde{C}$: the full 8-row prompt grid (all rows, unlike the AR model which sees only row 1).
+
+Intuition: a colouring book done in layers. You colour layer 2 everywhere at once, looking at layer 1; then layer 3 looking at layers 1 and 2; and so on. Seven passes, one per layer (Fig 3 caption, p. 6: "the NAR decoder will be called seven times").
+
+Worked example: inside one row, each frame's token is chosen independently given the input. If a 3-frame row has per-frame probabilities 0.9, 0.8 and 0.95, the row has probability $0.9 \times 0.8 \times 0.95 = 0.684$. Unlike Eq 1, none of these three depends on the others' choices.
+
+### Summing the rows above
+
+Eq 4 and Eq 5 (p. 7):
+
+$$
+e_{c_{t,j}} = W_a^{j} \odot c_{t,j}, \qquad e_{c_t} = \sum_{j=1}^{i-1} e_{c_{t,j}}
+$$
+
+- $W_a^{j}$: the embedding table for row $j$ (the NAR model has **eight** separate tables, p. 7), 1024 rows of 1024 numbers.
+- $\odot$: the paper's symbol for "look up the row of the table" (index selection, p. 7), not multiplication.
+- $e_{c_{t,j}}$: the vector for token $c_{t,j}$.
+- $i$: the row being predicted; $e_{c_t}$: the input vector for frame $t$, the sum of the looked-up vectors of rows $1$ to $i-1$.
+
+Intuition: stack transparent slides of the layers already done and look through all of them as one.
+
+Worked example (toy 2-number vectors): predicting row 3, frame $t$ has row-1 token 5 and row-2 token 2. If $W_a^1[5] = (1, 0)$ and $W_a^2[2] = (0.5, -1)$, the input is $(1.5, -1)$.
+
+The prompt grid gets the same treatment with all **eight** rows summed (p. 7). The transformer input is phonemes, then the prompt, then the partial new grid; every position may attend to every other (p. 7).
+
+### Telling the model which row it is on
+
+The same network fills all seven rows, so it must know which. The paper injects the row number $i$ with **adaptive layer normalisation (AdaLN)** (p. 7):
+
+$$
+\text{AdaLN}(h, i) = a_i \, \text{LayerNorm}(h) + b_i
+$$
+
+- $h$: the activations inside the network at one position.
+- $\text{LayerNorm}(h)$: shift $h$ to mean 0 and scale to spread 1.
+- $a_i$, $b_i$: a scale and a shift computed from an embedding of row number $i$.
+
+Intuition: same recipe, but the oven dial is set differently for each layer.
+
+Worked example: $h = (1, 3)$. Mean 2, standard deviation 1, so $\text{LayerNorm}(h) = (-1, 1)$. With $a_i = 2$, $b_i = 1$: $(2 \cdot -1 + 1, 2 \cdot 1 + 1) = (-1, 3)$.
+
+Weight sharing (p. 7): the output layer for row $j$ is the same table as the embedding of row $j+1$.
+
+**Training**: each step picks a random row $i \in [2, 8]$ to learn (p. 7). The NAR prompt is a random **3-second** segment from the same utterance (Sec 5.1, p. 8).
+
+<figure class="blog-figure blog-figure--wide">
+  <LayerFiller alt="An 8-row token grid where row 1 is given and each pass fills a whole further row at once. Beside it, the input for one outlined frame drawn as arrows added tip to tail, one per filled row, with AdaLN numbers for the row being predicted." />
+  <figcaption><strong>Figure 4. Rows 2 to 8, one pass each.</strong> Eq 4 and 5 (p. 7) with toy two-number vectors; at the third row the sum is (1, 0) + (0.5, −1) = (1.5, −1). The AdaLN scale and shift are toy values.</figcaption>
+</figure>
+
+
+## The prompt: three seconds of a stranger
+
+At inference (Sec 4.3, p. 7) the model gets a sentence, a voice clip and the clip's transcript. Two modes:
+
+- **VALL-E**: phonemes of the clip's transcript are glued in front of the new sentence's phonemes. Row 1 of the clip is the AR prefix. The model continues as if the clip's speaker kept reading.
+- **VALL-E-continual**: the clip is the first 3 s of the very utterance to be produced, with the whole transcript. The model continues the same sentence (p. 7).
+
+Everyday picture: you hum the first bar of a song and ask a friend to keep going. VALL-E-continual is "keep going with this song"; VALL-E is "now sing this other song, in the same voice".
+
+### Sampling choices
+
+- **AR model**: random sampling, not beam search. The paper says beam search "may lead the LM into an infinity loop" and sampling "could significantly increase the diversity" (Sec 4.3, p. 7). The paper does not state the temperature, top-k or top-p values.
+- **NAR model**: greedy, always the most likely token (Sec 4.3, p. 7).
+
+Why beam search loops (my explanation, not the paper's): beam search hunts for the single most likely sequence. In speech, "the same sound again" is very likely, so the most probable path can be a sound stuck on repeat. Sampling sometimes picks a less likely next token, which breaks the loop. See [Figure 5](#sampling-choices) and [Toy 2](#toy-experiments).
+
+Diversity (Sec 5.4, p. 12; Fig 4, p. 11): the same text and prompt, two seeds, give different lengths, phrase durations and stress (in one VCTK sample the second output stresses "must"). The authors suggest using this to make varied training data for speech recognition (p. 12).
+
+<figure class="blog-figure blog-figure--wide">
+  <BeamLoopDice alt="Four strips of 30 toy tokens A to F, where F ends the utterance: greedy decoding repeats A forever, beam search over unfinished paths also repeats, beam search comparing finished paths jumps straight to F, and a sampled run wanders and finishes." />
+  <figcaption><strong>Figure 5. The loop trap.</strong> Toy 2: stay 0.40, step on 0.35, any other 0.0625. Illustrates the claim in Sec 4.3 (p. 7); no number here is the paper’s.</figcaption>
+</figure>
+
+
+## Data: audiobooks with machine transcripts
+
+- **LibriLight**: **60K hours** of unlabelled English audiobook speech, about **7,000** speakers (Sec 5.1, p. 8).
+- Transcripts come from a machine: a hybrid **DNN-HMM** (deep neural network with hidden Markov model) **ASR** (automatic speech recognition) model trained on **960 hours** of labelled LibriSpeech with the Kaldi recipe, decoded into phoneme alignments with a **30 ms** frame shift (Sec 5.1, p. 8).
+- Repeated phonemes in a row are collapsed (p. 8): the aligner says "k k k æ æ t", the model sees "k æ t".
+- Training: **16** NVIDIA V100 32 GB GPUs, **6k** acoustic tokens per GPU per batch, **800k** steps, AdamW, warm-up over **32k** updates to a peak learning rate of $5 \times 10^{-4}$, then linear decay (Sec 5.1, p. 8).
+
+The bet (Sec 1, p. 2): this data is noisier and its transcripts less accurate than LibriTTS, but it is far more varied, and scale wins.
+
+
+## What the evidence shows
+
+### How it is graded
+
+Full explanations in [/blog/speech-evaluation-metrics/](/blog/speech-evaluation-metrics/); the short versions:
+
+- **Word error rate (WER)**: transcribe the output with an ASR model and count mistakes. Here the ASR is HuBERT-Large fine-tuned on LibriSpeech 960h, a CTC (connectionist temporal classification) model with no language model (Sec 5.1, p. 8). It measures **robustness**: did it say the words?
+
+$$
+\text{WER} = \frac{S + D + I}{N}
+$$
+
+  - $S$, $D$, $I$: substituted, deleted and inserted words; $N$: words in the reference.
+  - Intuition: mistakes per word you should have said.
+  - Example: reference "I must do something about it" ($N = 6$); output "I must do something it" has one deletion: $1/6 \approx 16.7\%$.
+
+- **Speaker similarity (SPK)**: WavLM-TDNN, a speaker verification model, turns each clip into a vector; the score is the cosine of the angle between prompt and output, from $-1$ to $1$ (Sec 5.1, p. 8).
+
+$$
+\cos(u, v) = \frac{u \cdot v}{\lVert u \rVert \, \lVert v \rVert}
+$$
+
+  - $u$, $v$: the two voice vectors; $u \cdot v$: multiply matching entries and add; $\lVert u \rVert$: length of $u$.
+  - Intuition: do the two arrows point the same way?
+  - Example: $u = (1, 0)$, $v = (0.6, 0.8)$: $u \cdot v = 0.6$, both lengths 1, cosine $0.6$.
+  - Note: the "prompt" side is the **decompressed** enrolled speech, so it has passed through EnCodec (p. 8).
+
+- **SMOS** (similarity mean opinion score): **6** native-speaker raters, scale 1 to 5 in steps of 0.5 (Sec 5.1, p. 8).
+- **CMOS** (comparative mean opinion score): **12** raters compare two clips side by side, from $-3$ (much worse) to $+3$ (much better) in steps of 1 (Sec 5.1, p. 8). The paper spells it "option".
+
+The baseline is **YourTTS**, the released checkpoint, trained on VCTK, LibriTTS and TTS-Portuguese (Sec 5.1, p. 8).
+
+### LibriSpeech: words and voice
+
+Test set: LibriSpeech test-clean clips of **4 to 10 s**, **2.2 hours** in all, no speakers shared with LibriLight. The prompt is a 3 s crop of a *different* utterance by the same speaker; each experiment runs three times and is averaged (Sec 5.2, p. 8).
+
+Table 2 (p. 9):
+
+| System | WER (%) | SPK |
+|---|---|---|
+| Ground truth | 2.2 | 0.754 |
+| GSLM | 12.4 | 0.126 |
+| AudioLM | 6.0 | not reported |
+| YourTTS | 7.7 | 0.337 |
+| VALL-E | 5.9 | 0.580 |
+| VALL-E-continual | 3.8 | 0.508 |
+
+Read it like a report card: VALL-E says the words more reliably than YourTTS (**5.9** vs **7.7**) and sounds much more like the speaker (**0.580** vs **0.337**). Ground truth shows the ceiling (**2.2**, **0.754**). Caveats from the table caption itself: AudioLM's WER uses a different ASR model (a Conformer Transducer) and has no SPK because it is not open-source (p. 9), so that row is not a fair comparison. GSLM scores **0.126** because HuBERT codes throw away who is speaking (p. 9).
+
+VALL-E-continual has a lower WER (**3.8**) because its first 3 s are real speech (p. 9). Its SPK is lower than VALL-E's (**0.508** vs **0.580**); the paper does not explain this [my guess: in continual mode similarity is measured against the start of the same clip, a different pairing; not stated in the paper].
+
+Table 3 (p. 9), **40** speakers, one utterance each:
+
+| | YourTTS | VALL-E | Ground truth |
+|---|---|---|---|
+| SMOS | 3.45 ± 0.09 | 4.38 ± 0.10 | 4.5 ± 0.10 |
+| CMOS vs VALL-E | −0.12 | 0.00 | +0.17 |
+
+So **+0.93** SMOS and **+0.12** CMOS over YourTTS (p. 9). Ground truth still wins on naturalness by **0.17** CMOS.
+
+<figure class="blog-figure blog-figure--wide">
+  <ValleReportCard alt="A scatter of word error rate against speaker similarity for ground truth, GSLM, YourTTS, VALL-E and VALL-E-continual, with AudioLM marked on the error axis only. Beside it, bars for listener similarity scores and comparative naturalness scores." />
+  <figcaption><strong>Figure 6. The report card.</strong> Tables 2 and 3 (p. 9).</figcaption>
+</figure>
+
+### Which prompt does what (ablations)
+
+Table 4 (p. 10), NAR model only, given the *true* row 1:
+
+| NAR setting | WER | SPK |
+|---|---|---|
+| No prompt | 19.6 | 0.518 |
+| Phoneme prompt only | 3.0 | 0.541 |
+| Phoneme + acoustic prompt | 2.8 | 0.732 |
+
+Phonemes fix the words (**19.6** to **3.0**); the voice clip fixes the voice (**0.541** to **0.732**) (p. 9).
+
+Table 5 (p. 10), AR ablation (NAR always uses both prompts):
+
+| | WER | SPK |
+|---|---|---|
+| VALL-E | 5.9 | 0.585 |
+| AR without acoustic prompt | 5.9 | 0.236 |
+
+Without the voice clip in the AR model, similarity collapses to **0.236** even though the NAR model still sees the clip (p. 10). So row 1 already carries much of the voice, not just the words. Small inconsistency: VALL-E's SPK is **0.580** in Table 2 and **0.585** in Table 5; the paper does not say why.
+
+
+
+### VCTK: accents and prompt length
+
+VCTK has **108** speakers, none seen by VALL-E; YourTTS saw **97** of them in training, so the paper also reports **11** speakers unseen by both (Sec 5.3, p. 10). (The text says YourTTS was evaluated on "the full 107 speakers" while the table says 108; a typo in the paper.)
+
+Table 6 (p. 10), speaker similarity:
+
+| | 3 s | 5 s | 10 s |
+|---|---|---|---|
+| **108 speakers** YourTTS (saw 97) | 0.357 | 0.377 | 0.394 |
+| VALL-E | 0.382 | 0.423 | 0.484 |
+| Ground truth | 0.546 | 0.591 | 0.620 |
+| **11 unseen** YourTTS | 0.331 | 0.337 | 0.344 |
+| VALL-E | 0.389 | 0.380 | 0.414 |
+| Ground truth | 0.528 | 0.556 | 0.586 |
+
+Longer prompts help VALL-E more than YourTTS (on all 108: VALL-E gains $0.484 - 0.382 = 0.102$ from 3 s to 10 s, YourTTS gains $0.394 - 0.357 = 0.037$; my arithmetic). On the 11 unseen speakers the 5 s score (**0.380**) is slightly below the 3 s score (**0.389**), so "longer is better" is not monotone on that tiny set. All VCTK scores are well below LibriSpeech's (**0.580**); the paper blames accents missing from audiobook training data (p. 11).
+
+Table 7 (p. 11), **60** speakers (11 unseen by both, 49 seen by YourTTS), 3 s prompts:
+
+| | YourTTS | VALL-E | Ground truth |
+|---|---|---|---|
+| SMOS | 3.70 ± 0.09 | 3.81 ± 0.09 | 4.29 ± 0.09 |
+| CMOS vs VALL-E | −0.23 | 0.00 | −0.04 |
+
+VALL-E is rated **+0.04** CMOS over the real recordings, "no statistically significant difference" (p. 10). The paper's reason: VCTK sentences are shorter and some real recordings are noisy (p. 11). Note the SMOS gap is small here (**+0.11**) and VALL-E is still **0.48** below ground truth.
+
+<figure class="blog-figure blog-figure--wide">
+  <PromptLengthLadder alt="Speaker similarity at 3, 5 and 10 second prompts for YourTTS, VALL-E and ground truth, with the gap between VALL-E and YourTTS shaded. A switch shows all 108 VCTK speakers or the 11 unseen by both models." />
+  <figcaption><strong>Figure 7. Longer prompts.</strong> Table 6 (p. 10).</figcaption>
+</figure>
+
+### Emotion and room sound
+
+Qualitative only, no numbers (Sec 5.4, p. 12):
+
+- **Acoustic environment**: a prompt with reverberation (echo) gives output with reverberation; YourTTS gives clean speech. The authors credit LibriLight's variety.
+- **Emotion**: prompts from EmoV-DB (five emotions) keep their emotion in the output, without emotional training data.
+
+Everyday picture: the model copies the whole "texture" of the clip, voice, mood and room, because it only learnt to continue audio, and real audio keeps its room and mood. That is a feature for cloning and a bug if you wanted clean speech from a noisy phone clip. Evidence lives on the demo page; there is no metric.
+
+
+## Where it breaks
+
+From Sec 6 (p. 12), in the authors' own words:
+
+- **Robustness**: "some words may be unclear, missed, or duplicated", blamed on the AR model's "disordered attention alignments" with "no constraints". In plain words: the model keeps its place in the text only by attention, and nothing forces it to move forward one phoneme at a time. It can jump ahead (skip a word) or slide back (repeat one).
+- **Data coverage**: 60K hours still miss many voices, especially accents; audiobooks are mostly reading style.
+- **Structure**: two models; the authors suggest one universal model, or a fully NAR model for speed.
+- **Misuse**: voice spoofing and impersonation; they suggest a detector for VALL-E audio (pp. 12 to 13). No detector is built or tested in the paper.
+
+Things I would add (my reading, not the paper's):
+
+- WER of **5.9** is about **2.7×** the ground truth's **2.2**: roughly one extra error every 27 words. Fine on average, but averages hide the occasional runaway repeat.
+- The ASR transcripts were made by a model trained on LibriSpeech, and testing is on LibriSpeech test-clean: same domain, so this is the easy case.
+- No timing numbers at all, despite the speed argument.
+- No code or weights released with the paper (only the demo link, p. 1).
+
+<figure class="blog-figure blog-figure--wide">
+  <AlignmentSlip alt="Twelve phoneme boxes and a strip of what got said frame by frame. A cursor reads along, sometimes holding a sound, skipping one (marked red) or stepping back (orange). Sliders set the skip and repeat chances; a readout gives how many of 500 readings go wrong." />
+  <figcaption><strong>Figure 8. Skips and repeats.</strong> Toy 5, a cartoon of Sec 6 (p. 12), not a model of VALL-E’s attention.</figcaption>
+</figure>
+
+
+## What came after (outside the paper)
+
+None of this is in the 2023 paper; it is context.
+
+- **VALL-E X** (Microsoft, 2023): extends the recipe to cross-lingual synthesis, speaking another language in the prompt speaker's voice. ([arXiv 2303.03926](https://arxiv.org/abs/2303.03926)).
+- **VALL-E 2** (Microsoft, 2024): adds **repetition-aware sampling** (if a token keeps recurring in recent history, fall back from nucleus sampling to random sampling) and **grouped code modelling** (predict several frames per step to shorten sequences). The authors claim human parity on LibriSpeech and VCTK. ([arXiv 2406.05370](https://arxiv.org/abs/2406.05370)). This targets exactly the loop problem in [Where it breaks](#where-it-breaks).
+- **The move away from discrete tokens**: flow-matching TTS such as **F5-TTS** (2024, [arXiv 2410.06885](https://arxiv.org/abs/2410.06885)) drops tokens and the AR model and generates continuous mel features with a non-autoregressive flow; see [/paper-reviews/flow-matching/](/paper-reviews/flow-matching/). Kyutai's **CALM** keeps the next-step AR loop but predicts continuous latents instead of codebook indices; see [/blog/pocket-tts-calm-explained/](/blog/pocket-tts-calm-explained/). And [Moshi](/paper-reviews/moshi/) keeps the token grid but replaces the AR-then-NAR split with a small depth transformer per frame.
+
+
+## Toy experiments
+
+I cannot train VALL-E here (60K hours, 16 V100s). These toys run in the browser, use no trained model and isolate one mechanism each. None is a reproduction.
+
+**Toy 1, the grid counter.** For durations 1, 3, 10 and 20 s and for 8 or 16 quantisers, compute frames $T = 75d$, tokens $8T$ or $16T$, and bitrate $75 \times n_q \times 10$ bits/s. Expected for 10 s: 750 frames, 6,000 tokens (8 rows) or 12,000 tokens (16 rows), 6 kbps or 12 kbps. The 16-quantiser case is the paper's own example (Sec 3, p. 5). Runs in [Figure 1](#counting-the-grid).
+
+**Toy 2, the loop trap.** A 6-state Markov chain over toy "sound tokens" A to F standing in for row-1 codes. Transition table (rows: from, entries: to): from each state, stay put with probability 0.40, move to the next state (A to B, ..., E to F) with 0.35, and spread the remaining 0.25 equally over the other four states (0.0625 each). F is the end state. Decode 30 steps from A three ways:
+
+- Greedy: always the most likely next token (stay, 0.40), so A A A A ... forever. Never reaches F.
+- Beam search, beam width 4, score = sum of log-probabilities, keeping only the 4 best unfinished paths at each step: the all-stay path keeps winning, so the top beam loops. (If finished paths are kept and compared too, beam instead prefers the shortest exit, A then F straight away, at log-probability $\ln 0.0625 \approx -2.77$: a different degenerate answer. The figure shows both.)
+- Sampling, temperature 1, seed 0, 1,000 runs: report the share that reach F within 30 steps and the mean length.
+
+Expected: greedy never finishes and the unfinished-only beam loops; sampling finishes often. Measured in Figure 5: **97.7%** of the 1,000 sampled runs reach F within 30 steps, after **8.4** steps on average. The paper's claim being illustrated is Sec 4.3, p. 7. Runs in [Figure 5](#sampling-choices).
+
+**Toy 3, coarse to fine.** 2-dimensional RVQ: 400 points from a Gaussian with standard deviation 1, seed 0; 8 codebooks of 4 entries each, trained by 20 iterations of k-means on the residual at each stage. Report the mean squared reconstruction error after 1, 2, ..., 8 codebooks. Expected: a steep drop then a long tail, the shape of Fig 2's caption (p. 4). The [RVQ post](/blog/residual-vector-quantization/#quantize-what-is-left-over) has the interactive version.
+
+**Toy 4, the pass counter.** For $T$ from 75 to 1,500 frames, count forward passes for three schedules: all 8 rows AR ($8T$), VALL-E ($T + 7$), fully NAR (8). Expected for $T = 750$: 6,000, 757, 8. Runs in [Figure 2](#coarse-first-fine-later).
+
+**Toy 5, alignment slip.** A toy attention that walks along 12 phonemes, one step per frame. At each frame the read position moves $+1$ with probability $1 - 2q$, stays with probability $q$ (later collapsed: a held sound) or jumps $+2$ with probability $q$ (a skip). Add a repeat event: move $-1$ with probability $r$. Seed 0, 500 runs for $q, r \in \{0, 0.02, 0.05, 0.1\}$. Report the share of runs with any skipped or repeated phoneme. Expected: zero at $q = r = 0$, rising with $q$ and $r$. This is a cartoon of Sec 6, p. 12, not a model of VALL-E's actual attention. Runs in [Figure 8](#where-it-breaks).
+
+
+## My interpretation
+
+1. **The prompt is the product.** Table 5 shows the AR acoustic prompt alone moves similarity from **0.236** to **0.585** (p. 10). There is no speaker encoder; "who is speaking" lives entirely in the context window. That is why VALL-E inherits room echo and emotion for free (Sec 5.4, p. 12): it cannot separate voice from recording conditions, because it never tried to.
+2. **Split by importance, not by time.** The AR-then-NAR split works because RVQ puts the important information in row 1. It also means row 1 has to decide words, rhythm and much of the voice at once, which is a lot for one row of 1024 symbols at 75 Hz.
+3. **The weakness is the strength.** Sampling gives diversity and escapes loops (Sec 4.3, p. 7), but it also produces the occasional skipped or repeated word (Sec 6, p. 12). VALL-E 2's repetition-aware sampling (outside the paper) is a patch on exactly this.
+4. **Scale over cleanliness, with an asterisk.** Machine transcripts on 60K hours beat clean data on hundreds, but the gains on accented VCTK speakers are small (SMOS **+0.11**, Table 7, p. 11). Scale bought breadth only where the data had it.
+5. For my Khmer TTS side project: the recipe needs a reasonable ASR system to make transcripts, which is the very thing low-resource languages lack. Worth noting before copying the data strategy.
+
+
+## Open questions
+
+- What sampling settings (temperature, top-k, top-p) were used? The paper does not say (Sec 4.3, p. 7).
+- How often do words get skipped or repeated? The paper gives an average WER but no count of catastrophic failures.
+- Why is VALL-E-continual's speaker similarity lower than VALL-E's (Table 2, p. 9)?
+- How much does the ASR transcript quality matter? No ablation on transcript noise.
+- How fast is it in practice? No timings despite the O(T) to O(1) argument (Sec 4.2, p. 6).
+- Can a detector really tell VALL-E audio apart, and for how long (Sec 6, p. 13)?
+
+## Related
+
+- [/blog/residual-vector-quantization/](/blog/residual-vector-quantization/)
+- [/blog/mimi-codec-explained/](/blog/mimi-codec-explained/)
+- [/blog/audio-basics/](/blog/audio-basics/)
+- [/blog/speech-evaluation-metrics/](/blog/speech-evaluation-metrics/)
+- [/blog/pocket-tts-calm-explained/](/blog/pocket-tts-calm-explained/)
+- [/paper-reviews/moshi/](/paper-reviews/moshi/)
+- [/paper-reviews/flow-matching/](/paper-reviews/flow-matching/)

@@ -1,0 +1,131 @@
+---
+// Foundations, neurons post: a small network learning XOR. Full-batch
+// gradient descent on the four points, loss ½(ŷ − y)² averaged, sigmoid
+// output. Default seed 7, η = 0.5, 4 tanh neurons: all four points right
+// from epoch 530, loss 0.0012 at epoch 2000. Without an activation the loss
+// stalls at 0.125: the best a straight line can do is ŷ = 0.5 everywhere.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-xor>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 370" role="img" aria-labelledby="xor-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="xor-title">A network learning XOR: the shaded output, the decision boundary and the loss over training</title>
+    <image data-heat x="40" y="40" width="290" height="290" preserveAspectRatio="none" />
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Training</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-play>Play</button>
+      <button type="button" class="fig-chip" data-one>Step one epoch</button>
+      <button type="button" class="fig-chip" data-reset>Start over</button>
+    </div></div>
+    <div><span class="fig-panel__name">Random start (seed)</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-seed="7" aria-pressed="true">7</button>
+      <button type="button" class="fig-chip" data-seed="1" aria-pressed="false">1</button>
+      <button type="button" class="fig-chip" data-seed="2" aria-pressed="false">2</button>
+    </div></div>
+    <div><span class="fig-panel__name">Hidden neurons</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-h="2" aria-pressed="false">2</button>
+      <button type="button" class="fig-chip" data-h="3" aria-pressed="false">3</button>
+      <button type="button" class="fig-chip" data-h="4" aria-pressed="true">4</button>
+    </div></div>
+    <div><span class="fig-panel__name">Activation</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-act="tanh" aria-pressed="true">Tanh</button>
+      <button type="button" class="fig-chip" data-act="relu" aria-pressed="false">ReLU</button>
+      <button type="button" class="fig-chip" data-act="linear" aria-pressed="false">None (linear)</button>
+    </div></div>
+    <label><span class="fig-panel__name">Learning rate η <strong data-veta></strong></span><input class="scrub" data-eta type="range" min="0.05" max="2" step="0.05" value="0.5" /></label>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { reduce } from "../../lib/figure-motion";
+  import { XOR, xorNet, xorEpoch, xorLoss, xorPredict, xorAllRight, fmt, type Act, type XorNet } from "../../lib/tiny-net";
+  import { INK, MUTED, JADE, NEG, GOLD } from "../../lib/net-diagram";
+  const MAX = 2000, RES = 116;
+  document.querySelectorAll<HTMLElement>("[data-xor]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    let seed = 7, H = 4, act: Act = "tanh", eta = 0.5;
+    let net: XorNet, epoch = 0, losses: number[] = [], solvedAt = -1, playing = false, raf = 0;
+    const cv = document.createElement("canvas"); cv.width = cv.height = RES;
+    const ctx = cv.getContext("2d")!, img = ctx.createImageData(RES, RES);
+    const lo = -0.5, span = 2; // the plot shows x₁, x₂ from −0.5 to 1.5
+    const PX = (v: number) => 40 + ((v - lo) / span) * 290, PY = (v: number) => 330 - ((v - lo) / span) * 290;
+    function reset() {
+      net = xorNet(seed, H); epoch = 0; losses = [xorLoss(net, act)]; solvedAt = xorAllRight(net, act) ? 0 : -1; draw();
+    }
+    function train(n: number) {
+      for (let i = 0; i < n && epoch < MAX; i++) {
+        xorEpoch(net, act, eta); epoch++; const L = xorLoss(net, act); losses.push(L);
+        if (solvedAt < 0 && xorAllRight(net, act)) solvedAt = epoch;
+      }
+    }
+    function heat() {
+      // Teal where the network says 0, rose where it says 1; a dark seam at 0.5.
+      for (let j = 0; j < RES; j++) for (let i = 0; i < RES; i++) {
+        const x1 = lo + (i / (RES - 1)) * span, x2 = lo + (1 - j / (RES - 1)) * span, y = xorPredict(net, act, x1, x2).yh;
+        const k = (j * RES + i) * 4, a = [214, 233, 226], b = [244, 214, 222], edge = Math.abs(y - 0.5) < 0.03;
+        for (let c = 0; c < 3; c++) img.data[k + c] = edge ? 60 : Math.round(a[c] + (b[c] - a[c]) * y);
+        img.data[k + 3] = 255;
+      }
+      ctx.putImageData(img, 0, 0);
+      $("[data-heat]").setAttribute("href", cv.toDataURL());
+    }
+    function draw() {
+      heat();
+      let s = `<rect x="40" y="40" width="290" height="290" fill="none" stroke="#cfd5d4"/>`;
+      s += `<text x="40" y="26" font-size="12" font-weight="700" fill="${INK}">What the network outputs at every point</text>`;
+      for (const v of [0, 1]) { s += `<text x="${PX(v)}" y="346" font-size="10.5" text-anchor="middle" fill="${MUTED}">x₁ = ${v}</text><text x="34" y="${PY(v) + 4}" font-size="10.5" text-anchor="end" fill="${MUTED}">x₂ = ${v}</text>`; }
+      XOR.forEach(([x1, x2, y]) => {
+        const p = xorPredict(net, act, x1, x2).yh, ok = (p > 0.5) === (y === 1);
+        s += `<circle cx="${PX(x1)}" cy="${PY(x2)}" r="11" fill="${y ? "#C9637F" : "#2F6E5F"}" stroke="${ok ? "#fff" : NEG}" stroke-width="${ok ? 2.5 : 4}"/><text x="${PX(x1)}" y="${PY(x2) + 4}" font-size="11" font-weight="700" text-anchor="middle" fill="#fff">${y}</text>`;
+        s += `<text x="${PX(x1) + (x1 ? -16 : 16)}" y="${PY(x2) + (x2 ? 26 : -18)}" font-size="10.5" text-anchor="${x1 ? "end" : "start"}" fill="${INK}" paint-order="stroke" stroke="#fff" stroke-width="3">ŷ = ${p.toFixed(2)}</text>`;
+      });
+      // Loss curve.
+      const LX = (e: number) => 400 + (e / MAX) * 330, top = 0.15, LY = (v: number) => 190 - (Math.min(v, top) / top) * 140;
+      s += `<text x="400" y="26" font-size="12" font-weight="700" fill="${INK}">Loss over training</text>`;
+      s += `<line x1="400" x2="730" y1="190" y2="190" stroke="#cfd5d4"/><line x1="400" x2="400" y1="50" y2="190" stroke="#cfd5d4"/>`;
+      s += `<line x1="400" x2="730" y1="${LY(0.125)}" y2="${LY(0.125)}" stroke="${NEG}" stroke-dasharray="4 4" stroke-opacity="0.6"/><text x="728" y="${LY(0.125) - 5}" font-size="10.5" text-anchor="end" fill="${NEG}">0.125: best a straight line can do</text>`;
+      [0, 500, 1000, 1500, 2000].forEach((e) => (s += `<text x="${LX(e)}" y="206" font-size="10.5" text-anchor="middle" fill="${MUTED}">${e}</text>`));
+      s += `<text x="392" y="${LY(0.15) + 4}" font-size="10.5" text-anchor="end" fill="${MUTED}">0.15</text><text x="392" y="194" font-size="10.5" text-anchor="end" fill="${MUTED}">0</text>`;
+      const stepN = Math.max(1, Math.floor(losses.length / 300));
+      s += `<polyline fill="none" stroke="${JADE}" stroke-width="2" points="${losses.filter((_, i) => i % stepN === 0 || i === losses.length - 1).map((v, i, arr) => `${LX(i === arr.length - 1 ? losses.length - 1 : i * stepN).toFixed(1)},${LY(v).toFixed(1)}`).join(" ")}"/>`;
+      if (solvedAt >= 0) s += `<line x1="${LX(solvedAt)}" x2="${LX(solvedAt)}" y1="50" y2="190" stroke="${GOLD}" stroke-dasharray="3 3"/>`;
+      // Readout.
+      const L = losses[losses.length - 1];
+      s += `<text x="400" y="238" font-size="13" fill="${INK}">Epoch <tspan font-weight="700">${epoch}</tspan> of ${MAX}, loss <tspan font-weight="700">${L.toFixed(4)}</tspan></text>`;
+      s += `<text x="400" y="260" font-size="12.5" fill="${solvedAt >= 0 ? GOLD : MUTED}" font-weight="${solvedAt >= 0 ? 700 : 400}">${solvedAt >= 0 ? `All four points right since epoch ${solvedAt}` : "Not all four points are right yet (red ring = wrong side)"}</text>`;
+      const note = act === "linear" ? "No activation: the hidden layer collapses, the boundary stays straight." : epoch >= MAX && solvedAt < 0 ? "Stuck: this random start landed in a bad spot. Try another seed." : "Each epoch: forward on all four points, backward, average, update.";
+      s += `<text x="400" y="282" font-size="11.5" fill="${MUTED}">${note}</text>`;
+      // The network, edges as thick as their weights.
+      const nx = [430, 560, 690], hy = (j: number) => 300 + ((j + 0.5) / H) * 60 - 30 + 14;
+      for (let j = 0; j < H; j++) {
+        [0, 1].forEach((i) => { const w = net.W[j][i]; s += `<line x1="${nx[0]}" y1="${312 + i * 36}" x2="${nx[1]}" y2="${hy(j)}" stroke="${w >= 0 ? JADE : NEG}" stroke-width="${Math.min(6, 0.6 + Math.abs(w)).toFixed(2)}" stroke-opacity="0.7"/>`; });
+        const v = net.v[j]; s += `<line x1="${nx[1]}" y1="${hy(j)}" x2="${nx[2]}" y2="330" stroke="${v >= 0 ? JADE : NEG}" stroke-width="${Math.min(6, 0.6 + Math.abs(v) * 0.6).toFixed(2)}" stroke-opacity="0.7"/>`;
+      }
+      [312, 348].forEach((y) => (s += `<circle cx="${nx[0]}" cy="${y}" r="6" fill="#fff" stroke="${INK}"/>`));
+      for (let j = 0; j < H; j++) s += `<circle cx="${nx[1]}" cy="${hy(j)}" r="6" fill="#fff" stroke="${INK}"/>`;
+      s += `<circle cx="${nx[2]}" cy="330" r="7" fill="#fff" stroke="${INK}"/>`;
+      $("[data-draw]").innerHTML = s;
+      $("[data-veta]").textContent = fmt(eta, 2);
+      $("[data-play]").textContent = playing ? "Pause" : epoch >= MAX ? "Finished" : "Play";
+    }
+    const loop = () => { train(reduce ? MAX : 6); draw(); if (playing && epoch < MAX) raf = requestAnimationFrame(loop); else { playing = false; draw(); } };
+    const play = (on: boolean) => { playing = on && epoch < MAX; cancelAnimationFrame(raf); if (playing) raf = requestAnimationFrame(loop); draw(); };
+    $("[data-play]").addEventListener("click", () => play(!playing));
+    $("[data-one]").addEventListener("click", () => { play(false); train(1); draw(); });
+    $("[data-reset]").addEventListener("click", () => { play(false); reset(); });
+    root.querySelector("[data-replay]")!.addEventListener("click", () => { reset(); play(true); });
+    const pick = (attr: string, f: (v: string) => void) => root.querySelectorAll<HTMLButtonElement>(`[${attr}]`).forEach((b) => b.addEventListener("click", () => {
+      root.querySelectorAll(`[${attr}]`).forEach((o) => o.setAttribute("aria-pressed", String(o === b))); f(b.getAttribute(attr)!); play(false); reset();
+    }));
+    pick("data-seed", (v) => (seed = +v)); pick("data-h", (v) => (H = +v)); pick("data-act", (v) => (act = v as Act));
+    $<HTMLInputElement>("[data-eta]").addEventListener("input", (e) => { eta = +(e.target as HTMLInputElement).value; play(false); reset(); });
+    reset();
+    // Train once on first view; the reader can pause, step and restart.
+    if (!reduce && "IntersectionObserver" in window) {
+      const io = new IntersectionObserver((es) => { if (es.some((e) => e.intersectionRatio >= 0.5)) { io.disconnect(); play(true); } }, { threshold: [0.5] });
+      io.observe(root);
+    } else { train(MAX); draw(); }
+  });
+</script>

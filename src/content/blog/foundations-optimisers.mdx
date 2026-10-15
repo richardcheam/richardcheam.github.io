@@ -1,0 +1,607 @@
+---
+title: "Optimisers: SGD, momentum, Adam and learning-rate schedules"
+date: 2026-10-15
+category: "deep-learning"
+read_time: "32 min"
+series_order: 3
+series: foundations
+featured: false
+excerpt: "Plain gradient descent zigzags in narrow valleys, crawls on flat ground and uses one step size for every weight. This post fixes each problem in turn, momentum, per-weight step sizes, Adam and schedules, on the same small bowl from the last post, with every step worked by hand."
+question: "Gradient descent knows which way is downhill. How do the optimisers used in practice decide how far to step, and why do they beat the plain rule?"
+my_work: "A concept note. I worked every optimiser step by hand on the bowl from post 2 and checked every number with a short script."
+result: "On the long valley 0.1 w1² + 4 w2², RMSProp and Adam reach a loss of about 0.02 and 0.15 after 10 steps where tuned plain descent is still at 0.71. On the rounder bowl from post 2, well-tuned plain descent is still the fastest: better optimisers are about robustness, not magic."
+evidence_limit: "Textbook methods on two-weight toy bowls and one bumpy curve. No experiments on real networks; all numbers are arithmetic checked by a script."
+lesson: "Momentum remembers the direction, RMSProp rescales each weight by how big its gradients usually are, Adam does both and corrects the early bias, and a schedule lowers the step size when the noise near the bottom starts to matter."
+---
+
+import OptimiserRace from "../../components/figures/OptimiserRace.astro";
+import MomentumHill from "../../components/figures/MomentumHill.astro";
+import MovingAverageLab from "../../components/figures/MovingAverageLab.astro";
+import PerWeightSteps from "../../components/figures/PerWeightSteps.astro";
+import AdamCalculator from "../../components/figures/AdamCalculator.astro";
+import ScheduleExplorer from "../../components/figures/ScheduleExplorer.astro";
+import LearningRateSweep from "../../components/figures/LearningRateSweep.astro";
+
+In [the last post](/blog/foundations-loss-gradient-descent/) we built gradient descent: measure the slope, step against it, repeat. It works, but it has habits that make real training slow and fragile. It zigzags across narrow valleys. It crawls on flat ground. And it uses one step size for every weight, even when some weights sit on steep slopes and others on gentle ones.
+
+The methods that fix this are called **optimisers**. An optimiser is just a rule for turning the gradient into a step. In this post we build the four you will meet everywhere (stochastic gradient descent, momentum, RMSProp and Adam), then add **learning-rate schedules**, which change the step size as training goes on.
+
+We will keep using the same landscape as post 2, so you can see the same terrain walked better and better:
+
+| What | Value |
+|---|---|
+| The bowl | $L = w_1^2 + 4 w_2^2$ |
+| Its slopes (the gradient) | $\left(2 w_1, \; 8 w_2\right)$ |
+| Starting point | $(4, 1)$, where the loss is **20** |
+| The bottom | $(0, 0)$, where the loss is **0** |
+
+Later we will also use a **long valley**, $L = 0.1 w_1^2 + 4 w_2^2$: the same narrow direction, but the gentle direction made ten times flatter.
+
+
+## Plain gradient descent and its three problems
+
+Recall the rule from post 2. In one sentence: move every weight a step against its own slope, with one shared step size.
+
+$$
+w \leftarrow w - \eta \, g
+$$
+
+- $w$ is one weight; the arrow $\leftarrow$ means "replace with".
+- $g$ is that weight's slope, $\partial L / \partial w$. We write $g$ for "gradient" to keep formulas short.
+- $\eta$ (eta) is the learning rate.
+
+When $g$ is computed on a random mini-batch rather than all the data, this is **stochastic gradient descent** (SGD), and in practice people call the whole family SGD. On our toy bowls the gradient is exact, but every idea below works the same with noisy gradients.
+
+On the bowl, with $\eta = 0.2$, post 2 found the zigzag: $(4, 1) \to (2.4, -0.6) \to (1.44, 0.36) \to (0.864, -0.216)$. Each step multiplies $w_1$ by $1 - 2\eta = 0.6$ and $w_2$ by $1 - 8\eta = -0.6$.
+
+That small example already shows the three problems.
+
+1. **Zigzag in narrow valleys.** The steep direction ($w_2$) overshoots and flips sign every step, while the gentle direction ($w_1$) creeps. Raise $\eta$ to speed up $w_1$, and $w_2$ explodes once $\eta$ passes **0.25**.
+2. **Slow on flat ground.** On the long valley the slope in $w_1$ is $0.2 w_1$, tiny. With $\eta = 0.2$, $w_1$ is multiplied by $1 - 0.04 = 0.96$ per step: after 10 steps it has only gone from 4 to **2.66**.
+3. **One step size for every weight.** The best $\eta$ for $w_1$ and the best $\eta$ for $w_2$ are different numbers, but plain descent must pick one, and the steepest direction always wins that argument.
+
+Each optimiser below fixes one or more of these. Here is the race we are building towards.
+
+<figure class="blog-figure blog-figure--wide">
+  <OptimiserRace alt="Contour map of the bowl w1 squared plus 4 w2 squared with four paths from (4, 1): plain descent, momentum, RMSProp and Adam. One Step button advances all four; the selected optimiser's arithmetic for the current step is written out below the map." />
+  <figcaption><strong>Figure 1. Four optimisers, one landscape.</strong> Press Step to move all four at once. Pick an optimiser to see its full arithmetic for that step; the chart on the right tracks all four losses. Switch to the long valley to see where the newer methods earn their keep.</figcaption>
+</figure>
+
+
+## Momentum: a heavy ball with a memory
+
+### The idea
+
+Plain descent is a walker with no memory: every step looks only at the slope underfoot. Imagine instead a **heavy ball** rolling downhill. It builds up speed along directions where the slope keeps pointing the same way, and when the slope flips back and forth (as in the zigzag), the pushes cancel and the ball calms down.
+
+In one sentence: keep a running **velocity** that adds up recent gradients, fading old ones, and step along the velocity instead of the raw gradient.
+
+$$
+v \leftarrow \beta \, v + g
+$$
+
+$$
+w \leftarrow w - \eta \, v
+$$
+
+- $v$ is the **velocity**, one number per weight, starting at 0.
+- $\beta$ (beta) is the **momentum coefficient**, usually **0.9**. It says how much of the old velocity survives each step: 90%.
+- $g$ is the gradient now; $\eta$ is the learning rate.
+
+Everyday picture: pushing a child on a swing, or a shopping trolley. Each push adds to the motion you already have. Pushes in the same direction pile up; pushes that alternate mostly cancel.
+
+This is the **heavy ball method** of Boris Polyak (1964).
+
+### Why it adds up to "ten times"
+
+If the gradient stays the same, say $g = 1$, the velocity goes $1$, then $0.9 + 1 = 1.9$, then $1.71 + 1 = 2.71$, and settles towards $1 / (1 - \beta) = 1 / 0.1 =$ **10**. So on a steady slope, momentum with learning rate $\eta$ moves like plain descent with learning rate $10 \eta$. That is why momentum is usually paired with a **smaller** learning rate. Below we use $\eta = 0.05$.
+
+(Some libraries write the velocity as an average, $v \leftarrow \beta v + (1 - \beta) g$, which settles at $g$ instead of $10 g$. Same idea, with the factor of 10 moved into $\eta$. We will meet this averaging form properly in [the moving average](#moving-averages-and-their-early-bias).)
+
+### Three steps by hand
+
+Bowl $L = w_1^2 + 4 w_2^2$, start $(4, 1)$, $\eta = 0.05$, $\beta = 0.9$, velocity starts at $(0, 0)$.
+
+**Step 1.**
+
+- Gradient: $(2 \times 4, \; 8 \times 1) = (8, 8)$.
+- Velocity: $(0.9 \times 0 + 8, \; 0.9 \times 0 + 8) = (8, 8)$.
+- Update: $(4 - 0.05 \times 8, \; 1 - 0.05 \times 8) = (3.6, 0.6)$. Loss $12.96 + 1.44 =$ **14.4**.
+
+**Step 2.**
+
+- Gradient: $(2 \times 3.6, \; 8 \times 0.6) = (7.2, 4.8)$.
+- Velocity: $(0.9 \times 8 + 7.2, \; 0.9 \times 8 + 4.8) = (14.4, 12)$.
+- Update: $(3.6 - 0.05 \times 14.4, \; 0.6 - 0.05 \times 12) = (2.88, 0)$. Loss $8.2944 + 0 =$ **8.2944**.
+
+**Step 3.**
+
+- Gradient: $(2 \times 2.88, \; 8 \times 0) = (5.76, 0)$.
+- Velocity: $(0.9 \times 14.4 + 5.76, \; 0.9 \times 12 + 0) = (18.72, 10.8)$.
+- Update: $(2.88 - 0.05 \times 18.72, \; 0 - 0.05 \times 10.8) = (1.944, -0.54)$. Loss $3.7791 + 1.1664 =$ **4.9455**.
+
+Look at the two directions.
+
+- In $w_1$, where the slope always points the same way, the velocity **grows**: 8, 14.4, 18.72. The steps grow too: 0.4, 0.72, 0.936. That is the speed-up on gentle slopes.
+- In $w_2$, step 3 is interesting. The gradient is exactly **0** (we are on the valley floor), yet the ball keeps moving to $-0.54$, because the velocity remembers. This is **overshoot**: a heavy ball rolls past the bottom and has to come back.
+
+What would change with a smaller $\beta$? At $\beta = 0$ the velocity is just the gradient, and we are back to plain descent. At $\beta = 0.5$ old pushes fade twice as fast, so the ball overshoots less but speeds up less.
+
+Honest result: on this small, fairly round bowl, momentum at these settings is **not** faster than plain descent at $\eta = 0.2$. After 10 steps momentum's loss is **6.61** (it is swinging past the bottom) against plain descent's **0.0007**. Momentum's real wins are on long, flat valleys (on the long valley it reaches **0.0020** after 60 steps against **0.0119**) and, as the next figure shows, on bumpy ground.
+
+### Rolling through a small dip
+
+The heavy ball has a second gift. Here is a 1-D loss with a small dent on the way down:
+
+$$
+L(w) = 0.1 \, w^2 - 0.5 \, e^{-2 (w - 3)^2}
+$$
+
+- The first part, $0.1 w^2$, is a wide bowl with its bottom at $w = 0$.
+- The second part digs a small dip near $w = 3$. Together they make a **local minimum** at $w \approx$ **2.667** (loss **0.311**), guarded on the left by a small hump at $w \approx$ **2.193** (loss **0.345**). The true bottom is at $w = 0$, loss 0.
+
+Start at $w = 5$ with $\eta = 0.2$. The slope there is $0.2 \times 5 + 2 \times 2 \times e^{-8} \approx 1 + 0.0013 =$ **1.0013**.
+
+- **Plain descent** walks into the dip and stays: $4.7997, 4.6066, 4.4187, \ldots$ and after about 21 steps it sits at **2.667** for ever. At the bottom of the dip the slope is zero, so nothing pushes it out.
+- **Momentum with $\beta = 0.9$** gathers speed on the way down. Its positions are $4.7997, 4.4264, 3.9036, 3.2063, 2.3747$, and at step 6 it reaches **1.6457**, past the hump. Inside the dip the gradient pushes back (at step 6 the gradient is $-0.0972$), but the velocity of **3.645** carries it through. It swings as far as **−2.144** at step 15, then settles towards 0.
+
+What would change with a smaller $\beta$? At $\beta = 0.5$ the ball does not build enough speed and is caught in the dip; at $\beta = 0.6$ it just escapes. Momentum is not a guarantee, just a better chance, the same way the noise from mini-batches helped escape the saddle in post 2.
+
+<figure class="blog-figure blog-figure--wide">
+  <MomentumHill alt="A 1-D curve with a small dip near w equals 3 and the true bottom at 0. Two balls start at w equals 5: plain descent and momentum. Each Step shows gradient, velocity and new position for both." />
+  <figcaption><strong>Figure 2. A heavy ball rolls through a dip that traps a careful walker.</strong> Step to watch plain descent settle at 2.667 while momentum swings past the hump. Lower beta to 0.5 and the ball is caught too.</figcaption>
+</figure>
+
+### Nesterov momentum: look before you leap
+
+A small improvement, due to Yurii Nesterov (1983) and brought into deep learning by Sutskever and colleagues (2013). In one sentence: measure the gradient not where you stand, but where the velocity is about to carry you.
+
+$$
+v \leftarrow \beta \, v + \nabla L\!\left(w - \eta \, \beta \, v\right)
+$$
+
+$$
+w \leftarrow w - \eta \, v
+$$
+
+The only change is inside the gradient: $w - \eta \beta v$ is a **look-ahead point**, roughly where the ball will be next. Everyday picture: a cyclist who looks at the road ahead rather than at the front wheel, and starts braking before the bend.
+
+Step 1 is the same as plain momentum (velocity is 0, so the look-ahead point is where we stand): $(3.6, 0.6)$. Step 2:
+
+- Look-ahead: $(3.6 - 0.05 \times 0.9 \times 8, \; 0.6 - 0.05 \times 0.9 \times 8) = (3.24, 0.24)$.
+- Gradient there: $(6.48, 1.92)$, smaller in $w_2$ than the $4.8$ at the current point, because the look-ahead is closer to the valley floor.
+- Velocity: $(7.2 + 6.48, \; 7.2 + 1.92) = (13.68, 9.12)$.
+- Update: $(3.6 - 0.684, \; 0.6 - 0.456) = (2.916, 0.144)$.
+
+Compare with plain momentum's $(2.88, 0)$ and then $(1.944, -0.54)$: Nesterov's third point is $(2.0704, -0.1598)$, overshooting $w_2$ by much less. It brakes earlier.
+
+
+## Moving averages and their early bias
+
+Before the next optimisers we need one tool, used three times in Adam. It deserves its own section.
+
+In one sentence: an **exponential moving average** (EMA) keeps a running summary that is mostly the old summary plus a little of the new value.
+
+$$
+m_t = \beta \, m_{t-1} + (1 - \beta) \, g_t
+$$
+
+- $t$ counts steps: 1, 2, 3, ...
+- $g_t$ is the new value at step $t$ (for us, a gradient).
+- $m_t$ is the average after step $t$; it starts at $m_0 = 0$.
+- $\beta$ is how much of the old average to keep; $1 - \beta$ is how much of the new value to let in.
+
+Everyday picture: the "feels like" temperature of a room. Open a window for a second and the room barely changes; leave it open and it slowly follows the outside. With $\beta = 0.9$, each new value gets a 10% say, and a value from 10 steps ago still has about $0.9^{10} \approx 35\%$ of its original weight. Roughly, the average remembers the last $1 / (1 - \beta) = 10$ values.
+
+### Worked example: smoothing a noisy gradient
+
+Suppose a weight's gradients over eight mini-batches are $4, 2, 6, 3, 5, 1, 4, 3$. Their true average is **3.5**; the jumps are mini-batch noise. With $\beta = 0.9$:
+
+- $m_1 = 0.9 \times 0 + 0.1 \times 4 =$ **0.4**
+- $m_2 = 0.9 \times 0.4 + 0.1 \times 2 = 0.36 + 0.2 =$ **0.56**
+- $m_3 = 0.9 \times 0.56 + 0.1 \times 6 = 0.504 + 0.6 =$ **1.104**
+
+Something is wrong. The gradients are around 3.5, but the average says 0.4, then 0.56, then 1.104. After 8 steps it has only reached **1.954**. The average is badly **biased towards zero** at the start.
+
+### Where the bias comes from
+
+The reason is the starting value $m_0 = 0$. Unroll the formula when every gradient equals the same number $g$:
+
+$$
+m_t = (1 - \beta)\left(1 + \beta + \beta^2 + \cdots + \beta^{t-1}\right) g = \left(1 - \beta^t\right) g
+$$
+
+(The middle bracket is a geometric sum, and $(1 - \beta)$ times it is exactly $1 - \beta^t$.) So after $t$ steps, the average holds only a fraction $1 - \beta^t$ of the true value. The rest of the weight is still sitting on the made-up 0 we started with.
+
+With $\beta = 0.9$ and a steady gradient of 8, as at the first step on our bowl: $m_1 = 0.1 \times 8 =$ **0.8**, $m_2 = 0.19 \times 8 =$ **1.52**, $m_3 = 0.271 \times 8 =$ **2.168**, and even $m_{10} = 0.651 \times 8 \approx$ **5.21**. Ten steps in, still a third short.
+
+### The fix: divide by what is missing
+
+In one sentence: since the average holds only $1 - \beta^t$ of the truth, divide by $1 - \beta^t$.
+
+$$
+\hat{m}_t = \frac{m_t}{1 - \beta^t}
+$$
+
+- $\hat{m}_t$ (read "m hat") is the **bias-corrected** average.
+- At step 1, $1 - \beta^1 = 0.1$, so $\hat{m}_1 = m_1 / 0.1 = g_1$ exactly: the first estimate is just the first value, which is the most honest thing it could be.
+- As $t$ grows, $\beta^t$ shrinks to 0, the divisor becomes 1, and the correction switches itself off.
+
+Back to the noisy gradients:
+
+| Step | $g_t$ | $m_t$ | $1 - 0.9^t$ | $\hat{m}_t$ | True mean so far |
+|---|---|---|---|---|---|
+| 1 | 4 | 0.4 | 0.1 | **4.0** | 4.0 |
+| 2 | 2 | 0.56 | 0.19 | **2.947** | 3.0 |
+| 3 | 6 | 1.104 | 0.271 | **4.074** | 4.0 |
+| 4 | 3 | 1.2936 | 0.3439 | **3.762** | 3.75 |
+| 8 | 3 | 1.9542 | 0.5695 | **3.431** | 3.5 |
+
+The corrected average tracks the real values from the very first step. What would change with a smaller $\beta$? At $\beta = 0.5$ the bias disappears faster ($1 - 0.5^3 = 0.875$ by step 3) but the average jumps around more: it goes $4, 2.667, 4.571, 3.733, 4.387, 2.667, \ldots$, following each noisy value closely.
+
+<figure class="blog-figure blog-figure--wide">
+  <MovingAverageLab alt="A bar chart of eight noisy gradients with three lines over it: the raw moving average starting near zero, the bias-corrected average, and the running true mean. A beta slider and a Step button show each update's arithmetic." />
+  <figcaption><strong>Figure 3. A moving average, its bias, and the fix.</strong> Step through the eight gradients. The raw average (grey) starts far too low; dividing by 1 − β^t (gold) fixes it. Move β and watch the trade-off between smoothness and lag, or switch to a steady gradient of 8 to see the bias on its own.</figcaption>
+</figure>
+
+
+## Per-weight step sizes: AdaGrad and RMSProp
+
+Now the third problem: one step size for every weight. The idea is to give each weight its own step size, based on how big its gradients usually are. Big gradients get a smaller step size; small gradients get a larger one.
+
+### AdaGrad
+
+**AdaGrad** (adaptive gradient) by Duchi, Hazan and Singer (2011). In one sentence: keep a running **total** of each weight's squared gradients, and divide the step by its square root.
+
+$$
+G \leftarrow G + g^2
+$$
+
+$$
+w \leftarrow w - \eta \, \frac{g}{\sqrt{G} + \epsilon}
+$$
+
+- $G$ is the running total of squared gradients for this weight, starting at 0.
+- $\sqrt{G}$ measures "how big this weight's gradients have been so far".
+- $\epsilon$ (epsilon) is a tiny number, such as $10^{-8}$, that only stops a division by zero. It is too small to change any number below.
+
+Everyday picture: a thermostat that has learned which radiators run hot. A weight that always gets big pushes has its pushes turned down; a weight that rarely gets pushed is turned up. This made AdaGrad popular for rare features, such as uncommon words, whose weights get few updates.
+
+By hand on the bowl with $\eta = 0.5$:
+
+- Step 1: gradient $(8, 8)$. $G = (64, 64)$, $\sqrt{G} = (8, 8)$. Step $0.5 \times 8 / 8 = 0.5$ for both. New point $(3.5, 0.5)$, loss **13.25**.
+- Step 2: gradient $(7, 4)$. $G = (64 + 49, \; 64 + 16) = (113, 80)$, $\sqrt{G} = (10.630, 8.944)$. Steps $0.5 \times 7 / 10.630 = 0.329$ and $0.5 \times 4 / 8.944 = 0.224$. New point $(3.171, 0.276)$, loss **10.359**.
+- Step 3: steps $0.256$ and $0.120$. New point $(2.915, 0.156)$, loss **8.593**.
+
+Notice step 1: both weights moved by exactly $0.5 = \eta$, whatever the size of the gradient. No zigzag at all. But notice also that $G$ only ever grows, so the steps shrink for ever, even on flat ground where we would like to keep going. After 50 steps, AdaGrad's loss is still **0.062**.
+
+### RMSProp
+
+**RMSProp** (root mean square propagation) was proposed by Tieleman and Hinton in a 2012 online lecture, never in a paper. In one sentence: like AdaGrad, but replace the growing total with a **moving average** of squared gradients, so old gradients are forgotten.
+
+$$
+s \leftarrow \beta \, s + (1 - \beta) \, g^2
+$$
+
+$$
+w \leftarrow w - \eta \, \frac{g}{\sqrt{s} + \epsilon}
+$$
+
+- $s$ is the moving average of the squared gradient, starting at 0. Its square root is the **root mean square** (RMS) of recent gradients: a typical gradient size.
+- $\beta$ is usually **0.9** here.
+- Everything else is as before.
+
+Dividing $g$ by a typical $\lvert g \rvert$ makes the step roughly $\eta$ in size for **every** weight, steep or gentle. The step's direction still comes from the gradient's sign and recent history.
+
+By hand on the bowl with $\eta = 0.3$, $\beta = 0.9$:
+
+**Step 1.** Gradient $(8, 8)$.
+
+- $s = (0.9 \times 0 + 0.1 \times 64, \; \ldots) = (6.4, 6.4)$; $\sqrt{s} = (2.530, 2.530)$.
+- Step: $0.3 \times 8 / 2.530 = 0.949$ for both.
+- New point $(3.051, 0.051)$. Loss **9.321**.
+
+**Step 2.** Gradient $(6.103, 0.411)$.
+
+- $s_1 = 0.9 \times 6.4 + 0.1 \times 6.103^2 = 5.76 + 3.724 = 9.484$; $\sqrt{s_1} = 3.080$.
+- $s_2 = 0.9 \times 6.4 + 0.1 \times 0.411^2 = 5.76 + 0.017 = 5.777$; $\sqrt{s_2} = 2.404$.
+- Steps: $0.3 \times 6.103 / 3.080 = 0.594$ and $0.3 \times 0.411 / 2.404 = 0.051$.
+- New point $(2.457, 0.0001)$. Loss **6.036**.
+
+**Step 3.** Gradient $(4.914, 0.0006)$. $s_1 = 10.950$, $\sqrt{s_1} = 3.309$, step $0.445$. New point $(2.011, 0.0000)$, loss **4.046**.
+
+Two things to notice.
+
+- In step 2 the $w_2$ gradient shrank from 8 to 0.411, but $s_2$ still remembers the old 64, so the step is small and $w_2$ lands almost exactly on the valley floor. No zigzag.
+- Step 1 was bigger than $\eta$: $0.949$ instead of $0.3$. That is the [early bias](#moving-averages-and-their-early-bias) again: $s_1$ holds only 10% of $g^2$, so $\sqrt{s_1}$ is only $\sqrt{0.1} \approx 0.316$ of $\lvert g \rvert$, and the step is $1 / 0.316 \approx 3.16$ times too big. Adam will fix this.
+
+### Same path on both bowls
+
+Here is the striking part. Run RMSProp on the long valley, $L = 0.1 w_1^2 + 4 w_2^2$. The $w_1$ gradient is now ten times smaller: $0.8$ instead of $8$. But $s_1$ is $100$ times smaller ($0.064$ instead of $6.4$), so $\sqrt{s_1}$ is also ten times smaller, and the ratio is unchanged: $0.3 \times 0.8 / 0.253 = 0.949$, the same step. RMSProp follows **exactly the same path** on both bowls: $(3.051, 0.051)$, $(2.457, 0.0001)$, $(2.011, 0.0000)$.
+
+Plain descent at $\eta = 0.2$ on the long valley does much worse: $(3.84, -0.6)$, $(3.686, 0.36)$, $(3.539, -0.216)$, loss **1.439** after three steps against RMSProp's **0.405**. Its $w_1$ barely moves because the slope is flat, and it cannot raise $\eta$ because $w_2$ would explode.
+
+Dividing each weight's step by its own typical gradient size cancels out how steep or flat that direction is. That is the whole point of per-weight step sizes.
+
+<figure class="blog-figure blog-figure--wide">
+  <PerWeightSteps alt="Two contour maps side by side: the bowl from post 2 and the long valley. Plain descent and RMSProp run on both. Bars beside each map show each weight's effective step size eta over root s, updating each step." />
+  <figcaption><strong>Figure 4. One step size per weight.</strong> Plain descent's path changes completely when the valley is stretched; RMSProp's does not. The bars show why: each weight's effective step size grows exactly as much as its slope shrinks. The slider stretches the right-hand valley further.</figcaption>
+</figure>
+
+The weakness shows later. Near the bottom, gradients become tiny, $s$ shrinks to match, and the step stays roughly $\eta$ in size. So RMSProp with a fixed learning rate **never settles**: on the bowl its loss reaches **0.0003** at step 20, then jitters back up to **0.19** at step 40. Keep that in mind for [schedules](#learning-rate-schedules).
+
+
+## Adam: momentum plus RMSProp, with bias correction
+
+**Adam** (adaptive moment estimation), by Diederik Kingma and Jimmy Ba (2015), is the default optimiser for most of deep learning today, including the Transformers behind speech models like [Pocket TTS](/blog/pocket-tts-calm-explained/). It is three ideas you now know, stacked:
+
+1. A moving average of the gradient, $m$: **momentum** (direction, with memory).
+2. A moving average of the squared gradient, $v$: **RMSProp** (typical size, per weight).
+3. **Bias correction** for both, because both start at 0.
+
+### The formulas
+
+In one sentence: step along the remembered direction, divided by the remembered size, after correcting both for their zero start.
+
+$$
+m_t = \beta_1 \, m_{t-1} + (1 - \beta_1) \, g_t
+$$
+
+$$
+v_t = \beta_2 \, v_{t-1} + (1 - \beta_2) \, g_t^2
+$$
+
+$$
+\hat{m}_t = \frac{m_t}{1 - \beta_1^t}, \qquad \hat{v}_t = \frac{v_t}{1 - \beta_2^t}
+$$
+
+$$
+w \leftarrow w - \eta \, \frac{\hat{m}_t}{\sqrt{\hat{v}_t} + \epsilon}
+$$
+
+- $m_t$ is the **first moment**: an average of the gradient. "Moment" is the statistics word; the first moment is the mean.
+- $v_t$ is the **second moment**: an average of the squared gradient. (This $v$ is not the velocity from the momentum section; Adam's paper uses $v$ for this.)
+- $\beta_1 = 0.9$ and $\beta_2 = 0.999$ are the defaults. $\beta_2$ is much closer to 1, so the size estimate remembers about 1000 steps.
+- $\hat{m}_t$, $\hat{v}_t$ are the bias-corrected versions.
+- $\eta$ is the learning rate (the paper's default is **0.001** for real networks; we use **0.5** on our toy bowl so the steps are visible). $\epsilon = 10^{-8}$.
+
+Everyday picture: a hiker with a compass and a stride length. The compass ($\hat{m}$) is an average of recent directions, so a single odd reading does not throw it off. The stride ($\eta / \sqrt{\hat{v}}$) is shortened on ground that has been rough and lengthened on ground that has been smooth.
+
+### Why bias correction matters even more here
+
+Look at the step at $t = 1$ **without** correction. With gradient $g_1$:
+
+- $m_1 = 0.1 \, g_1$ (10 times too small).
+- $v_1 = 0.001 \, g_1^2$, so $\sqrt{v_1} = \sqrt{0.001} \, \lvert g_1 \rvert \approx 0.0316 \, \lvert g_1 \rvert$ (about 31.6 times too small).
+- The ratio $m_1 / \sqrt{v_1} \approx 0.1 / 0.0316 \approx 3.16$.
+
+So the uncorrected first step is about **3.16** times bigger than $\eta$. The small numerator is underestimated, but the denominator is underestimated far more, because $\beta_2$ is closer to 1. With $\eta = 0.5$ and $g_1 = 8$: $0.5 \times 0.8 / \sqrt{0.064} = 0.5 \times 0.8 / 0.253 =$ **1.581** instead of 0.5. Without the correction, Adam's first steps would be about three times bigger than the learning rate asks for, and bigger still with $\beta_2$ closer to 1. Kingma and Ba added the correction for exactly this reason.
+
+With correction, $\hat{m}_1 = g_1$ and $\hat{v}_1 = g_1^2$, so the first step is $\eta \times g_1 / \lvert g_1 \rvert = \pm\eta$: exactly one learning rate, in the downhill direction, for **every** weight.
+
+### Three Adam steps by hand
+
+Bowl $L = w_1^2 + 4 w_2^2$, start $(4, 1)$, $\eta = 0.5$, $\beta_1 = 0.9$, $\beta_2 = 0.999$, $m = v = (0, 0)$.
+
+**Step 1** ($t = 1$; corrections $1 - 0.9 = 0.1$ and $1 - 0.999 = 0.001$).
+
+| | $w_1$ | $w_2$ |
+|---|---|---|
+| Gradient $g$ | $2 \times 4 = 8$ | $8 \times 1 = 8$ |
+| $m = 0.9 \times 0 + 0.1 g$ | 0.8 | 0.8 |
+| $v = 0.999 \times 0 + 0.001 g^2$ | 0.064 | 0.064 |
+| $\hat{m} = m / 0.1$ | **8** | **8** |
+| $\hat{v} = v / 0.001$ | **64** | **64** |
+| $\sqrt{\hat{v}}$ | 8 | 8 |
+| Step $0.5 \times \hat{m} / \sqrt{\hat{v}}$ | **0.5** | **0.5** |
+| New weight | 3.5 | 0.5 |
+
+Loss $12.25 + 1 =$ **13.25**.
+
+**Step 2** ($t = 2$; corrections $1 - 0.81 = 0.19$ and $1 - 0.998001 = 0.001999$).
+
+| | $w_1$ | $w_2$ |
+|---|---|---|
+| Gradient $g$ | $2 \times 3.5 = 7$ | $8 \times 0.5 = 4$ |
+| $m = 0.9 \times 0.8 + 0.1 g$ | $0.72 + 0.7 = 1.42$ | $0.72 + 0.4 = 1.12$ |
+| $v = 0.999 \times 0.064 + 0.001 g^2$ | $0.063936 + 0.049 = 0.112936$ | $0.063936 + 0.016 = 0.079936$ |
+| $\hat{m} = m / 0.19$ | **7.474** | **5.895** |
+| $\hat{v} = v / 0.001999$ | **56.496** | **39.988** |
+| $\sqrt{\hat{v}}$ | 7.516 | 6.324 |
+| Step $0.5 \times \hat{m} / \sqrt{\hat{v}}$ | **0.497** | **0.466** |
+| New weight | 3.003 | 0.034 |
+
+Loss **9.022**.
+
+**Step 3** ($t = 3$; corrections $0.271$ and $0.002997$).
+
+| | $w_1$ | $w_2$ |
+|---|---|---|
+| Gradient $g$ | 6.006 | 0.271 |
+| $m$ | 1.879 | 1.035 |
+| $v$ | 0.14889 | 0.07993 |
+| $\hat{m}$ | **6.932** | **3.820** |
+| $\hat{v}$ | **49.680** | **26.670** |
+| $\sqrt{\hat{v}}$ | 7.048 | 5.164 |
+| Step | **0.492** | **0.370** |
+| New weight | 2.511 | −0.336 |
+
+Loss **6.757**.
+
+What to notice:
+
+- Every step is close to $\eta = 0.5$ in size, for both weights, even though the $w_2$ gradient fell from 8 to 0.271. That is the RMSProp half.
+- In step 3, $w_2$'s gradient is nearly 0 but $\hat{m}$ is still **3.820**, so $w_2$ overshoots past 0 to $-0.336$. That is the momentum half, with the same overshoot we saw by hand earlier.
+- What would change with $\eta = 0.1$? Every step would be about 0.1 instead of 0.5: $(3.9, 0.9)$, then $(3.800, 0.800)$, then $(3.700, 0.702)$. Steady, but slow: Adam's step size is set by $\eta$, not by the gradient.
+
+Like RMSProp, Adam's path is the **same on both bowls**, since stretching a direction scales $\hat{m}$ and $\sqrt{\hat{v}}$ alike. On the long valley after 10 steps, Adam's loss is **0.147** against plain descent's **0.707**. And like RMSProp, with a fixed learning rate it never quite settles: on the bowl its loss is **0.30** at step 10 but **1.17** at step 20, as it circles the bottom.
+
+<figure class="blog-figure blog-figure--wide">
+  <AdamCalculator alt="A single-weight Adam calculator. Inputs for the gradient at each step, beta1, beta2 and the learning rate. Each Step press fills one row: m, v, the two corrections, m hat, v hat, the step and the new weight, with arithmetic shown. A toggle turns bias correction off." />
+  <figcaption><strong>Figure 5. Adam, one weight, one operation at a time.</strong> The default follows w1 on the bowl. Turn bias correction off and the first step jumps from 0.5 to 1.581.</figcaption>
+</figure>
+
+### The race, honestly
+
+Here are the losses in Figure 1, with the defaults (plain descent $\eta = 0.2$; momentum $\eta = 0.05$, $\beta = 0.9$; RMSProp $\eta = 0.3$, $\beta = 0.9$; Adam $\eta = 0.5$, $\beta_1 = 0.9$, $\beta_2 = 0.999$).
+
+| Loss after step | 10 | 20 | 40 | 60 |
+|---|---|---|---|---|
+| **Bowl** $w_1^2 + 4 w_2^2$ | | | | |
+| Plain descent | **0.0007** | 0.0000 | 0.0000 | 0.0000 |
+| Momentum | 6.61 | 2.12 | 0.216 | 0.025 |
+| RMSProp | 0.215 | 0.0003 | 0.188 | 0.038 |
+| Adam | 0.301 | 1.168 | 0.038 | 0.006 |
+| **Long valley** $0.1 w_1^2 + 4 w_2^2$ | | | | |
+| Plain descent | 0.707 | 0.313 | 0.061 | 0.012 |
+| Momentum | 1.685 | 0.239 | 0.031 | 0.002 |
+| RMSProp | **0.022** | 0.0000 | 0.188 | 0.038 |
+| Adam | 0.147 | 0.322 | 0.004 | **0.001** |
+
+Three honest lessons.
+
+1. On a small, round-ish bowl, **well-tuned plain descent wins**. Fancier is not always faster.
+2. Stretch the valley and the per-weight methods win easily early on, because their behaviour does not depend on how flat a direction is. In real networks, directions differ in steepness by factors far bigger than 40, and you do not know them in advance. That robustness is why Adam is the default.
+3. With a fixed learning rate, RMSProp and Adam **wander** near the bottom. They need the learning rate to come down. That is the job of a schedule.
+
+
+## AdamW and decoupled weight decay
+
+A common trick against overfitting, covered fully in [the regularisation post](/blog/foundations-regularisation/), is **weight decay**: pull every weight a little towards zero each step. With plain descent, the usual way to do it is to add a penalty $\frac{\lambda}{2} w^2$ to the loss, which adds $\lambda w$ to the gradient. ($\lambda$, lambda, sets the strength.)
+
+With Adam, that goes wrong. The extra $\lambda w$ is mixed into $g$, so it is averaged into $\hat{m}$ and then **divided by** $\sqrt{\hat{v}}$ like everything else. Weights with big gradients get their decay shrunk; weights with small gradients get it blown up.
+
+A tiny example. One weight, $w = 4$, true gradient $0$, $\lambda = 0.01$, $\eta = 0.5$, first step.
+
+- **Penalty in the gradient (Adam with L2):** $g = 0 + 0.01 \times 4 = 0.04$. Then $\hat{m} = 0.04$, $\hat{v} = 0.0016$, $\sqrt{\hat{v}} = 0.04$. Step $= 0.5 \times 0.04 / 0.04 =$ **0.5**. A whisper of decay became a full learning-rate step.
+- **Decoupled (AdamW):** leave the gradient alone, and shrink the weight separately:
+
+$$
+w \leftarrow w - \eta \left( \frac{\hat{m}_t}{\sqrt{\hat{v}_t} + \epsilon} + \lambda \, w \right)
+$$
+
+  Here the Adam part is $0$ and the decay is $0.5 \times 0.01 \times 4 =$ **0.02**, exactly what the strength asked for.
+
+This fix is **AdamW**, by Ilya Loshchilov and Frank Hutter (2019). The "W" stands for weight decay. AdamW is what most large models, including language and speech Transformers, are trained with today.
+
+
+## Learning-rate schedules
+
+So far $\eta$ has been fixed. But the best step size changes during training. Early on, the weights are far from good and big steps help. Late in training, the weights are close, mini-batch noise and the wandering we saw above dominate, and small steps help. A **schedule** is a rule for $\eta$ as a function of the step number $t$.
+
+For all three examples: training lasts $T = 100$ steps, and the peak learning rate is $\eta_{\max} = 0.1$.
+
+### Step decay
+
+In one sentence: hold $\eta$ fixed, then cut it by a factor at chosen milestones.
+
+Example: multiply by 0.1 at steps 50 and 75. So $\eta = 0.1$ for steps 0 to 49, **0.01** for steps 50 to 74, **0.001** for steps 75 to 100. Everyday picture: driving on the motorway, then the main road, then your street. Simple and still common for image models, but the sudden drops cause sudden jumps in the loss curve, and you must choose the milestones.
+
+### Cosine decay
+
+In one sentence: glide $\eta$ smoothly from the peak to zero along half a cosine wave.
+
+$$
+\eta_t = \eta_{\min} + \tfrac{1}{2} \left( \eta_{\max} - \eta_{\min} \right) \left( 1 + \cos \frac{\pi t}{T} \right)
+$$
+
+- $t$ is the current step, $T$ the total number of steps.
+- $\cos(\pi t / T)$ goes from $\cos 0 = 1$ at the start to $\cos \pi = -1$ at the end, so $1 + \cos$ goes from 2 to 0.
+- $\eta_{\min}$ is the floor; here 0.
+
+Worked values with $\eta_{\max} = 0.1$, $\eta_{\min} = 0$:
+
+- $t = 0$: $0.05 \times (1 + 1) =$ **0.1**.
+- $t = 25$: $\cos(\pi/4) \approx 0.7071$, so $0.05 \times 1.7071 =$ **0.0854**.
+- $t = 50$: $\cos(\pi/2) = 0$, so **0.05**, exactly half.
+- $t = 75$: $\cos(3\pi/4) \approx -0.7071$, so $0.05 \times 0.2929 =$ **0.0146**.
+- $t = 100$: **0**.
+
+It stays high for a long time, then falls steeply in the middle, then eases gently into zero. Cosine decay comes from **SGDR** (stochastic gradient descent with warm restarts) by Loshchilov and Hutter (2017), who also restarted the cosine several times; most people now use a single cosine.
+
+### Linear warm-up
+
+In one sentence: start $\eta$ near zero and raise it in a straight line to the peak over the first few steps, then decay.
+
+With 10 warm-up steps followed by a cosine over the remaining 90:
+
+- $t < 10$: $\eta_t = 0.1 \times t / 10$. So $t = 1$ gives **0.01**, $t = 5$ gives **0.05**, $t = 10$ gives **0.1**.
+- $t \geq 10$: the cosine formula with $t - 10$ in place of $t$ and $90$ in place of $T$. At $t = 25$: $\cos(\pi \times 15 / 90) = \cos(\pi/6) \approx 0.866$, so $0.05 \times 1.866 =$ **0.0933**. At $t = 50$: **0.0587**. At $t = 75$: **0.0179**.
+
+Why warm up? Two reasons.
+
+1. **Large batches.** Goyal and colleagues (2017) trained an image classifier with very large batches and a correspondingly large learning rate. Starting at the full rate made early training unstable; ramping up over the first 5 epochs fixed it.
+2. **Adam's early estimates are thin.** In the first steps, $\hat{v}$ is an average of only one or two squared gradients, so it is a shaky estimate of the typical gradient size. We saw that Adam's first step moves **every** weight by a full $\eta$, whatever its gradient, because $\hat{m}_1 / \sqrt{\hat{v}_1} = \pm 1$. If $\eta$ is already at its peak, every weight in the network takes a full-sized step on the evidence of a single mini-batch. Warm-up keeps those early steps small until the averages have seen enough data. Liu and colleagues (2020) analysed this problem in detail.
+
+Warm-up followed by cosine decay is the most common schedule for Transformers today.
+
+<figure class="blog-figure blog-figure--wide">
+  <ScheduleExplorer alt="A plot of learning rate against step for three schedules: step decay, cosine, and warm-up plus cosine. A step slider moves a vertical line and prints each schedule's learning rate at that step with the formula filled in." />
+  <figcaption><strong>Figure 6. Three ways to change the step size over time.</strong> Drag the step slider; each schedule prints its learning rate and the arithmetic. Change the warm-up length and peak.</figcaption>
+</figure>
+
+Back to the race: give RMSProp or Adam a decaying schedule in Figure 1 (turn on "Cosine decay over 60 steps") and the wandering near the bottom fades as the step size shrinks.
+
+
+## Choosing a learning rate
+
+Every optimiser above still has a learning rate, and it still matters most. How do you pick one without knowing the landscape?
+
+### Try a range
+
+The simplest honest method: try several values spread over orders of magnitude, run each briefly, and compare. On the 1-D bowl from post 2, $L = (w - 3)^2$ from $w = 0$, each step multiplies the distance by $1 - 2\eta$, so after 5 steps the loss is $9 \times (1 - 2\eta)^{10}$:
+
+| $\eta$ | 0.001 | 0.01 | 0.03 | 0.1 | 0.3 | 0.5 | 0.9 | 1.0 | 1.1 |
+|---|---|---|---|---|---|---|---|---|---|
+| Loss after 5 steps | 8.82 | 7.35 | 4.85 | 0.966 | **0.0009** | **0** | 0.966 | 9.0 | 55.7 |
+
+The picture you get is always the same shape: a long flat stretch where nothing happens (too small), a dip where learning is fast, then a sharp rise (too big). The best value sits in the dip, a little below the cliff edge.
+
+### The learning-rate range test
+
+Leslie Smith (2017) made this cheap. In one sentence: run **one** short training run in which the learning rate starts tiny and increases every mini-batch, and record the loss as you go. Plot loss against learning rate. Smith plotted accuracy against the learning rate: where accuracy starts rising, the rate is large enough to learn; where it stops rising or turns ragged, it is too large, and the good range lies between. Most people now read the loss curve the same way, picking a rate somewhat below the point where the loss is lowest.
+
+It costs one short run instead of many, and it works with any optimiser.
+
+<figure class="blog-figure blog-figure--wide">
+  <LearningRateSweep alt="A log-scale plot of the loss after five steps against the learning rate on the bowl (w minus 3) squared, from 0.001 to 1.2. A marker slides along the curve; small panels show the five-step path for the selected rate." />
+  <figcaption><strong>Figure 7. Too small, just right, too big, in one sweep.</strong> The steps visit eight learning rates; slide η yourself to try any other. The curve shows the loss after five steps and the inset shows the path. The dip is where you want to be; the cliff starts at 1.</figcaption>
+</figure>
+
+
+## What to remember
+
+- **Plain (stochastic) gradient descent** has three problems: it zigzags in narrow valleys, crawls on flat ground, and uses one step size for every weight. The steepest direction sets the limit for all.
+- **Momentum** keeps a velocity $v \leftarrow \beta v + g$ and steps along it. Consistent directions speed up (by up to $1 / (1 - \beta) = 10$ times), alternating ones cancel, and the ball can roll through small dips, at the cost of overshoot. **Nesterov** measures the gradient at the look-ahead point and brakes earlier.
+- An **exponential moving average** started at zero is biased low by a factor $1 - \beta^t$; dividing by it fixes the early estimates.
+- **AdaGrad** and **RMSProp** divide each weight's step by its typical gradient size, so steep and flat directions take similar steps. AdaGrad's total only grows, so it slows for ever; RMSProp's average forgets.
+- **Adam** is momentum plus RMSProp plus bias correction. Its first step moves every weight by exactly $\eta$. **AdamW** applies weight decay separately so it is not distorted by the per-weight scaling.
+- **Schedules** (step, cosine, warm-up then cosine) lower the learning rate when the noise near the bottom matters; **warm-up** keeps Adam's early, poorly estimated steps small.
+- Choose the learning rate by sweeping it: too small is flat, too big is a cliff, the dip in between is the target. The **range test** does it in one run.
+
+
+## Try it yourself
+
+- **Figure 1.** Defaults, bowl. After 3 steps: plain descent at **(0.864, −0.216)**, momentum at **(1.944, −0.54)**, RMSProp at **(2.011, 0.000)**, Adam at **(2.511, −0.336)**. After 10 steps the losses are **0.0007, 6.61, 0.215, 0.301**. Switch to the long valley: after 10 steps **0.707, 1.685, 0.022, 0.147**.
+- **Figure 2.** After 6 steps, momentum ($\beta = 0.9$) is at **1.646**, past the hump at 2.193; plain descent is at **3.829** and will stop at **2.667**. Set $\beta = 0.5$ and momentum is trapped too.
+- **Figure 3.** $\beta = 0.9$: after step 3 the raw average reads **1.104** and the corrected one **4.074**; after step 8, **1.954** and **3.431**. Set $\beta = 0.5$: corrected step 2 is **2.667**.
+- **Figure 4.** After 3 steps on the long valley, plain descent is at **(3.539, −0.216)** with loss **1.439**, RMSProp at **(2.011, 0.000)** with loss **0.405**. RMSProp's points match those on the bowl.
+- **Figure 5.** Gradients 8, 7, 6.006 with $\eta = 0.5$: $\hat{m}$ reads **8, 7.474, 6.932**, $\hat{v}$ reads **64, 56.496, 49.680**, steps **0.5, 0.497, 0.492**. Turn off bias correction: step 1 becomes **1.581**.
+- **Figure 6.** At step 25: step decay **0.1**, cosine **0.0854**, warm-up plus cosine **0.0933**. At step 75: **0.001**, **0.0146**, **0.0179**.
+- **Figure 7.** Learning rate 0.3: loss after 5 steps **0.0009**. Learning rate 1.1: **55.7**.
+
+
+## Sources
+
+- B. T. Polyak (1964). "Some methods of speeding up the convergence of iteration methods." *USSR Computational Mathematics and Mathematical Physics*, 4(5), 1–17. The heavy ball (momentum) method.
+- Y. Nesterov (1983). "A method for solving the convex programming problem with convergence rate O(1/k²)." *Soviet Mathematics Doklady*, 27, 372–376 (Russian original in *Doklady Akademii Nauk SSSR*, 269, 543–547).
+- I. Sutskever, J. Martens, G. Dahl and G. Hinton (2013). "On the importance of initialization and momentum in deep learning." ICML 2013. Nesterov momentum in deep learning.
+- J. Duchi, E. Hazan and Y. Singer (2011). "Adaptive Subgradient Methods for Online Learning and Stochastic Optimization." *Journal of Machine Learning Research*, 12, 2121–2159. AdaGrad.
+- T. Tieleman and G. Hinton (2012). "Lecture 6.5, rmsprop: Divide the gradient by a running average of its recent magnitude." *Neural Networks for Machine Learning*, Coursera. RMSProp (unpublished lecture).
+- D. P. Kingma and J. Ba (2015). "Adam: A Method for Stochastic Optimization." ICLR 2015. arXiv:1412.6980.
+- I. Loshchilov and F. Hutter (2019). "Decoupled Weight Decay Regularization." ICLR 2019. arXiv:1711.05101. AdamW.
+- I. Loshchilov and F. Hutter (2017). "SGDR: Stochastic Gradient Descent with Warm Restarts." ICLR 2017. arXiv:1608.03983. Cosine schedule.
+- P. Goyal, P. Dollár, R. Girshick, P. Noordhuis, L. Wesolowski, A. Kyrola, A. Tulloch, Y. Jia and K. He (2017). "Accurate, Large Minibatch SGD: Training ImageNet in 1 Hour." arXiv:1706.02677. Linear scaling and gradual warm-up.
+- L. N. Smith (2017). "Cyclical Learning Rates for Training Neural Networks." WACV 2017. arXiv:1506.01186. The learning-rate range test.
+- L. Liu, H. Jiang, P. He, W. Chen, X. Liu, J. Gao and J. Han (2020). "On the Variance of the Adaptive Learning Rate and Beyond." ICLR 2020. arXiv:1908.03265.
+

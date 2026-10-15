@@ -1,0 +1,69 @@
+---
+// Foundations, LSTM and GRU post: one LSTM cell over inputs 1, 0, 0, 0 with
+// b_f = 3, w_i = 4, b_i = −2, w_g = 2, other weights 0. Belt c: 0.8491,
+// 0.8088, 0.7705, 0.7339; output h: 0.3453, 0.3345, 0.3236, 0.3127. With
+// b_f = 0 the belt halves: 0.8491, 0.4246, 0.2123, 0.1061.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-lstmcell>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 330" role="img" aria-labelledby="lc2-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="lc2-title">An LSTM cell with its cell-state belt, four gates and output, computed one operation at a time</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Forget bias b_f <strong data-v="bf"></strong></span><input class="scrub" data-k="bf" type="range" min="-3" max="6" step="0.5" value="3" /></label>
+    <label><span class="fig-panel__name">Input-gate weight w_i <strong data-v="wi"></strong></span><input class="scrub" data-k="wi" type="range" min="-4" max="4" step="0.5" value="4" /></label>
+    <label><span class="fig-panel__name">Input-gate bias b_i <strong data-v="bi"></strong></span><input class="scrub" data-k="bi" type="range" min="-4" max="4" step="0.5" value="-2" /></label>
+    <label><span class="fig-panel__name">Candidate weight w_g <strong data-v="wg"></strong></span><input class="scrub" data-k="wg" type="range" min="-3" max="3" step="0.5" value="2" /></label>
+    <label><span class="fig-panel__name">Output-gate bias b_o <strong data-v="bo"></strong></span><input class="scrub" data-k="bo" type="range" min="-4" max="4" step="0.5" value="0" /></label>
+    <label><span class="fig-panel__name">First input <strong data-v="x1"></strong></span><input class="scrub" data-k="x1" type="range" min="-1" max="1" step="0.5" value="1" /></label>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt, par } from "../../lib/tiny-net";
+  import { INK, MUTED, GOLD, TINT, JADE, NEG } from "../../lib/net-diagram";
+  import { txt, arrow } from "../../lib/plot";
+  import { lstmForward } from "../../lib/lstm";
+  document.querySelectorAll<HTMLElement>("[data-lstmcell]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const p: Record<string, number> = { bf: 3, wi: 4, bi: -2, wg: 2, bo: 0, x1: 1 };
+    const run = () => lstmForward({ w: { f: 0, i: p.wi, g: p.wg, o: 0 }, u: { f: 0, i: 0, g: 0, o: 0 }, b: { f: p.bf, i: p.bi, g: 0, o: p.bo }, v: 1 }, [p.x1, 0, 0, 0]);
+    const f4 = (v: number) => fmt(v, 4);
+    const steps = () => run().flatMap((r, t) => [
+      { say: `Step ${t + 1}, forget gate: how much of the old belt to keep.`, math: `f = σ(0 × ${par(r.x)} + ${par(p.bf)}) = ${f4(r.f)}` },
+      { say: "Input gate: how much of the new candidate to write.", math: `i = σ(${fmt(p.wi)} × ${par(r.x)} + ${par(p.bi)}) = σ(${fmt(p.wi * r.x + p.bi)}) = ${f4(r.i)}` },
+      { say: "Candidate: what could be written. tanh, so it can be negative.", math: `g = tanh(${fmt(p.wg)} × ${par(r.x)}) = ${f4(r.g)}` },
+      { say: "Output gate: how much of the belt to show.", math: `o = σ(${par(p.bo)}) = ${f4(r.o)}` },
+      { say: "Belt, part one: multiply the old belt by the forget gate.", math: `f × c_prev = ${f4(r.f)} × ${par(r.cPrev, 4)} = ${f4(r.f * r.cPrev)}` },
+      { say: "Belt, part two: add the gated candidate. This addition is why the gradient survives.", math: `c = ${f4(r.f * r.cPrev)} + ${f4(r.i)} × ${par(r.g, 4)} = ${f4(r.c)}` },
+      { say: "Output: squash the belt and pass it through the output gate.", math: `h = ${f4(r.o)} × tanh(${f4(r.c)}) = ${f4(r.o)} × ${f4(r.tc)} = ${f4(r.h)}` },
+    ]);
+    function draw(k: number) {
+      const rs = run(), t0 = k < 0 ? 0 : Math.floor(k / 7), sub = k < 0 ? -1 : k % 7, r = rs[t0], lit = (n: number) => sub === n;
+      const box = (x: number, y: number, label: string, val: string, on: boolean, done: boolean) => `<rect x="${x}" y="${y}" width="74" height="46" rx="7" fill="${on ? TINT : "#fff"}" stroke="${on ? JADE : INK}" stroke-width="${on ? 2.5 : 1.2}"/>` + txt(x + 37, y + 18, label, `font-size="11" text-anchor="middle" fill="${MUTED}"`) + txt(x + 37, y + 37, done ? val : "?", `font-size="13" font-weight="700" text-anchor="middle" fill="${done ? INK : "#B9C0BF"}"`);
+      let s = txt(30, 22, `The cell at step ${t0 + 1} (input ${fmt(r.x)})`, `font-size="12" font-weight="700" fill="${INK}"`);
+      // Belt across the top.
+      s += `<line x1="40" x2="520" y1="60" y2="60" stroke="${GOLD}" stroke-width="5" stroke-opacity="0.5"/>` + txt(40, 48, `belt c_prev = ${f4(r.cPrev)}`, `font-size="11.5" fill="${INK}"`) + txt(520, 48, sub >= 5 ? `c = ${f4(r.c)}` : "c = ?", `font-size="11.5" font-weight="700" text-anchor="end" fill="${INK}"`);
+      s += `<circle cx="180" cy="60" r="14" fill="${lit(4) ? TINT : "#fff"}" stroke="${INK}"/>` + txt(180, 65, "×", `font-size="15" text-anchor="middle" fill="${INK}"`) + `<circle cx="330" cy="60" r="14" fill="${lit(5) ? TINT : "#fff"}" stroke="${INK}"/>` + txt(330, 65, "+", `font-size="15" text-anchor="middle" fill="${INK}"`);
+      const B = [["f", "forget f", r.f], ["i", "input i", r.i], ["g", "candidate g", r.g], ["o", "output o", r.o]] as const;
+      B.forEach(([, lab, v], j) => (s += box(143 + j * 100, 130, lab, f4(v), lit(j), sub >= j)));
+      s += arrow(180, 130, 180, 76, MUTED, 1.2) + arrow(280, 130, 322, 72, MUTED, 1.2) + arrow(380, 130, 338, 72, MUTED, 1.2) + arrow(480, 130, 560, 96, MUTED, 1.2);
+      s += `<rect x="540" y="40" width="80" height="56" rx="7" fill="${lit(6) ? TINT : "#fff"}" stroke="${lit(6) ? JADE : INK}"/>` + txt(580, 60, "o × tanh(c)", `font-size="10.5" text-anchor="middle" fill="${MUTED}"`) + txt(580, 82, sub >= 6 ? f4(r.h) : "?", `font-size="13" font-weight="700" text-anchor="middle" fill="${INK}"`) + arrow(520, 60, 538, 60, GOLD, 2) + arrow(620, 68, 680, 68, INK, 1.5) + txt(690, 72, "h", `font-size="12" fill="${INK}"`);
+      s += txt(143, 200, `inputs to every gate: x = ${fmt(r.x)}, h_prev = ${f4(r.hPrev)}`, `font-size="11" fill="${MUTED}"`);
+      // Timeline of the four steps.
+      s += txt(30, 236, "belt c (gold) and output h (green) over the four steps", `font-size="11.5" font-weight="700" fill="${INK}"`);
+      rs.forEach((q, t) => {
+        const done = t < t0 || (t === t0 && sub === 6), x = 60 + t * 170;
+        s += `<rect x="${x}" y="${300 - Math.abs(q.c) * 50}" width="40" height="${Math.abs(q.c) * 50}" fill="${GOLD}" fill-opacity="${done ? 0.85 : 0.15}"/><rect x="${x + 46}" y="${300 - Math.abs(q.h) * 50}" width="40" height="${Math.abs(q.h) * 50}" fill="${JADE}" fill-opacity="${done ? 0.85 : 0.15}"/>`;
+        s += txt(x + 43, 318, done ? `${fmt(q.c, 4)} / ${fmt(q.h, 4)}` : `step ${t + 1}`, `font-size="10.5" text-anchor="middle" fill="${done ? INK : MUTED}"`);
+      });
+      $("[data-draw]").innerHTML = s;
+      root.querySelectorAll<HTMLElement>("[data-v]").forEach((el) => (el.textContent = fmt(p[el.dataset.v!], 1)));
+    }
+    const redraw = stepper(root, steps, draw, { delay: 1 });
+    root.querySelectorAll<HTMLInputElement>("[data-k]").forEach((inp) => inp.addEventListener("input", () => { p[inp.dataset.k!] = +inp.value; redraw(); }));
+  });
+</script>

@@ -1,0 +1,61 @@
+---
+// Sampling weight P(g) ∝ h_g^α for three toy speaker groups (100 h, 25 h, 1 h).
+// α = 1 is proportional to hours, 0 is uniform, 0.5 is the square root used in
+// the foundation run. The repeat counter shows the price of lifting small groups.
+const { alt } = Astro.props;
+const groups = [{ h: 100, c: "#2b2b30" }, { h: 25, c: "#594578" }, { h: 1, c: "#8a6a1f" }];
+---
+<div class="blog-diagram ss" role="region" aria-label={alt} data-ss data-cfg={JSON.stringify(groups)}>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 300" role="img" aria-labelledby="ss-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="ss-title">Share of training draws per speaker group as the exponent changes</title>
+    <text x="24" y="28" font-size="11" letter-spacing="1" fill="#5f5f66">SHARE OF TRAINING DRAWS</text>
+    {groups.map((g, i) => (
+      <g transform={`translate(24 ${56 + i * 54})`}>
+        <text y="14" font-size="12" font-weight="600" fill={g.c}>{g.h} h speaker</text>
+        <rect x="120" width="440" height="20" rx="3" fill="#ececf1" />
+        <rect data-bar={i} x="120" width="0" height="20" rx="3" fill={g.c} />
+        <text data-pct={i} x="574" y="15" font-size="13" font-weight="700" fill={g.c} font-family="ui-monospace, SFMono-Regular, Menlo, monospace"></text>
+      </g>
+    ))}
+    <text data-formula x="24" y="232" font-size="13" fill="#2b2b30" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"></text>
+    <text data-repeat x="24" y="256" font-size="11" fill="#8a6a1f"></text>
+    <text x="24" y="284" font-size="10.5" fill="#5f5f66">Real foundation set, at α = 0.5: the three largest voices fell from 65% of draws to 38%; the smallest groups were repeated up to about 240 times.</text>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Exponent α in P ∝ hours^α<strong data-val></strong></span><input class="scrub" data-a type="range" min="0" max="1" step="0.05" value="0.5" style="--n: 4; --p: 50%" /></label>
+    <div><span class="fig-panel__name">Presets</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-set="0">Uniform</button>
+      <button type="button" class="fig-chip" data-set="0.5">Square root</button>
+      <button type="button" class="fig-chip" data-set="1">Proportional</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { setupFigure, tween } from "../../lib/figure-motion";
+
+  document.querySelectorAll<HTMLElement>("[data-ss]").forEach((root) => {
+    const gs: { h: number }[] = JSON.parse(root.dataset.cfg!);
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const a = $<HTMLInputElement>("[data-a]");
+    const total = gs.reduce((s, g) => s + g.h, 0);
+    function frame(alpha: number, grow = 1) {
+      const w = gs.map((g) => g.h ** alpha), W = w.reduce((s, x) => s + x, 0);
+      w.forEach((x, i) => {
+        $(`[data-bar="${i}"]`).setAttribute("width", String(440 * (x / W) * grow));
+        $(`[data-pct="${i}"]`).textContent = `${((x / W) * 100).toFixed(1)}%`;
+      });
+      const name = alpha === 0 ? "uniform" : alpha === 1 ? "proportional" : alpha === 0.5 ? "square root" : "";
+      $("[data-formula]").textContent = `α = ${alpha.toFixed(2)}${name ? `  (${name})` : ""}`;
+      // Draw as many clips as the corpus holds: each 1 h clip is then heard this many times.
+      const rep = ((w[2] / W) * total) / gs[2].h;
+      $("[data-repeat]").textContent = `In one pass of ${total} h of draws, each clip of the 1 h speaker is heard about ${rep.toFixed(1)}× and each clip of the 100 h speaker ${(((w[0] / W) * total) / gs[0].h).toFixed(2)}×.`;
+      $("[data-val]").textContent = alpha.toFixed(2);
+      a.style.setProperty("--p", `${alpha * 100}%`);
+    }
+    a.addEventListener("input", () => frame(+a.value));
+    root.querySelectorAll<HTMLButtonElement>("[data-set]").forEach((b) => b.addEventListener("click", () => { a.value = b.dataset.set!; frame(+a.value); }));
+    setupFigure(root, () => frame(+a.value, 0), async (alive) => { await tween(1, (t) => alive() && frame(+a.value, t)); });
+  });
+</script>

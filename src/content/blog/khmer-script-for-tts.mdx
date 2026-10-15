@@ -1,0 +1,299 @@
+---
+title: "How Khmer writing looks to a text-to-speech model"
+title_key: "Khmer writing"
+date: 2026-10-14
+category: "speech-ai"
+read_time: "25 min"
+series_order: 12.5
+series: speech-ai
+featured: false
+excerpt: "Khmer letters stack, vowels sit on every side of a consonant, and words have no spaces. This post follows one syllable from the screen to code points, bytes and tokens, and shows what each step means for a text-to-speech model."
+question: "What does a TTS model actually receive when you give it a line of Khmer text?"
+my_work: "A concept note for my Khmer TTS project. I checked every code point against the Unicode chart and counted every byte and token by hand; the corpus numbers come from my fine-tuning runs."
+result: "One short Khmer word such as ខ្មែរ is 1 syllable on screen, 5 code points, 15 UTF-8 bytes, and 15 tokens for a tokenizer that knows no Khmer. A Khmer tokenizer brought a typical sentence down to 27 tokens."
+evidence_limit: "Explains the writing system and standard Unicode behaviour. Pronunciations are approximate IPA. No new experiments; corpus figures are from the fine-tuning post."
+lesson: "What you see, what is stored and what the model reads are three different things. A Khmer text frontend has to decide at each step which of them it trusts."
+---
+import SyllableAssembly from "../../components/figures/SyllableAssembly.astro";
+import ConsonantSeries from "../../components/figures/ConsonantSeries.astro";
+import SameLookTwins from "../../components/figures/SameLookTwins.astro";
+import ThreeCounters from "../../components/figures/ThreeCounters.astro";
+import NoSpaceReader from "../../components/figures/NoSpaceReader.astro";
+import ByteMerge from "../../components/figures/ByteMerge.astro";
+import RielReader from "../../components/figures/RielReader.astro";
+
+In the [fine-tuning post](/blog/khmer-tts-fine-tuning/) I taught an English text-to-speech (TTS) model to speak Khmer. That post moved fast past one question: what does the model actually see when it is handed a line of Khmer? This post slows down and answers it, one letter at a time.
+
+You do not need to read Khmer. Think of a line of Khmer as a string of beads. On screen you see the finished necklace. Inside the computer there is a list of beads in the order they were threaded, and that order is not always the order you see. A TTS model only ever gets the list. By the end you will know how the list is built ([syllables](#a-syllable-is-built-around-one-consonant)), why it can disagree with the screen ([logical and visual order](#stored-in-one-order-drawn-in-another)), why two identical-looking words can be different lists ([normalization](#two-lists-that-look-the-same)), how long the list is in three different units ([counting](#letters-code-points-and-bytes)), and what a TTS frontend has to do before the model reads anything ([the frontend](#what-this-means-for-a-tts-frontend)).
+
+## Three words before we start
+
+- **Code point**: the number Unicode gives a single character. Written `U+` and four hexadecimal (base sixteen) digits. Khmer lives from U+1780 to U+17FF.
+- **Glyph**: the shape the font draws. One code point can become one glyph, part of a glyph, or a glyph in a different place.
+- **Grapheme cluster**: what a reader would call "one letter-block", the unit your cursor jumps over when you press the arrow key.
+
+## A syllable is built around one consonant
+
+Khmer is an **abugida**. In an alphabet such as English, consonants and vowels are equal letters standing in a row. In an abugida, the consonant is the boss. Every consonant letter already carries a vowel sound inside it, called the **inherent vowel**, and other vowels are small signs clipped onto the consonant like accessories on a doll.
+
+ក on its own is the consonant KA, U+1780, and is read with its inherent vowel, roughly /kɑː/ in IPA (the International Phonetic Alphabet). Add the vowel sign ា (AA, U+17B6) after it and you get កា, roughly /kaː/.
+
+<figure class="blog-figure blog-figure--wide">
+  <SyllableAssembly alt="An empty slot. Code points for ខ្មែរ arrive one at a time from a conveyor belt: KHA lands in the centre, COENG appears as a dotted joiner, MO shrinks and slides under KHA, the vowel sign AE splits and flies to the left of the cluster, and RO lands on the right. The finished word ខ្មែរ glows; the conveyor below still shows the five code points in stored order." />
+  <figcaption><strong>Figure 1. A syllable assembles.</strong> Five code points arrive in stored order. The font moves each one into its visual place: one goes under, one goes to the left, one stays on the right.</figcaption>
+</figure>
+
+### Two families of consonants
+
+Here is the twist that has no English cousin. Khmer consonants come in **two series**. The first series (often called the a-series) and the second series (the o-series) look like separate letters, but the bigger difference is what they do to the vowels clipped onto them: **the same vowel sign is read differently depending on which series the consonant belongs to**.
+
+| Letter | Code point | Name in Unicode | Series |
+|---|---|---|---|
+| ក | U+1780 | KHMER LETTER KA | first (a-series) |
+| គ | U+1782 | KHMER LETTER KO | second (o-series) |
+
+Add the same sign ា (U+17B6) to each: កា is roughly /kaː/, and គា is roughly /kiə/. The stored vowel is identical: U+17B6 in both. So a model that reads code points has to learn that U+17B6 makes two different sounds, and the clue is the consonant before it.
+
+A picture: each vowel sign is a light filter, and the consonant series decides which colour of light passes through it.
+
+<figure class="blog-figure">
+  <ConsonantSeries alt="Two cards, ក and គ. The same vowel sign slides onto each; the stored code points under each differ only in the consonant, while the IPA reading changes. Buttons switch between three vowel signs." />
+  <figcaption><strong>Figure 2. One vowel sign, two sounds.</strong> The sign ា is stored as U+17B6 under both consonants. What changes the reading is the series of the consonant it is attached to.</figcaption>
+</figure>
+
+### Stacking consonants with coeng
+
+When two consonants sit together with no vowel between them, Khmer writes the second one small, **under** the first. The small form is a **subscript consonant**. Unicode does not have separate subscript letters. Instead it stores an invisible joiner, **COENG** (U+17D2), between the two ordinary consonants, and the font does the stacking.
+
+ក្រ is KA + COENG + RO:
+
+| Glyph | Code point | Name |
+|---|---|---|
+| ក | U+1780 | KHMER LETTER KA |
+| ្ | U+17D2 | KHMER SIGN COENG |
+| រ | U+179A | KHMER LETTER RO |
+
+Three code points, one block on screen. The subscript form of RO is drawn to the *left* of KA, even though RO is stored last. We will come back to that in the [next section](#stored-in-one-order-drawn-in-another).
+
+A bigger cluster: ខ្មែរ, the word for "Khmer" itself.
+
+| Glyph | Code point | Name |
+|---|---|---|
+| ខ | U+1781 | KHMER LETTER KHA |
+| ្ | U+17D2 | KHMER SIGN COENG |
+| ម | U+1798 | KHMER LETTER MO |
+| ែ | U+17C2 | KHMER VOWEL SIGN AE |
+| រ | U+179A | KHMER LETTER RO |
+
+### Diacritics and independent vowels
+
+Besides vowel signs, a few small marks change the sound of a syllable. Some you will meet often (names from the Unicode chart):
+
+| Sign | Code point | Name |
+|---|---|---|
+| ំ | U+17C6 | KHMER SIGN NIKAHIT |
+| ះ | U+17C7 | KHMER SIGN REAHMUK |
+| ់ | U+17CB | KHMER SIGN BANTOC |
+| ៉ | U+17C9 | KHMER SIGN MUUSIKATOAN |
+| ៊ | U+17CA | KHMER SIGN TRIISAP |
+| ៌ | U+17CC | KHMER SIGN ROBAT |
+
+MUUSIKATOAN and TRIISAP are series shifters: they move a consonant into the other series, so they change which vowel sound you hear: MUUSIKATOAN moves certain second-series consonants into the first series, TRIISAP moves certain first-series consonants into the second (Unicode Standard, Chapter 16). BANTOC shortens the vowel before it.
+
+A few vowels can also stand alone without a consonant, as their own letters. These are **independent vowels**, such as ឥ (U+17A5, KHMER INDEPENDENT VOWEL QI) and ឯ (U+17AF, KHMER INDEPENDENT VOWEL QE). They are much rarer than dependent vowel signs.
+
+### The shape of a syllable
+
+Put the pieces together and a written Khmer syllable has this skeleton, in stored order:
+
+consonant, then optionally COENG + consonant (once or twice), then optionally a series shifter, then optionally a vowel sign, then optionally a final sign.
+
+Think of a sandwich order slip: bread first (the base consonant), then the extra fillings in a fixed order. The order slip is what is stored. How the sandwich looks on the plate is the font's job. The Unicode Standard gives this order and the recommended placement of each mark (Unicode Standard, Chapter 16, Southeast Asia, Khmer section).
+
+
+
+
+## Stored in one order, drawn in another
+
+In English, the order you type and the order you see are the same. In Khmer they often are not. Unicode stores text in **logical order**, the order you would say or type the parts: consonant first, then everything attached to it. The font draws text in **visual order**, where some vowel signs go to the left of the consonant, some above, some below and some to the right.
+
+In ខ្មែរ the vowel sign AE (U+17C2) is stored fourth, after KHA, COENG and MO, yet it is drawn first, on the far left. A program that walks the stored list left to right reaches the vowel after the consonants, which is exactly the order a speaker produces them: the consonants start the syllable, the vowel follows. That is good news for TTS. Logical order is closer to speech than visual order is.
+
+The trap is the reverse direction. Text copied out of an old PDF, or typed with a font hack, may store the vowel first because it *looks* first. To a model, that is a different, wrong list.
+
+More vowel positions, all stored after KA:
+
+| Word | Stored code points | Where the vowel is drawn |
+|---|---|---|
+| កា | U+1780 U+17B6 | right |
+| កើ | U+1780 U+17BE | wraps: left and top |
+| កៀ | U+1780 U+17C0 | wraps: left and right |
+| ខ្មែរ | U+1781 U+17D2 U+1798 U+17C2 U+179A | left of the whole cluster |
+
+
+## Two lists that look the same
+
+Because the font does the arranging, two different stored lists can draw the **same picture**. This is the most common hidden bug in Khmer text data.
+
+Example one, a split vowel. The vowel sign OE ើ (U+17BE) looks like the sign E េ (U+17C1) plus the sign II ី (U+17B8). Typing E then II after a consonant can draw something that looks identical to OE. But Unicode **NFC** (Normalization Form C, the standard "pick one spelling" rule) does *not* merge them: I checked, NFC leaves U+17C1 U+17B8 as two code points. So normalization will not save you here; instead the Unicode Standard lists two-part spellings like this among the Khmer sequences not to use (Chapter 16).
+
+Example two, order of attached marks. A shifter and a vowel sign can be typed in either order and many fonts draw both the same way. Only one order is the recommended one.
+
+Example three, deprecated characters. A few code points in the block are deprecated and should not appear in new text: U+17A3 and U+17A4 (two independent vowels) and U+17D3 (KHMER SIGN BATHAMASAT).
+
+Why this matters for TTS: the model learns sound from lists. If one word appears in the data as two different lists, the model sees two "words" with half the examples each. In my corpus, NFC changed nothing (see [Normalisation in the fine-tuning post](/blog/khmer-tts-fine-tuning/#normalisation-change-little-flag-a-lot)); the lesson is that NFC alone is not proof the text is clean.
+
+<figure class="blog-figure">
+  <SameLookTwins alt="Two cards showing the same-looking syllable built from ក. Under the left card: U+1780 U+17BE. Under the right card: U+1780 U+17C1 U+17B8. An 'Apply NFC' button runs normalization; both lists stay unchanged and a 'still different' badge appears. A 'Repair' button maps the right card to the left." />
+  <figcaption><strong>Figure 3. Same picture, different lists.</strong> NFC is run live in your browser with String.prototype.normalize. It leaves both lists as they are; only a Khmer-specific repair rule merges them.</figcaption>
+</figure>
+
+## Letters, code points and bytes
+
+Ask "how long is ខ្មែរ?" and you get three honest answers.
+
+- **Grapheme clusters**: what a reader counts as blocks. You might expect 1. Chromium's `Intl.Segmenter`, tested in October 2026, returns **2**: ខ្មែ and រ, because the final RO is a separate consonant with no mark joining it. Browsers built on older Unicode rules can split the stacked cluster differently, so even this count depends on the software.
+- **Code points**: 5.
+- **Bytes**: 15, in UTF-8.
+
+UTF-8 (Unicode Transformation Format, 8-bit) is how most files store code points. It uses 1 to 4 bytes per code point depending on how big the number is. Every Khmer code point sits between U+0800 and U+FFFF, and every code point in that range takes exactly 3 bytes. So for pure Khmer text:
+
+$$
+B = 3 \times N
+$$
+
+- $B$: the number of bytes the text takes in UTF-8.
+- $N$: the number of code points.
+- $3$: bytes per code point for anything from U+0800 to U+FFFF, which includes the whole Khmer block.
+
+Intuition: every Khmer bead weighs the same, 3 grams. Count the beads, multiply by three.
+
+Worked example: ស្រី is SA U+179F, COENG U+17D2, RO U+179A, II U+17B8. That is $N = 4$, so $B = 3 \times 4 = 12$ bytes. The English word "Khmer" is 5 code points but only 5 bytes, because Latin letters below U+0080 take 1 byte each.
+
+Spaces and the zero-width space (below) count too: U+200B is also in the 3-byte range.
+
+<figure class="blog-figure blog-figure--wide">
+  <ThreeCounters alt="A text box prefilled with ខ្មែរ and three counters: grapheme clusters, code points and UTF-8 bytes. Each code point is a bead coloured by its role, with its UTF-8 bytes in hex underneath." />
+  <figcaption><strong>Figure 4. Three ways to measure one word.</strong> Type any text. Graphemes come from Intl.Segmenter, code points from the string's iterator, bytes from TextEncoder.</figcaption>
+</figure>
+
+## No spaces between words
+
+An English sentence has gaps between words. A Khmer sentence runs words together; spaces mark the end of a phrase or clause, a bit like commas. The sentence-ending mark is KHAN ។ (U+17D4).
+
+Imagine reading "thecatsatonthemat" and having to decide where the words break. Usually there is one sensible answer, sometimes there are two. That job is **word segmentation**, and for Khmer it is its own research problem, with dictionary methods and learned models (for example Chea and colleagues, 2015, who used conditional random fields).
+
+Some writers insert the invisible **zero-width space** U+200B (ZERO WIDTH SPACE) between words. It draws nothing but tells software where a line may break. Nothing requires it, so text from different sources differs: some put it between every word, some nowhere.
+
+For TTS this matters in two ways. First, where speakers pause, and that follows phrases, which the real spaces mostly mark. Second, data hygiene: U+200B is invisible, so a transcript with it and one without look identical but are different lists, the same problem as the [look-alike lists](#two-lists-that-look-the-same). The tokenizer in my project, SentencePiece, needs no word spaces at all, which is one reason it was chosen ([A tokenizer for the script](/blog/khmer-tts-fine-tuning/#a-tokenizer-for-the-script)).
+
+Example string with a zero-width space: ខ្មែរ U+200B ស្រី. That is 5 + 1 + 4 = **10** code points and $3 \times 10 = 30$ bytes. On screen it looks like ខ្មែរស្រី.
+
+<figure class="blog-figure blog-figure--wide">
+  <NoSpaceReader alt="The Khmer sentence for I love the Khmer language, written with no visible spaces. A toggle marks the hidden zero-width spaces with dashed red lines; a button runs a longest-match segmenter with a four-word dictionary, dropping a box with an English gloss over each word it finds." />
+  <figcaption><strong>Figure 5. Finding the words.</strong> The toy segmenter uses a tiny dictionary written into the figure, so it is easy to check by hand. Real segmenters use large dictionaries or trained models.</figcaption>
+</figure>
+
+## What a tokenizer does to Khmer
+
+A tokenizer chops text into pieces and numbers them. The [fine-tuning post](/blog/khmer-tts-fine-tuning/#a-tokenizer-for-the-script) explains why. Here is what happens when the tokenizer has never seen Khmer.
+
+A **byte-level** tokenizer, the kind used by many English models, starts from the 256 possible byte values and then learns merges: "these two pieces often appear together, make them one piece". This is **BPE** (byte pair encoding). If training text had no Khmer, no Khmer merges were learned, so each Khmer byte stays its own token. This is **byte fallback**.
+
+$$
+T_{\text{fallback}} = B = 3 \times N
+$$
+
+- $T_{\text{fallback}}$: tokens produced when nothing Khmer was learned.
+- $B$: UTF-8 bytes, from the [counting section](#letters-code-points-and-bytes).
+- $N$: code points.
+
+Intuition: with no Khmer pieces in its box, the tokenizer can only hand over the smallest crumbs it has.
+
+Worked example: ខ្មែរ has $N = 5$, so $T_{\text{fallback}} = 15$ tokens for one syllable. Each token is a fragment such as the byte 0xE1 that tells the model nothing about sound on its own. (The first byte of every Khmer code point is 0xE1: in UTF-8, everything from U+1000 to U+1FFF starts with that byte. ក is E1 9E 80.)
+
+A tokenizer trained on Khmer learns merges like "COENG + RO" or the whole word ខ្មែរ. In my project the Khmer SentencePiece tokenizer, **4,000** pieces, turned a typical dev sentence into **27** tokens, about **3.8** code points per token. Under byte fallback the same 3.8 code points would be $3 \times 3.8 \approx 11.4$ tokens, so roughly **11** times more tokens for the same text:
+
+$$
+\frac{T_{\text{fallback}}}{T_{\text{Khmer}}} = \frac{3 \times N}{N / r} = 3r
+$$
+
+- $T_{\text{Khmer}}$: tokens from the Khmer tokenizer.
+- $r$: code points per Khmer token, measured as 3.8.
+
+Worked example: $3 \times 3.8 = 11.4$. A 27-token sentence would be about $27 \times 11.4 \approx 308$ byte tokens.
+
+Why more tokens hurt: the model must stretch its attention over more items, and each item means less. One finding from the project to keep honest: **5.9%** of learned pieces start in the middle of a stacked cluster, so even a Khmer tokenizer does not always cut at syllable lines.
+
+<figure class="blog-figure blog-figure--wide">
+  <ByteMerge alt="The word ខ្មែរ as 15 byte tiles. Press 'merge' and a toy BPE with four hand-written merge rules joins tiles step by step: three bytes into a code point, COENG+MO into a subscript piece, then the whole word. A token counter falls 15, 5, 4, 1. A switch 'English-only rules' disables all Khmer merges and the counter stays at 15." />
+  <figcaption><strong>Figure 6. Merging crumbs into pieces.</strong> The merge rules are a toy, written out in the figure so each step can be checked. Real tokenizers learn thousands of them from data.</figcaption>
+</figure>
+
+## Numbers, dates and money
+
+Khmer has its own digits, U+17E0 to U+17E9: ០ ១ ២ ៣ ៤ ៥ ៦ ៧ ៨ ៩. They work like 0 to 9, same place values. Many texts also use the Western digits 0 to 9, sometimes in the same sentence.
+
+A TTS model cannot say "២០២៤" as digits; it must be turned into words first. That step is **text normalization**, and for numbers it is done by a **verbaliser**: a small program that rewrites a number as the words a speaker says. The year ២០២៤ (U+17E2 U+17E0 U+17E2 U+17E4) should become ពីរពាន់ម្ភៃបួន, "two thousand twenty-four". The money amount ៥០០០៛ uses the riel sign ៛ (U+17DB, KHMER CURRENCY SYMBOL RIEL), written after the number and read after it too: ប្រាំពាន់រៀល, "five thousand riel".
+
+The same digits read differently depending on what they are: a year, a count, a phone number read digit by digit, a time, money. The fine-tuning post tells how I checked every rule by ear and kept only the confirmed ones ([Numbers](/blog/khmer-tts-fine-tuning/#numbers-teach-them-with-a-listener-checking-the-rules)): **16,736 of 18,220** digit recordings got a confirmed spoken form.
+
+<figure class="blog-figure">
+  <RielReader alt="A number box with ៥០០០៛. Four steps appear: the digits with their code points, their values 5, 0, 0, 0, the place values 5 × 1,000 = 5,000, and the spoken Khmer words ending in រៀល. A switch reads the digits one by one instead." />
+  <figcaption><strong>Figure 7. A number becomes words.</strong> The digit-to-value step is exact. The words come from a short rule table written into the figure.</figcaption>
+</figure>
+
+## What this means for a TTS frontend
+
+The **frontend** is everything that runs on the text before the model: cleaning, normalization, and choosing what units the model reads. Each section above is a decision.
+
+**Characters or phonemes.** A phoneme is a unit of sound. Many English TTS systems convert text to phonemes with **G2P** (grapheme to phoneme) using a pronunciation dictionary. Open Khmer G2P tools and dictionaries are few, and I did not use one. Khmer spelling often does not tell you the sound (silent letters, Pali and Sanskrit loans, series rules). My project feeds written pieces directly and lets the model learn sound from audio; that works when the data is large, and fails on rare words it never heard.
+
+**Duration from character counts.** Before training I used characters per second to catch broken clips. The median was **12** characters per second ([the speaking-rate check](/blog/khmer-tts-fine-tuning/#quality-control-reject-the-broken-keep-the-hard)):
+
+$$
+\hat{d} = \frac{N}{R}
+$$
+
+- $\hat{d}$: estimated speaking time in seconds.
+- $N$: code points in the transcript.
+- $R$: typical speaking rate, **12** code points per second in my corpus.
+
+Intuition: if you know how fast someone usually reads, the length of the text predicts how long they will talk.
+
+Worked example: ខ្មែរ U+200B ស្រី has $N = 10$ (counting the invisible space), so $\hat{d} = 10 / 12 \approx 0.83$ seconds. Without the U+200B, $N = 9$ and $\hat{d} = 0.75$. An invisible character changed the estimate by **0.08** seconds, which is why the frontend should strip or count such characters on purpose. Also, code points are a rough ruler: COENG is a code point but makes no sound by itself.
+
+**Normalization order.** A safe frontend order: fix look-alike sequences, decide what to do with U+200B, verbalise numbers and currency, then tokenize.
+
+
+## Try it yourself
+
+Open your browser's developer console (F12, then the Console tab) and paste:
+
+1. `[..."ខ្មែរ"].map(c => "U+" + c.codePointAt(0).toString(16).toUpperCase())` should print U+1781, U+17D2, U+1798, U+17C2, U+179A.
+2. `new TextEncoder().encode("ស្រី").length` should print **12**.
+3. `"េី".normalize("NFC").length` should print **2**: NFC does not merge it into U+17BE.
+4. `[...new Intl.Segmenter("km", {granularity: "grapheme"}).segment("ខ្មែរ")].length` printed **2** in Chromium in October 2026; your browser may differ.
+5. `"ខ្មែរ​ស្រី".length` should print **10**, while it looks like 9 characters' worth of text.
+
+In-page toys: type into [Figure 4](#letters-code-points-and-bytes) the inputs `ក`, `ក្រ`, `ខ្មែរ`, `២០២៤` and check the counters give 1/3, 3/9, 5/15, 4/12 code points/bytes. In Figure 6, flip "English-only rules" and confirm ខ្មែរ stays at 15 tokens. In Figure 7, type `២៥០០០០` and switch between "An amount" and "Digit by digit".
+
+## What to remember
+
+- The screen shows a necklace; the model gets the list of beads in typing order.
+- A Khmer word can be 1 block, 5 code points and 15 bytes all at once.
+- Identical-looking text can be different lists, and NFC does not fix all of them.
+- A tokenizer with no Khmer pays 3 tokens per code point; a Khmer one paid about 1 per 3.8.
+- Numbers, money and invisible spaces must be decided by the frontend before the model sees them.
+
+Next: [how those choices played out when fine-tuning Pocket TTS for Khmer](/blog/khmer-tts-fine-tuning/).
+
+## Sources
+
+- The Unicode Consortium. *The Unicode Standard*, Chapter 16, Southeast Asia (Khmer section). https://www.unicode.org/versions/latest/
+- The Unicode Consortium. Khmer code chart U+1780 to U+17FF. https://www.unicode.org/charts/PDF/U1780.pdf
+- Unicode Standard Annex 29, *Unicode Text Segmentation* (grapheme clusters). https://www.unicode.org/reports/tr29/
+- Unicode Standard Annex 15, *Unicode Normalization Forms*. https://www.unicode.org/reports/tr15/
+- Chea, Thu, Ding, Utiyama, Finch and Sumita, *Khmer Word Segmentation Using Conditional Random Fields*, Khmer Natural Language Processing, 2015.
+- Kudo and Richardson, 2018, *SentencePiece*. https://arxiv.org/abs/1808.06226
+- Corpus numbers: [Same model, new language](/blog/khmer-tts-fine-tuning/).

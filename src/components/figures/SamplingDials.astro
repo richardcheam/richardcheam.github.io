@@ -1,0 +1,59 @@
+---
+// Foundations, language models post: temperature, top-k and top-p on the
+// logits 2, 1, 0, −1. T 1: 0.644, 0.237, 0.087, 0.032. T 0.5: 0.865. T 2:
+// 0.455. k = 2: 0.731, 0.269. p = 0.9: keep 3 → 0.665, 0.245, 0.090.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-sampling>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 250" role="img" aria-labelledby="sd2-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="sd2-title">Four token probabilities reshaped by temperature and cut by top-k and top-p</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Temperature T <strong data-v="T"></strong></span><input class="scrub" data-k="T" type="range" min="0.1" max="3" step="0.05" value="1" /></label>
+    <label><span class="fig-panel__name">Top-k (4 = off) <strong data-v="k"></strong></span><input class="scrub" data-k="k" type="range" min="1" max="4" step="1" value="4" /></label>
+    <label><span class="fig-panel__name">Top-p <strong data-v="p"></strong></span><input class="scrub" data-k="p" type="range" min="0.05" max="1" step="0.01" value="1" /></label>
+    <div><span class="fig-panel__name">Sample</span><div class="fig-chips"><button type="button" class="fig-chip" data-draw100>Draw 100 tokens</button></div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt, mulberry } from "../../lib/tiny-net";
+  import { INK, MUTED, GOLD, JADE, NEG } from "../../lib/net-diagram";
+  import { txt } from "../../lib/plot";
+  import { softmax } from "../../lib/attention";
+  const Z = [2, 1, 0, -1], NAMES = ["A", "B", "C", "D"];
+  document.querySelectorAll<HTMLElement>("[data-sampling]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const p: Record<string, number> = { T: 1, k: 4, p: 1 };
+    let tally: number[] | null = null, seed = 15;
+    const set = (T: number, k: number, pp: number) => { p.T = T; p.k = k; p.p = pp; root.querySelectorAll<HTMLInputElement>("[data-k]").forEach((i) => (i.value = String(p[i.dataset.k!]))); tally = null; };
+    const calc = () => {
+      const base = softmax(Z.map((z) => z / p.T));
+      let keep = [0, 1, 2, 3].slice(0, p.k);
+      if (p.p < 1) { let c = 0; const kk: number[] = []; for (const i of keep) { kk.push(i); c += base[i]; if (c >= p.p - 1e-12) break; } keep = kk; }
+      const tot = keep.reduce((s, i) => s + base[i], 0), fin = base.map((v, i) => (keep.includes(i) ? v / tot : 0));
+      return { base, keep, tot, fin };
+    };
+    const steps = () => [[1, 4, 1, "Plain softmax of the logits 2, 1, 0, −1."], [0.5, 4, 1, "Temperature 0.5 doubles the gaps between logits: the top token takes more."], [2, 4, 1, "Temperature 2 halves the gaps: the distribution flattens."], [1, 2, 1, "Top-k with k = 2: keep the two most likely tokens and renormalise."], [1, 4, 0.9, "Top-p with p = 0.9: keep the smallest set of top tokens whose probabilities reach 0.9. Two reach 0.881, not enough; three reach 0.968."]].map(([T, k, pp, say]) => ({ say: say as string, math: "", enter: () => set(T as number, k as number, pp as number) })).map((st) => ({ ...st, get math() { const c = calc(); return `logits ÷ ${fmt(p.T, 2)} = ${Z.map((z) => fmt(z / p.T, 2)).join(", ")} → softmax ${c.base.map((v) => fmt(v, 3)).join(", ")}${c.keep.length < 4 ? `\nkeep ${c.keep.map((i) => NAMES[i]).join(", ")} (total ${fmt(c.tot, 3)}) → ${c.fin.filter((v) => v > 0).map((v) => fmt(v, 3)).join(", ")}` : ""}`; } }));
+    function draw() {
+      const c = calc();
+      let s = txt(30, 20, "probability of each of four tokens", `font-size="12" font-weight="700" fill="${INK}"`);
+      Z.forEach((z, i) => {
+        const x = 60 + i * 120, cut = !c.keep.includes(i), h = c.fin[i] * 150, hb = c.base[i] * 150;
+        s += `<rect x="${x}" y="${190 - hb}" width="70" height="${hb}" fill="none" stroke="${MUTED}" stroke-dasharray="3 3"/>`;
+        s += `<rect x="${x}" y="${190 - h}" width="70" height="${h}" fill="${cut ? "#e3e7e6" : GOLD}" fill-opacity="0.85"/>`;
+        s += txt(x + 35, 208, `${NAMES[i]} (logit ${fmt(z)})`, `font-size="11" text-anchor="middle" fill="${INK}"`) + txt(x + 35, 182 - Math.max(h, hb), cut ? "cut" : fmt(c.fin[i], 3), `font-size="12" font-weight="700" text-anchor="middle" fill="${cut ? NEG : INK}"`);
+        if (tally) s += txt(x + 35, 228, `drawn ${tally[i]}×`, `font-size="11" text-anchor="middle" fill="${JADE}"`);
+      });
+      s += txt(560, 60, "dashed: after temperature", `font-size="11" fill="${MUTED}"`) + txt(560, 78, "gold: after the cut, renormalised", `font-size="11" fill="${MUTED}"`);
+      $("[data-draw]").innerHTML = s;
+      root.querySelectorAll<HTMLElement>("[data-v]").forEach((el) => (el.textContent = el.dataset.v === "k" && p.k === 4 ? "off" : fmt(p[el.dataset.v!], 2)));
+    }
+    const redraw = stepper(root, steps, draw, { delay: 2.2 });
+    root.querySelectorAll<HTMLInputElement>("[data-k]").forEach((inp) => inp.addEventListener("input", () => { p[inp.dataset.k!] = +inp.value; tally = null; redraw(); }));
+    $("[data-draw100]").addEventListener("click", () => { const r = mulberry(seed++), c = calc(); tally = [0, 0, 0, 0]; for (let n = 0; n < 100; n++) { let u = r(), i = 0; while (i < 3 && u > c.fin[i]) { u -= c.fin[i]; i++; } tally[i]++; } redraw(); });
+  });
+</script>

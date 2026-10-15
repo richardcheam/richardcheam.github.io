@@ -1,0 +1,85 @@
+---
+// F5-TTS review, Figure 2: the infilling task (Sec 3.1, p. 4). Inputs: the
+// noisy spectrogram (1 - t) x0 + t x1, the visible part (1 - m) x1, and the
+// padded text. Training masks 70% to 100% of the frames (Sec 4, p. 6). The
+// spectrogram is synthetic (a few harmonic stripes), 64 bands by 120 frames.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram imk" role="region" aria-label={alt} data-imk>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 400" role="img" aria-labelledby="imk-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="imk-title">The three inputs of the infilling task: noisy spectrogram, visible context and padded text</title>
+    <text x="20" y="20" font-size="11.5" font-weight="700" fill="#2b2b30">Target x₁ (what the model must rebuild under the mask)</text>
+    <image data-i0 x="20" y="28" width="360" height="96" preserveAspectRatio="none" style="image-rendering: pixelated" />
+    <text x="400" y="20" font-size="11.5" font-weight="700" fill="#2b2b30">Input 1: noisy (1 − t) x₀ + t x₁</text>
+    <image data-i1 x="400" y="28" width="360" height="96" preserveAspectRatio="none" style="image-rendering: pixelated" />
+    <text x="20" y="150" font-size="11.5" font-weight="700" fill="#2b2b30">Input 2: visible context (1 − m) ⊙ x₁</text>
+    <image data-i2 x="20" y="158" width="360" height="96" preserveAspectRatio="none" style="image-rendering: pixelated" />
+    <text x="400" y="150" font-size="11.5" font-weight="700" fill="#2b2b30">Input 3: padded text, one slot per frame</text>
+    <g data-text></g>
+    <rect data-m0 y="28" height="96" fill="none" stroke="#a33b3b" stroke-width="2" stroke-dasharray="4 3" />
+    <text data-r1 x="20" y="288" font-size="13" font-weight="700"></text>
+    <text data-r2 x="20" y="310" font-size="12" fill="#2b2b30"></text>
+    <text data-r3 x="20" y="332" font-size="12" fill="#2b2b30"></text>
+    <text data-r4 x="20" y="356" font-size="11.5" fill="#5f5f66"></text>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Mask starts at frame<strong data-va></strong></span><input class="scrub" data-a type="range" min="1" max="120" step="1" value="37" /></label>
+    <label><span class="fig-panel__name">Flow step t<strong data-vt></strong></span><input class="scrub" data-t type="range" min="0" max="1" step="0.05" value="0.5" /></label>
+    <div><span class="fig-panel__name">Preset</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-preset>Inference: reference in frames 1 to 30, the rest to write</button>
+      <button type="button" class="fig-chip" data-noise>New noise</button>
+    </div></div>
+  </div>
+</div>
+
+<script>
+  import { gauss } from "../../lib/flow-math";
+  import { ramp } from "../../lib/audio-math";
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-imk]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const aIn = $<HTMLInputElement>("[data-a]"), tIn = $<HTMLInputElement>("[data-t]");
+    const mk = (g: Element, tag: string, a: Record<string, string | number>, txt?: string) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, String(a[k])); if (txt !== undefined) e.textContent = txt; g.append(e); return e; };
+    const F = 64, N = 120;
+    // Synthetic target: three "syllables" with harmonic stripes, values roughly in [-1, 1].
+    const x1 = Array.from({ length: N }, (_, n) => Array.from({ length: F }, (_, f) => {
+      const syl = Math.max(0, Math.sin(Math.PI * ((n / 40) % 1))), f0 = 6 + 2 * Math.floor(n / 40);
+      const harm = [1, 2, 3, 4].reduce((a, h) => a + Math.exp(-((f - f0 * h) ** 2) / 3) / h, 0);
+      return -1 + 2 * Math.min(1, 0.1 + syl * harm * 1.4);
+    }));
+    let seed = 2, x0: number[][] = [];
+    const newNoise = () => { const g = gauss(seed++); x0 = Array.from({ length: N }, () => Array.from({ length: F }, () => g())); };
+    const img = (val: (n: number, f: number) => number | null) => {
+      const cv = document.createElement("canvas"); cv.width = N; cv.height = F; const ctx = cv.getContext("2d")!, im = ctx.createImageData(N, F);
+      for (let n = 0; n < N; n++) for (let f = 0; f < F; f++) { const v = val(n, f), o = ((F - 1 - f) * N + n) * 4; if (v === null) { im.data[o] = im.data[o + 1] = im.data[o + 2] = 20; } else { const [r, g, b] = ramp(Math.max(0, Math.min(1, (v + 1.6) / 3.2))); im.data[o] = r; im.data[o + 1] = g; im.data[o + 2] = b; } im.data[o + 3] = 255; }
+      ctx.putImageData(im, 0, 0); return cv.toDataURL();
+    };
+    const T0 = img((n, f) => x1[n][f]);
+    $("[data-i0]").setAttribute("href", T0);
+    function draw() {
+      const a = +aIn.value - 1, t = +tIn.value, frac = (N - a) / N;
+      $("[data-i1]").setAttribute("href", img((n, f) => (1 - t) * x0[n][f] + t * x1[n][f]));
+      $("[data-i2]").setAttribute("href", img((n, f) => (n >= a ? null : x1[n][f])));
+      const m0 = $("[data-m0]"); m0.setAttribute("x", String(20 + (a / N) * 360)); m0.setAttribute("width", String(((N - a) / N) * 360));
+      const gt = $("[data-text]"); gt.replaceChildren();
+      const txt = [..."the cat sat"], cw = 360 / 40;
+      for (let i = 0; i < 40; i++) { mk(gt, "rect", { x: 400 + i * cw, y: 170, width: cw - 1, height: 26, fill: i < txt.length ? "#594578" : "#e4e4ea" }); if (i < txt.length) mk(gt, "text", { x: 400 + i * cw + cw / 2 - 0.5, y: 188, "font-size": 9, "text-anchor": "middle", fill: "#fff" }, txt[i] === " " ? "␣" : txt[i]); }
+      mk(gt, "text", { x: 400, y: 214, "font-size": 10.5, fill: "#5f5f66" }, "first 40 of 120 slots shown; the text covers the whole clip,");
+      mk(gt, "text", { x: 400, y: 230, "font-size": 10.5, fill: "#5f5f66" }, "visible and hidden parts alike");
+      const ok = frac >= 0.7 - 1e-9, r1 = $("[data-r1]");
+      r1.textContent = `Masked: frames ${a + 1} to ${N} of ${N} = ${Math.round(frac * 100)}%${ok ? "" : ", below the 70% training minimum"}`;
+      r1.setAttribute("fill", ok ? "#2b2b30" : "#a33b3b");
+      const pn = 60, pf = 18, mixv = (1 - t) * x0[pn][pf] + t * x1[pn][pf];
+      $("[data-r2]").textContent = `One pixel (frame 61, band 19): x₀ = ${x0[pn][pf].toFixed(2)}, x₁ = ${x1[pn][pf].toFixed(2)}, mixed = ${mixv.toFixed(2)}`;
+      $("[data-r3]").textContent = `Target velocity there: x₁ − x₀ = ${(x1[pn][pf] - x0[pn][pf]).toFixed(2)}, the same at every t.`;
+      $("[data-r4]").textContent = "The loss only counts frames under the red mask: the model rebuilds what is hidden, using the context and the text.";
+      $("[data-va]").textContent = String(a + 1); $("[data-vt]").textContent = t.toFixed(2);
+      [aIn, tIn].forEach((i) => i.style.setProperty("--p", `${((+i.value - +i.min) / (+i.max - +i.min)) * 100}%`));
+    }
+    let raf = 0; const later = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(draw); };
+    aIn.addEventListener("input", later); tIn.addEventListener("input", later);
+    $("[data-preset]").addEventListener("click", () => { aIn.value = "31"; tIn.value = "0"; draw(); });
+    $("[data-noise]").addEventListener("click", () => { newNoise(); draw(); });
+    newNoise(); draw();
+  });
+</script>

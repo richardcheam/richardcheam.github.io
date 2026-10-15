@@ -1,0 +1,111 @@
+---
+// Figure 8: a 2-D cousin of the paper's Fig 7. 200 noise grains (seed 7) are
+// pushed to the 8-point ring with N fixed steps, for the VP and OT marginal
+// fields. Error is the mean distance to a reference endpoint (RK4, 200 steps
+// for OT, 4000 for VP). NFE counts network calls: 1 per Euler step, 2 per
+// midpoint step.
+const { alt } = Astro.props;
+const NS = [1, 2, 4, 8, 16, 32];
+---
+<div class="blog-diagram sb" role="region" aria-label={alt} data-sb>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 500" role="img" aria-labelledby="sb-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="sb-title">Where grains land with few solver steps, for the diffusion and optimal transport paths</title>
+    <text x="20" y="96" font-size="11.5" font-weight="700" fill="#2b2b30">VP</text>
+    <text x="20" y="220" font-size="11.5" font-weight="700" fill="#2b2b30">OT</text>
+    {NS.map((n, i) => <text x={110 + i * 112} y="22" font-size="11" text-anchor="middle" fill="#2b2b30"><tspan font-weight="700">{n}</tspan> step{n === 1 ? "" : "s"}</text>)}
+    {[0, 1].map((r) => NS.map((_, i) => <rect x={60 + i * 112} y={34 + r * 124} width="100" height="100" fill="none" stroke="#ececf1" />))}
+    <g data-cells></g>
+    <g data-pct></g>
+    <text x="60" y="306" font-size="11.5" font-weight="700" fill="#2b2b30">Average miss against network calls</text>
+    <rect x="60" y="316" width="560" height="150" fill="none" stroke="#ececf1" />
+    <g data-axes></g>
+    <path data-l0 d="" fill="none" stroke="#a33b3b" stroke-width="2" />
+    <path data-l1 d="" fill="none" stroke="#4F5D3A" stroke-width="2" />
+    <g data-pts></g>
+    <text x="640" y="340" font-size="11" font-weight="700" fill="#a33b3b">VP diffusion</text>
+    <text x="640" y="358" font-size="11" font-weight="700" fill="#4F5D3A">OT</text>
+    <text data-say x="640" y="392" font-size="11" fill="#2b2b30"></text>
+    <text data-say2 x="640" y="408" font-size="11" fill="#2b2b30"></text>
+    <text data-say3 x="640" y="424" font-size="11" fill="#2b2b30"></text>
+    <text x="340" y="492" font-size="10.5" text-anchor="middle" fill="#5f5f66">network calls (NFE), doubling each tick</text>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Solver</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-solver="euler" aria-pressed="true">Euler (1 call per step)</button>
+      <button type="button" class="fig-chip" data-solver="midpoint" aria-pressed="false">Midpoint (2 calls per step)</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { setupFigure, tween, wait } from "../../lib/figure-motion";
+  import { integrate, noiseCloud, RING, RING_COLORS, REF_STEPS, type Vec, type Path } from "../../lib/flow-math";
+  const SVGNS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-sb]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const Ns = [1, 2, 4, 8, 16, 32], paths: Path[] = ["vp", "ot"], x0s = noiseCloud(200, 7);
+    const ref = Object.fromEntries(paths.map((p) => [p, x0s.map((x) => integrate(p, x, REF_STEPS[p])[0])])) as Record<Path, Vec[]>;
+    const nearest = (e: Vec) => { let b = 0, d = 1e9; RING.forEach((c, k) => { const q = Math.hypot(e[0] - c[0], e[1] - c[1]); if (q < d) { d = q; b = k; } }); return { b, d }; };
+    const colour = Object.fromEntries(paths.map((p) => [p, ref[p].map((e) => RING_COLORS[nearest(e).b])])) as Record<Path, string[]>;
+    const runs: Record<string, { ends: Vec[]; err: number; near: number }> = {};
+    for (const s of ["euler", "midpoint"] as const) for (const p of paths) for (const N of Ns) {
+      const ends = x0s.map((x) => integrate(p, x, N, s)[0]);
+      const err = ends.reduce((a, e, i) => a + Math.hypot(e[0] - ref[p][i][0], e[1] - ref[p][i][1]), 0) / ends.length;
+      runs[`${s}${p}${N}`] = { ends, err, near: ends.filter((e) => nearest(e).d < 0.3).length / ends.length };
+    }
+    // Cells: one dot per grain, plus faint target ring.
+    const cells = paths.map((p, r) => Ns.map((_, i) => {
+      const g = document.createElementNS(SVGNS, "g"); g.setAttribute("transform", `translate(${110 + i * 112} ${84 + r * 124})`);
+      const clip = `clip-${r}-${i}-${Math.random().toString(36).slice(2, 7)}`;
+      g.innerHTML = `<clipPath id="${clip}"><rect x="-50" y="-50" width="100" height="100" /></clipPath>`;
+      const inner = document.createElementNS(SVGNS, "g"); inner.setAttribute("clip-path", `url(#${clip})`); g.append(inner);
+      RING.forEach((c) => { const e = document.createElementNS(SVGNS, "circle"); e.setAttribute("cx", String(c[0] * 9)); e.setAttribute("cy", String(-c[1] * 9)); e.setAttribute("r", "4"); e.setAttribute("fill", "#ececf1"); inner.append(e); });
+      const dots = x0s.map((_, k) => { const e = document.createElementNS(SVGNS, "circle"); e.setAttribute("r", "1.4"); e.setAttribute("fill", colour[p][k]); inner.append(e); return e; });
+      $("[data-cells]").append(g);
+      const t = document.createElementNS(SVGNS, "text"); t.setAttribute("x", String(110 + i * 112)); t.setAttribute("y", String(146 + r * 124)); t.setAttribute("font-size", "10.5"); t.setAttribute("text-anchor", "middle"); $("[data-pct]").append(t);
+      return { dots, t };
+    }));
+    // Chart axes: NFE 1..64 on log2, error 0.001..10 on log10.
+    const CX = (nfe: number) => 60 + (Math.log2(nfe) / 6) * 560, CY = (e: number) => 466 - ((Math.log10(Math.max(e, 1e-3)) + 3) / 4) * 150;
+    const ax = $("[data-axes]");
+    [1, 2, 4, 8, 16, 32, 64].forEach((n) => { const t = document.createElementNS(SVGNS, "text"); t.setAttribute("x", String(CX(n))); t.setAttribute("y", "480"); t.setAttribute("font-size", "10.5"); t.setAttribute("text-anchor", "middle"); t.setAttribute("fill", "#2b2b30"); t.textContent = String(n); ax.append(t); });
+    [0.001, 0.01, 0.1, 1, 10].forEach((e) => { const t = document.createElementNS(SVGNS, "text"); t.setAttribute("x", "54"); t.setAttribute("y", String(CY(e) + 4)); t.setAttribute("font-size", "10"); t.setAttribute("text-anchor", "end"); t.setAttribute("fill", "#5f5f66"); t.textContent = String(e); ax.append(t); });
+    let solver: "euler" | "midpoint" = "euler", shown: Record<string, Vec[]> = {};
+    function place(mix: number, from: Record<string, Vec[]>) {
+      paths.forEach((p, r) => Ns.forEach((N, i) => {
+        const key = `${p}${N}`, to = runs[solver + key].ends, fr = from[key] ?? to;
+        cells[r][i].dots.forEach((d, k) => {
+          const x = fr[k][0] + (to[k][0] - fr[k][0]) * mix, y = fr[k][1] + (to[k][1] - fr[k][1]) * mix;
+          d.setAttribute("cx", (x * 9).toFixed(1)); d.setAttribute("cy", (-y * 9).toFixed(1));
+        });
+        if (mix === 1) shown[key] = to;
+      }));
+    }
+    function labels() {
+      paths.forEach((p, r) => Ns.forEach((N, i) => {
+        const run = runs[solver + p + N], t = cells[r][i].t;
+        t.textContent = `${Math.round(run.near * 100)}% landed`; t.setAttribute("fill", run.near > 0.9 ? "#4F5D3A" : "#a33b3b"); t.setAttribute("font-weight", run.near > 0.9 ? "700" : "400");
+      }));
+      const per = solver === "euler" ? 1 : 2, gp = $("[data-pts]"); gp.replaceChildren();
+      paths.forEach((p, pi) => {
+        const col = pi ? "#4F5D3A" : "#a33b3b";
+        $(`[data-l${pi}]`).setAttribute("d", Ns.map((N, i) => `${i ? "L" : "M"}${CX(N * per).toFixed(1)} ${CY(runs[solver + p + N].err).toFixed(1)}`).join(""));
+        Ns.forEach((N) => { const c = document.createElementNS(SVGNS, "circle"); c.setAttribute("cx", String(CX(N * per))); c.setAttribute("cy", String(CY(runs[solver + p + N].err))); c.setAttribute("r", "3.5"); c.setAttribute("fill", col); const tt = document.createElementNS(SVGNS, "title"); tt.textContent = `${p.toUpperCase()}, ${N * per} calls: average miss ${runs[solver + p + N].err.toFixed(3)}`; c.append(tt); gp.append(c); });
+      });
+      const first = (p: Path) => Ns.find((N) => runs[solver + p + N].near > 0.9)!;
+      const o = first("ot"), v = first("vp");
+      $("[data-say]").textContent = `90% of grains land with`;
+      $("[data-say2]").textContent = `OT: ${o * per} calls; VP: ${v * per} calls.`;
+      $("[data-say3]").textContent = `VP needs ${v / o}× as many.`;
+    }
+    root.querySelectorAll<HTMLButtonElement>("[data-solver]").forEach((b) => b.addEventListener("click", async () => {
+      const from = { ...shown }; solver = b.dataset.solver as typeof solver;
+      root.querySelectorAll("[data-solver]").forEach((o) => o.setAttribute("aria-pressed", String(o === b)));
+      labels(); await tween(0.8, (e) => place(e, from)); place(1, from);
+    }));
+    const start: Record<string, Vec[]> = {}; paths.forEach((p) => Ns.forEach((N) => (start[`${p}${N}`] = x0s)));
+    labels(); place(1, {});
+    setupFigure(root, () => place(0, start), async (alive) => { await wait(0.2); if (!alive()) return; await tween(1.6, (e) => { if (alive()) place(e, start); }); if (alive()) place(1, start); });
+  });
+</script>

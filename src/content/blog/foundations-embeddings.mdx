@@ -1,0 +1,449 @@
+---
+title: "Embeddings: turning words and sounds into vectors"
+date: 2026-10-15
+category: "deep-learning"
+read_time: "28 min"
+series_order: 6
+series: foundations
+featured: false
+excerpt: "A network only understands numbers, but language and codec audio arrive as symbols. An embedding gives every symbol a learned list of numbers, so that similar symbols end up close together. This post builds one by hand, trains one, and follows it into speech models."
+question: "How does a network turn a word, or a codec token, into numbers that carry meaning?"
+my_work: "A concept note. I worked every example by hand, checked every number with a short script, and specified the figures from the standard formulas."
+result: "An embedding table is just a weight matrix read one row at a time. Trained by backpropagation on 'which words appear together', eight random 2-D points sort themselves into two clear groups within about fifty passes over a sixteen-pair toy corpus."
+evidence_limit: "This explains textbook methods on toy data. The skip-gram run is a seeded toy, not a real word2vec model; real embeddings have hundreds of dimensions and millions of training pairs."
+lesson: "An embedding is a lookup of learned weights. What the numbers mean comes entirely from the training task: change the task and the same table learns a different geometry."
+---
+
+import OneHotVsDense from "../../components/figures/OneHotVsDense.astro";
+import LookupAsMatmul from "../../components/figures/LookupAsMatmul.astro";
+import CosineDrag from "../../components/figures/CosineDrag.astro";
+import RowGradientStep from "../../components/figures/RowGradientStep.astro";
+import SkipGramTrainer from "../../components/figures/SkipGramTrainer.astro";
+import AnalogyExplorer from "../../components/figures/AnalogyExplorer.astro";
+import CodebookSum from "../../components/figures/CodebookSum.astro";
+
+In [the first Foundations post](/blog/foundations-neurons-backprop/) every input was already a number: our tiny network took $x_1$ and $x_2$ and multiplied them by weights. In [the second](/blog/foundations-loss-gradient-descent/) we learned to nudge those weights downhill on a loss. Both posts quietly assumed the input *was* a number.
+
+But much of what we want models to read is not. A sentence is a row of words. A Khmer sentence is a row of syllables and code points (see [the Khmer script post](/blog/khmer-script-for-tts/)). A speech model like Moshi reads audio as a row of **codec tokens**, small whole numbers that are really names of entries in a codebook (see [residual vector quantization](/blog/residual-vector-quantization/)). The number 7 for "dog" means nothing more than the number 7 on a cloakroom ticket. You cannot multiply a cloakroom ticket by a weight and expect sense.
+
+This post is about the bridge: the **embedding**, a learned list of numbers for every symbol.
+
+
+## Why a network needs numbers for symbols
+
+A neuron computes $z = w_1 x_1 + w_2 x_2 + b$. That only makes sense if bigger $x$ means "more of something". Token ids do not work that way.
+
+Say our tiny vocabulary is **cat = 0, dog = 1, car = 2, bus = 3**. If we fed the id straight in, the network would believe that bus (3) is three times cat... and that car (2) is exactly halfway between cat and bus... and that dog (1) is closer to cat than car is. None of that is true; the ids were handed out in whatever order we wrote the list. Shuffle the list and the "facts" change. A good input should not depend on an arbitrary filing order.
+
+So we need two things:
+
+1. A way to give each symbol its **own** input, with no fake order.
+2. Ideally, a way for **similar** symbols to get **similar** inputs, so that what the network learns about "cat" helps a little with "dog".
+
+One-hot vectors solve the first. Embeddings solve both.
+
+
+## One-hot vectors and their problems
+
+In one sentence: give every word its own slot, and switch on only that slot.
+
+A **one-hot vector** is a list as long as the vocabulary, all zeros except a single 1 at the word's id. With our four words:
+
+| word | id | one-hot |
+|---|---|---|
+| cat | 0 | (1, 0, 0, 0) |
+| dog | 1 | (0, 1, 0, 0) |
+| car | 2 | (0, 0, 1, 0) |
+| bus | 3 | (0, 0, 0, 1) |
+
+The fake order is gone: no word is "bigger" than another. But two new problems appear.
+
+### Problem one: size
+
+The list is as long as the vocabulary. A modest English vocabulary has **50,000** words; the text vocabulary in [Pocket TTS](/blog/pocket-tts-calm-explained/) has **4,000** pieces. Every input would be 49,999 zeros and one 1. Nearly all of the multiplication a network does on it is multiplying by zero.
+
+### Problem two: everyone is equally far apart
+
+To compare two vectors we can measure the straight-line distance between them. In one sentence: subtract the two lists, square each difference, add them up, take the square root.
+
+$$
+d(\mathbf{a}, \mathbf{b}) = \sqrt{\sum_{i=1}^{n} (a_i - b_i)^2}
+$$
+
+- $\mathbf{a}$ and $\mathbf{b}$ are the two vectors (bold means "a list of numbers").
+- $n$ is how many numbers each list has.
+- $a_i$ and $b_i$ are the $i$-th numbers in each list.
+- $\sum_{i=1}^{n}$ means "add up for $i = 1, 2, \dots, n$".
+
+Everyday picture: Pythagoras on a map. Walk 3 blocks east and 4 north, and you are $\sqrt{9 + 16} = 5$ blocks from home as the crow flies. The formula is the same thing with more directions.
+
+Worked example, cat against dog:
+
+- Differences: $(1 - 0, 0 - 1, 0 - 0, 0 - 0) = (1, -1, 0, 0)$.
+- Squares: $(1, 1, 0, 0)$, sum **2**.
+- Distance: $\sqrt{2} \approx$ **1.414**.
+
+Cat against car: differences $(1, 0, -1, 0)$, squares sum to 2, distance **1.414** again. Every pair of different words differs in exactly two slots, so **every pair is exactly 1.414 apart**. To a one-hot network, cat is as unlike dog as it is unlike bus. Nothing learned about one word can leak to another, because the inputs share nothing.
+
+What would change if the vocabulary grew? Nothing about the distances: with a million words every pair is still $\sqrt{2}$ apart. Only the waste grows.
+
+### The fix: short, dense lists
+
+Instead, give each word a short list of ordinary numbers, say **3** of them, chosen so related words have nearby lists:
+
+| word | vector |
+|---|---|
+| cat | (0.9, 0.8, 0.1) |
+| dog | (0.8, 0.9, 0.2) |
+| car | (0.1, 0.2, 0.9) |
+| bus | (0.2, 0.1, 0.8) |
+
+Cat against dog: differences $(0.1, -0.1, -0.1)$, squares $0.01 + 0.01 + 0.01 = 0.03$, distance $\sqrt{0.03} \approx$ **0.173**. Cat against car: differences $(0.8, 0.6, -0.8)$, squares $0.64 + 0.36 + 0.64 = 1.64$, distance $\approx$ **1.281**. Now the two animals are close and the two vehicles are close (car to bus is also **0.173**), and the groups are far apart.
+
+This short list is a **dense vector** ("dense" because most of its numbers are not zero), and a table of them is an **embedding**. Here I picked the numbers by hand to make the point. The rest of the post is about where real ones come from.
+
+<figure class="blog-figure blog-figure--wide">
+  <OneHotVsDense alt="Two panels side by side. Left, four words as one-hot vectors with a distance table where every off-diagonal entry is 1.414. Right, the same four words as 3-number vectors with a distance table where cat-dog and car-bus are 0.173 and the cross pairs are about 1.2." />
+  <figcaption><strong>Figure 1. One-hot against dense.</strong> Click any two words to see their distance worked out term by term in both encodings. One-hot puts every pair at the same distance; dense vectors can put related words close. Toy numbers chosen by hand.</figcaption>
+</figure>
+
+
+## An embedding table is a lookup
+
+In one sentence: stack every word's vector as one row of a table, and to embed a word, read its row.
+
+Our table, called $E$, has one row per word and one column per number:
+
+$$
+E = \begin{pmatrix}
+0.9 & 0.8 & 0.1 \\
+0.8 & 0.9 & 0.2 \\
+0.1 & 0.2 & 0.9 \\
+0.2 & 0.1 & 0.8
+\end{pmatrix}
+$$
+
+- Row 0 is cat, row 1 is dog, row 2 is car, row 3 is bus.
+- $E$ has $V = 4$ rows ($V$ for vocabulary size) and $d = 3$ columns ($d$ for dimension, how many numbers each word gets).
+
+To embed "dog" (id 1), take row 1: **(0.8, 0.9, 0.2)**. That is all an embedding layer does at run time. In code it is `E[ids]`, exactly the $W_{\text{lut}}[\text{ids}]$ (lookup table) you met in [the Pocket TTS walkthrough](/blog/pocket-tts-calm-explained/), where the table is 4,000 rows of 1,024 numbers.
+
+### The same thing as multiplying a one-hot vector by a matrix
+
+Here is the idea that makes embeddings fit into everything we already know. Reading a row is the same as multiplying the word's one-hot vector by $E$.
+
+$$
+\mathbf{e} = \mathbf{x} E
+$$
+
+- $\mathbf{x}$ is the one-hot vector, a row of $V$ numbers.
+- $E$ is the table, $V$ rows by $d$ columns.
+- $\mathbf{e}$ is the result, a row of $d$ numbers: the embedding.
+
+Each output number is "multiply each slot of $\mathbf{x}$ by the matching number in one column of $E$, then add". Worked for dog, $\mathbf{x} = (0, 1, 0, 0)$:
+
+- Column 1: $0 \times 0.9 + 1 \times 0.8 + 0 \times 0.1 + 0 \times 0.2 = 0.8$
+- Column 2: $0 \times 0.8 + 1 \times 0.9 + 0 \times 0.2 + 0 \times 0.1 = 0.9$
+- Column 3: $0 \times 0.1 + 1 \times 0.2 + 0 \times 0.9 + 0 \times 0.8 = 0.2$
+
+Result **(0.8, 0.9, 0.2)**, which is row 1. The zeros wipe out every row except the one where the 1 sits. Everyday picture: a wall of pigeonholes with one light switched on; the multiplication "reads" whatever is in the lit hole.
+
+Why does this matter? Because it says an embedding layer is just a **linear layer with no bias**, fed one-hot inputs, like the weighted sums in post 1. So everything we know about training weights applies unchanged. The lookup is only a shortcut that skips the multiplications by zero: with 4,000 words it does one row read instead of 4,000 multiply-and-adds per column.
+
+<figure class="blog-figure blog-figure--wide">
+  <LookupAsMatmul alt="A one-hot row vector on the left, the 4 by 3 table in the middle, the 3-number result on the right. Stepping runs the multiplication column by column; at each term the matching slot and table cell glow, terms multiplied by zero fade, and the selected row lights up." />
+  <figcaption><strong>Figure 2. Lookup is multiplication.</strong> Pick a word and press Step. Each step computes one product, and the running sum fills the result. Every term with a 0 drops out, so the answer is always the selected row. Toy 4-word, 3-number table.</figcaption>
+</figure>
+
+
+## Vectors as points: dot product and cosine similarity
+
+A list of 2 numbers is a point on a sheet of paper; a list of 3 is a point in a room. A list of 300 is a point in a space we cannot picture, but the arithmetic is the same, so we practise in 2-D.
+
+Distance is one way to compare points. Models more often use **direction**: do two arrows from the origin point the same way?
+
+### The dot product
+
+In one sentence: multiply the two lists slot by slot, then add.
+
+$$
+\mathbf{a} \cdot \mathbf{b} = \sum_{i=1}^{n} a_i b_i
+$$
+
+Worked: $\mathbf{a} = (3, 4)$, $\mathbf{b} = (4, 3)$. Products $3 \times 4 = 12$ and $4 \times 3 = 12$, sum **24**.
+
+The dot product is big and positive when the arrows point the same way, zero when they are at right angles, negative when they point apart. Try $\mathbf{c} = (-4, 3)$: $3 \times (-4) + 4 \times 3 = -12 + 12 =$ **0**. $\mathbf{a}$ and $\mathbf{c}$ are at right angles.
+
+The catch: the dot product also grows with length. Double $\mathbf{a}$ to $(6, 8)$ and the dot with $\mathbf{b}$ doubles to 48, though the direction did not change.
+
+### Cosine similarity
+
+In one sentence: take the dot product, then divide out both lengths, so only direction is left.
+
+$$
+\cos(\mathbf{a}, \mathbf{b}) = \frac{\mathbf{a} \cdot \mathbf{b}}{\lVert \mathbf{a} \rVert \, \lVert \mathbf{b} \rVert}
+$$
+
+- $\lVert \mathbf{a} \rVert$ is the **length** (or norm) of $\mathbf{a}$: its distance from the origin, $\sqrt{a_1^2 + a_2^2 + \dots}$.
+- The result is the cosine of the angle between the arrows: **1** for the same direction, **0** for a right angle, **−1** for opposite.
+
+Everyday picture: two people pointing at the sky. Cosine asks only "are they pointing at the same star?", not how long their arms are.
+
+Worked: $\lVert (3, 4) \rVert = \sqrt{9 + 16} = 5$, and $\lVert (4, 3) \rVert = 5$. So $\cos = 24 / (5 \times 5) = 24 / 25 =$ **0.96**, an angle of about **16.3°**. Now double $\mathbf{a}$ to $(6, 8)$: dot 48, lengths 10 and 5, cosine $48 / 50 =$ **0.96** again. Length cancelled out, as promised.
+
+Back in our 3-number table: cos(cat, dog) $= 1.46 / (1.208 \times 1.221) \approx$ **0.990**; cos(cat, car) $= 0.34 / (1.208 \times 0.927) \approx$ **0.303**. Same verdict as distance, here.
+
+Cosine is the measure behind speaker similarity in [the speech evaluation post](/blog/speech-evaluation-metrics/), and [the RVQ post](/blog/residual-vector-quantization/) shows what happens when a codebook lookup switches from distance to direction (its Figure with points sliding onto a circle). I will not repeat that here.
+
+<figure class="blog-figure blog-figure--wide">
+  <CosineDrag alt="A 2-D grid with two draggable arrows from the origin. A panel prints the dot product term by term, both lengths, the cosine and the angle, and an arc between the arrows is coloured from red (opposite) through grey (right angle) to green (same direction)." />
+  <figcaption><strong>Figure 3. Cosine similarity by hand.</strong> Drag either arrow tip. Stretch an arrow along its own direction and watch the dot product change while the cosine stays put. Exact arithmetic.</figcaption>
+</figure>
+
+
+## How embeddings are learned
+
+Hand-picked numbers do not scale to 50,000 words. So we do not pick them: **the embedding table is just a weight matrix, and we train it with backpropagation like any other weight.** We start with small random numbers and let the loss push them around.
+
+The one-hot view from [the lookup section](#an-embedding-table-is-a-lookup) tells us what the gradient looks like. In one sentence: only the rows that were actually used get a gradient, and each gets exactly the gradient of its own vector.
+
+Why? Because $\mathbf{e} = \mathbf{x} E$, and every row of $E$ except the selected one was multiplied by 0. Nudging an unused row changes nothing, so its slope is 0. Written out:
+
+$$
+\frac{\partial L}{\partial E_{k}} =
+\begin{cases}
+\dfrac{\partial L}{\partial \mathbf{e}} & \text{if } k \text{ is the word we looked up} \\[4pt]
+\mathbf{0} & \text{otherwise}
+\end{cases}
+$$
+
+- $L$ is the loss, as in [post 2](/blog/foundations-loss-gradient-descent/).
+- $E_k$ is row $k$ of the table.
+- $\partial L / \partial \mathbf{e}$ is the gradient arriving at the embedding from the layers above, computed by ordinary backpropagation.
+
+### One update, by hand
+
+A tiny task. Each word has a 2-number embedding, and the model's "score" for the word is the dot product with a fixed vector $\mathbf{u} = (1, 2)$. We want the score for "cat" to be **1**. The loss is half the squared error:
+
+$$
+s = \mathbf{e} \cdot \mathbf{u}, \qquad L = \tfrac{1}{2}(s - y)^2
+$$
+
+- $s$ is the score, $y = 1$ is the target, $\mathbf{e}$ is cat's row.
+
+Start: cat's row is $\mathbf{e} = (0.2, 0.1)$; dog's row is $(0.5, -0.3)$; the learning rate is $\eta = 0.1$.
+
+1. Forward: $s = 0.2 \times 1 + 0.1 \times 2 = 0.4$. Loss $\tfrac{1}{2}(0.4 - 1)^2 = \tfrac{1}{2} \times 0.36 =$ **0.18**.
+2. Gradient of the loss with respect to $s$: $s - y = 0.4 - 1 = -0.6$.
+3. Gradient with respect to cat's row: $-0.6 \times \mathbf{u} = (-0.6, -1.2)$. (Each number of $\mathbf{e}$ was multiplied by the matching number of $\mathbf{u}$, so that is its slope, times the $-0.6$ from above. This is the chain rule from post 1.)
+4. Update: $\mathbf{e}_{\text{new}} = (0.2, 0.1) - 0.1 \times (-0.6, -1.2) = (0.2 + 0.06, 0.1 + 0.12) =$ **(0.26, 0.22)**.
+5. Dog's row: gradient $(0, 0)$, so it stays **(0.5, −0.3)**.
+6. Check: new score $0.26 + 0.44 = 0.7$, new loss $\tfrac{1}{2}(0.3)^2 =$ **0.045**, a quarter of before.
+
+What if $\eta$ were 0.5? The update would be five times bigger, $(0.5, 0.7)$, the score would jump to 1.9 and overshoot the target, the same bouncing as in [post 2's learning-rate race](/blog/foundations-loss-gradient-descent/).
+
+This "only used rows move" fact has practical consequences. A word that appears rarely gets few updates and stays near its random start. A word that never appears in training keeps its random row forever. When Richard's Khmer fine-tuning replaced the English tokenizer, the fresh 4,000-row Khmer table started random, which is why its learning rate is warmed up slowly ([Khmer TTS fine-tuning](/blog/khmer-tts-fine-tuning/)).
+
+<figure class="blog-figure blog-figure--wide">
+  <RowGradientStep alt="A 4-row table of 2-number embeddings with cat's row highlighted. Steps show the forward score, the error, the gradient arriving at cat's row, and the update; the other three rows are shown with a zero gradient and do not move." />
+  <figcaption><strong>Figure 4. One gradient step on one row.</strong> Step through forward, error, gradient and update. Only the row that was looked up changes; the others receive a gradient of exactly zero. Toy task with exact arithmetic.</figcaption>
+</figure>
+
+
+## Learning from the company a word keeps
+
+The task above was made up. What task makes embeddings *meaningful*? The linguist J. R. Firth put the idea in one line in 1957: "You shall know a word by the company it keeps." Words that show up in similar surroundings tend to mean similar things. You have never seen a "wug", but if I say "the wug drinks milk and chases a ball", you already suspect it is an animal.
+
+Bengio and colleagues (2003) trained the first well-known **neural language model**: it learned an embedding table jointly with a network that predicted the next word, and similar words ended up with similar rows as a side effect. Mikolov and colleagues (2013) stripped that down to something tiny and fast called **word2vec**. Its **skip-gram** version asks one question over and over: given a word, which words appear next to it?
+
+### A tiny corpus
+
+Eight two-word sentences:
+
+> cat milk, dog milk, cat ball, dog ball, car fuel, bus fuel, car road, bus road
+
+Each sentence gives two training pairs (word, neighbour), one each way: (cat, milk) and (milk, cat), and so on. That is **16 pairs**. Notice that cat and dog never appear together, yet they have exactly the same neighbours. Skip-gram should therefore place them together.
+
+### The skip-gram score
+
+Every word gets **two** vectors: a word vector $\mathbf{v}$ (used when it is the centre word) and a context vector $\mathbf{u}$ (used when it is the neighbour). The model's belief that $c$ appears next to $w$ is
+
+$$
+p = \sigma(\mathbf{v}_w \cdot \mathbf{u}_c), \qquad \sigma(s) = \frac{1}{1 + e^{-s}}
+$$
+
+- $\mathbf{v}_w$ is the word vector of the centre word $w$; $\mathbf{u}_c$ is the context vector of the neighbour $c$.
+- $\sigma$ (sigma) is the sigmoid from post 1: it squashes any number into a probability between 0 and 1.
+- A big dot product (arrows aligned) means "very likely neighbours".
+
+### Negative sampling
+
+If the only training signal were "these two are neighbours, push the score up", the easiest solution would be to make every vector huge and identical. So for each true pair we also draw a few random words and say "these are probably *not* neighbours, push their score down". This is **negative sampling** (Mikolov and colleagues, second 2013 paper). The loss for one true pair and $k$ negatives is the cross-entropy from [post 2](/blog/foundations-loss-gradient-descent/), applied to $k + 1$ yes-or-no questions. The gradient of each question's loss with respect to its score is simply
+
+$$
+g = p - \text{label}
+$$
+
+with label 1 for the true neighbour and 0 for each negative. (This is the same "prediction minus target" as the softmax gradient in post 2.) Both vectors then move: $\mathbf{v}_w$ by $-\eta \, g \, \mathbf{u}_c$ and $\mathbf{u}_c$ by $-\eta \, g \, \mathbf{v}_w$.
+
+Worked first pair from the seeded run in Figure 5: centre "cat", true neighbour "milk", negatives "ball" and "fuel".
+
+- (cat, milk): dot $0.0573$, $p = \sigma(0.0573) = 0.5143$, $g = 0.5143 - 1 =$ **−0.4857**: pull together.
+- (cat, ball): dot $0.0336$, $p = 0.5084$, $g =$ **0.5084**: push apart.
+- (cat, fuel): dot $0.0275$, $p = 0.5069$, $g =$ **0.5069**: push apart.
+
+At the start every $p$ is about 0.5: the model knows nothing. Notice "ball" was drawn as a negative even though cat does sit next to ball in another sentence. Random negatives are sometimes wrong; with a real vocabulary of many thousands of words this rarely matters, and in our toy the true pair (cat, ball) pulls back harder over many passes.
+
+### What happens
+
+Run all 16 pairs once (one **epoch**), many times. In the seeded run (2-D vectors, $\eta = 0.1$, $k = 2$):
+
+| after | cos(cat, dog) | cos(cat, car) | cos(car, bus) |
+|---|---|---|---|
+| start | 0.605 | 0.922 | −0.609 |
+| 10 epochs | 0.988 | 0.411 | 0.531 |
+| 50 epochs | 0.999 | 0.091 | 0.997 |
+
+At the start, cat happens to point almost the same way as car (0.922): random noise. By epoch 50 the animals and their things (cat, dog, milk, ball) sit in one direction and the vehicles and theirs (car, bus, fuel, road) in another, nearly at right angles. Nobody told the model that cats and dogs are animals. It only saw who stands next to whom.
+
+The real word2vec is the same loop with hundreds of dimensions, a window of several words on each side, billions of words of text, and negatives drawn more often for common words (in proportion to word frequency raised to the power 0.75). **GloVe** (Pennington and colleagues, 2014) reaches similar vectors a different way, by fitting the vectors to a table of how often each pair of words co-occurs.
+
+<figure class="blog-figure blog-figure--wide">
+  <SkipGramTrainer alt="A 2-D scatter of eight labelled word points starting at random positions. Each step processes one training pair: lines show the true neighbour pulled closer and two negatives pushed away, with the sigmoid and gradient numbers printed. Running epochs, the animal words and vehicle words drift into two separate groups." />
+  <figcaption><strong>Figure 5. Skip-gram, trained live.</strong> Step one pair at a time to see each pull and push, or Play to watch the eight words sort themselves; Pause freezes the run. Seeded, so the numbers match the text. Toy corpus of 16 pairs.</figcaption>
+</figure>
+
+
+## Analogy arithmetic, and its limits
+
+The most famous result from the word2vec papers is that differences between vectors can carry relations. The classic example: the vector for king, minus man, plus woman, lands closest to queen.
+
+In one sentence: subtract to isolate a relation, add it to another word, then find the nearest word.
+
+$$
+\mathbf{r} = \mathbf{v}_{\text{king}} - \mathbf{v}_{\text{man}} + \mathbf{v}_{\text{woman}}
+$$
+
+A toy 2-D space where the first number is "royalty" and the second "male (+) or female (−)":
+
+| word | vector |
+|---|---|
+| king | (3, 1) |
+| queen | (3, −1) |
+| man | (1, 1) |
+| woman | (1, −1) |
+| prince | (2, 1.5) |
+| princess | (2, −1.5) |
+
+$\mathbf{r} = (3 - 1 + 1, \; 1 - 1 + (-1)) = (3, -1)$, which is exactly queen. In this toy the relation "male to female" is the same arrow $(0, -2)$ for every pair, so the arithmetic is perfect.
+
+Real embeddings are not built that neatly. Make queen a little messier, $(2.6, -0.4)$, and $\mathbf{r} = (3, -1)$ is no longer on it. Distances from $\mathbf{r}$: queen **0.721**, princess **1.118**, king **2.0**, woman **2.0**. Queen still wins, but by a margin, not by identity.
+
+Three honest caveats:
+
+1. **The input words are usually excluded.** Standard evaluation searches for the nearest word *other than* king, man and woman. Without that rule, the nearest word to $\mathbf{r}$ is often one of the inputs (very often king itself), and the headline accuracy drops sharply. Nissim, van Noord and van der Goot (2020) show how much this rule shapes the famous examples.
+2. **It is about similarity, not reasoning.** Levy and Goldberg (2014) showed the analogy search is equivalent to adding and subtracting cosine similarities, so it works when the answer is "similar to king and to woman, unlike man". It is a property of the geometry, not a sign that the model understands royalty.
+3. **It works for some relations and not others.** Regular patterns like capital cities or plurals tend to work; many relations do not, and the embeddings also absorb biases present in their training text.
+
+<figure class="blog-figure blog-figure--wide">
+  <AnalogyExplorer alt="A 2-D plot of six word points. Choosing three words draws the arrow from the second to the first, then copies it onto the third, landing at a result point. Circles show the distance to every word, nearest highlighted, with a toggle that includes or excludes the input words." />
+  <figcaption><strong>Figure 6. Analogy arithmetic, step by step.</strong> Pick A − B + C. Steps draw the subtraction, then the addition, then rank every word by distance. Switch to "messy" vectors and toggle "exclude inputs" to see when it fails. Toy vectors chosen by hand.</figcaption>
+</figure>
+
+
+## Where is the word? Position information
+
+An embedding table gives "dog" the same row whether it is the first word or the tenth. "Dog bites man" and "man bites dog" contain the same three rows. Some models read the sequence in order and get position for free (the recurrent networks in [post 8](/blog/foundations-recurrent-networks/)). Attention, the core of the Transformer, does not: it treats its inputs as an unordered set unless we tell it otherwise ([attention](/blog/foundations-attention/), [the Transformer](/blog/foundations-transformer/)).
+
+The simplest fix is a **second embedding table, indexed by position**: row 0 for "first word", row 1 for "second", and so on, and add that row to the word's row. The original Transformer (Vaswani and colleagues, 2017) used fixed sine and cosine waves instead of a learned table; many later models, including the transformer inside [Mimi](/blog/mimi-codec-explained/), use **rotary position embeddings**, which rotate vectors by an angle that depends on position. Those get their own section in the attention post.
+
+Adding two embeddings may look like it would scramble them. It mostly does not, and the next section shows speech models relying on exactly that.
+
+
+## Embeddings for sound
+
+Speech models that work with **codec tokens** treat audio like text. A neural codec such as Mimi turns each 80 millisecond frame of audio into a short stack of token ids, one per codebook, chosen by [residual vector quantization](/blog/residual-vector-quantization/) (RVQ). Moshi uses **8** codebooks per frame at **12.5** frames per second ([the MoshiRAG review](/paper-reviews/moshirag/)). Each id is again a cloakroom ticket, so each codebook gets its own embedding table.
+
+But a frame has 8 ids, and the model wants one vector per frame. The usual answer: **look up one row from each codebook's table and add them.** Moshi's paper says exactly this: at each step its Temporal Transformer receives "the sum of K learnt embeddings", one per token stream. Moshi then goes further, as the MoshiRAG review explains: its whole input at each step is a sum of embeddings for its own text token, its own audio tokens and your audio tokens.
+
+A toy with **2** codebooks of **4** entries and 3-number embeddings:
+
+- Codebook 1 table rows: (1, 0, 0), (0, 1, 0), (0.5, 0.5, 0), (0, 0, 1).
+- Codebook 2 table rows: (0.1, 0, 0), (0, 0.2, 0), (0, 0, 0.3), (0.1, 0.1, 0.1).
+- A frame with ids (2, 3): row 2 of table 1 is (0.5, 0.5, 0); row 3 of table 2 is (0.1, 0.1, 0.1).
+- Sum: **(0.6, 0.6, 0.1)**.
+
+Two things make this sensible. First, it mirrors RVQ itself: the codec rebuilds a frame by *adding* one entry from each codebook, so adding one embedding per codebook keeps the same "coarse plus fine corrections" shape (the small numbers in table 2 above echo that later codebooks hold smaller corrections; in a trained model the sizes are learned, not given). Second, by [the lookup section](#an-embedding-table-is-a-lookup), the sum is just a **multi-hot** vector (one 1 per codebook) times the two tables stacked into one big table. So it is still one linear layer, trained by backprop, and only the rows used in that frame get a gradient.
+
+Not every speech model needs this. [Pocket TTS](/blog/pocket-tts-calm-explained/) uses an embedding table for its *text* tokens, but its audio is **continuous**: 32 numbers per frame, no codebook, no ids. A continuous vector needs no lookup; an ordinary linear layer maps it to the model's width. Embeddings are the bridge only where the input is a symbol.
+
+<figure class="blog-figure blog-figure--wide">
+  <CodebookSum alt="One audio frame shown as a column of codebook ids. For each id, its codebook's table lights up the chosen row, the row slides out, and the rows stack into a running sum that becomes the frame's single input vector. A toggle shows the same result as a multi-hot vector times the stacked table." />
+  <figcaption><strong>Figure 7. One frame, many codebooks, one vector.</strong> Step through the lookups and the sum. The multi-hot toggle shows it is one matrix multiplication. Toy 2-codebook, 4-entry, 3-number tables; Moshi uses 8 codebooks.</figcaption>
+</figure>
+
+
+## How many numbers per word?
+
+The table has $V \times d$ numbers. Pocket TTS's text table is $4{,}000 \times 1{,}024 =$ **4,096,000** weights. The widely shared word2vec vectors trained on Google News cover about 3 million words and phrases at 300 dimensions, $3{,}000{,}000 \times 300 =$ **900 million** numbers.
+
+The trade-off:
+
+- **Too few dimensions** and words are crowded. In our 2-D toy there is room for "animal versus vehicle" and little else. Real words differ in many ways at once (topic, grammar, formality, sound), and each needs room.
+- **Too many** and the table is large, slow to train, and rare words get many numbers but few updates (recall: only used rows move), so their vectors stay noisy. [The representation collapse post](/blog/representation-collapse-explained/) shows that a nominally wide embedding can also end up using only a few of its directions.
+- In practice $d$ is usually tied to the model's width, so the embedding plugs straight into the next layer: 1,024 in Pocket TTS's text table, a few hundred for classic word vectors.
+
+
+In PyTorch the table is `nn.Embedding(V, d)`, and its only parameter is the $V \times d$ weight matrix (no bias):
+
+```python
+import torch.nn as nn
+
+toy = nn.Embedding(4, 3)          # 4 words, 3 numbers each
+pocket = nn.Embedding(4000, 1024) # Pocket TTS's text table
+print(toy.weight.shape, toy.weight.numel())
+print(pocket.weight.numel())
+```
+
+It prints:
+
+```text
+torch.Size([4, 3]) 12
+4096000
+```
+
+## What to remember
+
+- Token ids are labels, not quantities. One-hot vectors remove the fake order but are huge and put every pair at the same distance, **1.414**.
+- An embedding table has one row per symbol. Looking up a row is exactly multiplying a one-hot vector by the table, so an embedding layer is a linear layer and trains by backpropagation.
+- Only the rows that were looked up get a gradient. Rare symbols learn slowly; unseen ones never move.
+- Dot product measures alignment and length; cosine similarity divides out length and keeps only direction.
+- Skip-gram with negative sampling learns vectors by predicting neighbours. Words with the same company end up close.
+- Analogy arithmetic works in neat cases; real results depend on excluding the input words, and it reflects similarity, not reasoning.
+- Speech codecs give several ids per frame; models like Moshi embed each and add the rows. Continuous latents, as in Pocket TTS, need no embedding table.
+
+
+## Try it yourself
+
+- **Figure 1.** Click cat and dog: one-hot distance **1.414**, dense **0.173**. Click cat and car: **1.414** and **1.281**.
+- **Figure 2.** Pick dog and step through all 12 products: the result fills to **(0.8, 0.9, 0.2)**. Pick bus: **(0.2, 0.1, 0.8)**.
+- **Figure 3.** Set A = (3, 4), B = (4, 3): dot **24**, lengths **5** and **5**, cosine **0.96**, angle **16.3°**. Drag A to (6, 8): dot **48**, cosine still **0.96**. Drag B to (−4, 3): dot **0**, angle **90°**.
+- **Figure 4.** Defaults: after one step cat's row is **(0.26, 0.22)**, loss **0.18 → 0.045**, dog's row unchanged at **(0.5, −0.3)**. Set η = 0.5: cat's row **(0.5, 0.7)**, score **1.9**.
+- **Figure 5.** Press "Step one pair" once: the panel shows (cat, milk) $g$ = **−0.4857**, (cat, ball) **0.5084**, (cat, fuel) **0.5069**. Play, and pause near epoch 50: cos(cat, dog) **0.999**, cos(cat, car) **0.091**.
+- **Figure 6.** king − man + woman: result **(3, −1)**, nearest queen at distance **0**. Switch to messy: queen **0.721**, princess **1.118**. Turn off "exclude inputs" in messy mode: queen still nearest; king and woman tie at **2.0**.
+- **Figure 7.** Ids (2, 3): sum **(0.6, 0.6, 0.1)**. Ids (0, 0): **(1.1, 0, 0)**.
+
+
+## Sources
+
+- J. R. Firth (1957). "A synopsis of linguistic theory, 1930–1955." In *Studies in Linguistic Analysis*, Philological Society, Oxford, 1–32. Source of "You shall know a word by the company it keeps" (p. 11).
+- Y. Bengio, R. Ducharme, P. Vincent and C. Jauvin (2003). "A Neural Probabilistic Language Model." *Journal of Machine Learning Research*, 3, 1137–1155.
+- T. Mikolov, K. Chen, G. Corrado and J. Dean (2013). "Efficient Estimation of Word Representations in Vector Space." arXiv:1301.3781. Introduces skip-gram and CBOW (continuous bag of words), and the analogy test.
+- T. Mikolov, I. Sutskever, K. Chen, G. Corrado and J. Dean (2013). "Distributed Representations of Words and Phrases and their Compositionality." NeurIPS 2013. arXiv:1310.4546. Introduces negative sampling and the 0.75 power.
+- J. Pennington, R. Socher and C. D. Manning (2014). "GloVe: Global Vectors for Word Representation." EMNLP 2014, 1532–1543.
+- O. Levy and Y. Goldberg (2014). "Linguistic Regularities in Sparse and Explicit Word Representations." CoNLL 2014, 171–180.
+- M. Nissim, R. van Noord and R. van der Goot (2020). "Fair Is Better than Sensational: Man Is to Doctor as Woman Is to Doctor." *Computational Linguistics*, 46(2), 487–497.
+- A. Vaswani et al. (2017). "Attention Is All You Need." NeurIPS 2017. arXiv:1706.03762.
+- A. Défossez et al. (2024). "Moshi: a speech-text foundation model for real-time dialogue." arXiv:2410.00037. Section 3.4: the summed per-codebook embeddings; Mimi uses 8 codebooks of 2,048 entries.
+- Google News word2vec vectors: 3 million words and phrases, 300 dimensions (released with the word2vec code).
+

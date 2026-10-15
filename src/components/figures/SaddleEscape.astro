@@ -1,0 +1,87 @@
+---
+// Foundations, loss post: the saddle L = w₁² − w₂² with η = 0.25, so each
+// step multiplies w₁ by 0.5 and w₂ by 1.5. From (2, 0) the ball slides into
+// the saddle and stays; from (2, 0.01) it is at (0.0625, 0.0759) after five
+// steps (loss −0.0019) and w₂ ≈ 1.297 after twelve.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-saddle>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 320" role="img" aria-labelledby="se-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="se-title">Two balls on a saddle: one with no sideways nudge stays stuck, one with a tiny nudge rolls away</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Learning rate η <strong data-v="eta"></strong></span><input class="scrub" data-k="eta" type="range" min="0.05" max="0.45" step="0.05" value="0.25" /></label>
+    <label><span class="fig-panel__name">Nudge of ball 2 <strong data-v="nudge"></strong></span><input class="scrub" data-k="nudge" type="range" min="0.001" max="0.1" step="0.001" value="0.01" /></label>
+    <div><span class="fig-panel__name">Mini-batch noise</span><div class="fig-chips"><button type="button" class="fig-chip" data-noise aria-pressed="false">Add noise each step</button></div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt, mulberry } from "../../lib/tiny-net";
+  import { INK, MUTED, NEG, GOLD, JADE } from "../../lib/net-diagram";
+  import { frame, txt } from "../../lib/plot";
+  const N = 12, L = ([a, b]: number[]) => a * a - b * b;
+  const B = { l: 40, t: 30, w: 260, h: 260, x0: -2.5, x1: 2.5, y0: -2.5, y1: 2.5 };
+  document.querySelectorAll<HTMLElement>("[data-saddle]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const p: Record<string, number> = { eta: 0.25, nudge: 0.01 };
+    let noise = false;
+    const run = () => {
+      const rnd = mulberry(5), gauss = () => Math.sqrt(-2 * Math.log(1 - rnd())) * Math.cos(2 * Math.PI * rnd()) * 0.01;
+      const balls = [[[2, 0]], [[2, p.nudge]]];
+      for (let i = 0; i < N; i++) for (const b of balls) {
+        const [a, c] = b[i];
+        let n = [a * (1 - 2 * p.eta), c * (1 + 2 * p.eta)];
+        if (noise) n = [n[0] + gauss(), n[1] + gauss()];
+        b.push(n);
+      }
+      return balls;
+    };
+    const steps = () => {
+      const balls = run(), f1 = 1 - 2 * p.eta, f2 = 1 + 2 * p.eta;
+      return Array.from({ length: N }, (_, i) => ({
+        say: i === 0 ? `The slopes are 2w₁ and −2w₂, so each step multiplies w₁ by 1 − 2η = ${fmt(f1)} (sliding into the valley) and w₂ by 1 + 2η = ${fmt(f2)} (rolling off the hump).${noise ? " Noise adds a small random kick to both." : ""}` : i === 5 ? "Ball 2's loss just went below zero: it has started down the other side. Ball 1, with w₂ exactly 0, will never feel that slope." : `Step ${i + 1}.`,
+        math: balls.map((b, j) => { const [a, c] = b[i], [na, nc] = b[i + 1]; return `ball ${j + 1}: w₁ = ${fmt(a, 4)} × ${fmt(f1)} = ${fmt(na, 4)}, w₂ = ${fmt(c, 4)} × ${fmt(f2)} = ${fmt(nc, 4)}${noise ? " (plus noise)" : ""}, L = ${fmt(L(b[i + 1]), 4)}`; }).join("\n"),
+      }));
+    };
+    function draw(k: number) {
+      const F = frame(B), balls = run(), n = k + 1;
+      let s = `<clipPath id="se-clip"><rect x="${B.l}" y="${B.t}" width="${B.w}" height="${B.h}"/></clipPath><g clip-path="url(#se-clip)">`;
+      // Where the loss is negative (|w₂| > |w₁|): the downhill sides of the saddle.
+      s += `<polygon points="${F.X(0)},${F.Y(0)} ${F.X(-2.5)},${F.Y(2.5)} ${F.X(2.5)},${F.Y(2.5)}" fill="${NEG}" fill-opacity="0.08"/><polygon points="${F.X(0)},${F.Y(0)} ${F.X(-2.5)},${F.Y(-2.5)} ${F.X(2.5)},${F.Y(-2.5)}" fill="${NEG}" fill-opacity="0.08"/>`;
+      for (const c of [-4, -2, -1, 1, 2, 4]) {
+        const pts: string[] = [], pts2: string[] = [];
+        for (let i = 0; i <= 60; i++) {
+          const t = -2.5 + (5 * i) / 60;
+          if (c > 0) { const a = Math.sqrt(c + t * t); pts.push(`${F.X(a)},${F.Y(t)}`); pts2.push(`${F.X(-a)},${F.Y(t)}`); }
+          else { const b = Math.sqrt(-c + t * t); pts.push(`${F.X(t)},${F.Y(b)}`); pts2.push(`${F.X(t)},${F.Y(-b)}`); }
+        }
+        const col = c > 0 ? JADE : NEG;
+        s += `<polyline fill="none" stroke="${col}" stroke-opacity="0.35" points="${pts.join(" ")}"/><polyline fill="none" stroke="${col}" stroke-opacity="0.35" points="${pts2.join(" ")}"/>`;
+      }
+      balls.forEach((b, j) => {
+        const ps = b.slice(0, n + 1), col = j ? GOLD : INK;
+        s += `<polyline fill="none" stroke="${col}" stroke-width="2" points="${ps.map(([a, c]) => `${F.X(a)},${F.Y(c)}`).join(" ")}"/>`;
+        const [a, c] = ps[ps.length - 1];
+        s += `<circle cx="${F.X(a)}" cy="${F.Y(c)}" r="${j ? 6 : 7.5}" fill="${col}" stroke="#fff" stroke-width="2"/>`;
+      });
+      s += `</g>` + F.grid([-2, 0, 2], [-2, 0, 2], 0);
+      s += txt(40, 18, "Saddle L = w₁² − w₂² (red: below zero)", `font-size="12" font-weight="700" fill="${INK}"`);
+      balls.forEach((b, j) => {
+        const y = 60 + j * 90, [a, c] = b[n], col = j ? GOLD : INK;
+        s += `<circle cx="346" cy="${y - 4}" r="6" fill="${col}"/>` + txt(360, y, `Ball ${j + 1}: starts at (2, ${j ? fmt(p.nudge, 3) : "0"})`, `font-size="12.5" font-weight="700" fill="${INK}"`);
+        s += txt(360, y + 22, `after ${n} step${n === 1 ? "" : "s"}: (${fmt(a, 4)}, ${fmt(c, 4)})`, `font-size="12" fill="${INK}"`);
+        s += txt(360, y + 42, `loss ${fmt(L(b[n]), 4)}${Math.abs(c) > 0.5 ? ", rolling away downhill" : Math.abs(a) < 0.1 && Math.abs(c) < 0.05 ? ", stuck near the saddle" : ""}`, `font-size="11.5" fill="${MUTED}"`);
+      });
+      s += txt(346, 260, "At the saddle point the gradient is zero in every direction,", `font-size="11.5" fill="${MUTED}"`) + txt(346, 278, "so a ball exactly on the ridge line never leaves it.", `font-size="11.5" fill="${MUTED}"`);
+      $("[data-draw]").innerHTML = s;
+      root.querySelectorAll<HTMLElement>("[data-v]").forEach((el) => (el.textContent = fmt(p[el.dataset.v!], 3)));
+    }
+    const redraw = stepper(root, steps, draw, { delay: 1.4 });
+    root.querySelectorAll<HTMLInputElement>("[data-k]").forEach((inp) => inp.addEventListener("input", () => { p[inp.dataset.k!] = +inp.value; redraw(); }));
+    $<HTMLButtonElement>("[data-noise]").addEventListener("click", (e) => { noise = !noise; (e.currentTarget as HTMLElement).setAttribute("aria-pressed", String(noise)); redraw(); });
+  });
+</script>

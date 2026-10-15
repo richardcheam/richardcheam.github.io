@@ -1,0 +1,590 @@
+---
+title: "Speech without tokens: how Pocket TTS works"
+date: 2026-10-11
+category: "speech-ai"
+read_time: "22 min"
+series_order: 9
+series: speech-ai
+featured: false
+excerpt: "Kyutai's Pocket TTS generates speech as continuous vectors, not codec tokens, and turns noise into each audio frame in a single network call. The full path from text to waveform, with the shapes and the math."
+question: "How can a 100M-parameter model clone a voice and speak faster than real time on a laptop CPU?"
+my_work: "A concept note. I traced the data flow through the CALM paper and the released Pocket TTS code, checked every tensor shape against the shipped config, and built a worked example and a runnable toy of the pipeline."
+result: "Three choices carry the speed: continuous 32-number latents at 12.5 per second, a small transformer distilled from a larger one, and a sampler head that maps noise to a latent in one step."
+evidence_limit: "This explains published methods and released code. I did not train or benchmark the model; speed figures are Kyutai's."
+lesson: "A one-step generator does not skip the ODE. It learns the ODE's solution map, and the training objective is what keeps that map honest."
+---
+
+import TilesVsTrajectory from "../../components/figures/TilesVsTrajectory.astro";
+import PocketTtsPipeline from "../../components/figures/PocketTtsPipeline.astro";
+import PrefixAttention from "../../components/figures/PrefixAttention.astro";
+import FlowVsDiffusion from "../../components/figures/FlowVsDiffusion.astro";
+import FlowSlider from "../../components/figures/FlowSlider.astro";
+import OneStepSlider from "../../components/figures/OneStepSlider.astro";
+import MimiDecoder from "../../components/figures/MimiDecoder.astro";
+
+Most speech generators of the last few years borrowed the playbook of text language models: turn audio into a sequence of integers, then predict the next integer. Pocket TTS, released by Kyutai in January 2026, does not. It predicts the next stretch of audio as a vector of 32 real numbers, and it produces each one from random noise in a single forward pass of a small network. The whole model has about 100 million parameters and, per Kyutai's README, runs at roughly six times real time on two cores of a MacBook Air M4.
+
+The method behind it is described in the ICLR 2026 paper [Continuous Audio Language Models](https://arxiv.org/abs/2509.06926) (CALM) by Rouard, Orsini, Roebel, Zeghidour and Défossez. The code is in [kyutai-labs/pocket-tts](https://github.com/kyutai-labs/pocket-tts). This post walks the path from a text string to a waveform. It starts with why tokens were the default, then builds up flow matching from scratch, because the speed trick only makes sense once you see what it is short-cutting.
+
+Every shape below comes from the released English config, not from the paper's larger research models. Where the two differ I say so.
+
+## Part 1: Why audio became tokens, and what that cost
+
+### The codec-token recipe
+
+Raw audio is a terrible sequence to model directly. At 24 kHz, one second is 24,000 numbers, and the structure that matters (phonemes, pitch contours, breath) spans thousands of them. A transformer over raw samples would need enormous context for a single sentence.
+
+Neural audio codecs solve the length problem. An encoder compresses the waveform into a much slower sequence of frames; a decoder reconstructs audio from those frames. Models such as [AudioLM](https://arxiv.org/abs/2209.03143) and [VALL-E](https://arxiv.org/abs/2301.02111) then go one step further and **quantize** each frame, so that a language model can predict it with a softmax over a vocabulary, exactly as it would a word.
+
+The standard quantizer is residual vector quantization (RVQ). A frame vector z is replaced by the nearest entry of a learned codebook. The leftover error is quantized again by a second codebook, and so on:
+
+$$
+r_0 = z, \qquad k_i = \arg\min_j \lVert r_{i-1} - c^{(i)}_j \rVert, \qquad r_i = r_{i-1} - c^{(i)}_{k_i}, \qquad \hat z = \sum_{i=1}^{Q} c^{(i)}_{k_i}
+$$
+
+Reading it symbol by symbol:
+
+- $z$ is one frame from the encoder: a list of numbers describing 80 ms of sound.
+- $c^{(i)}_j$ is entry $j$ of codebook $i$. A codebook is a fixed list of example vectors, like a box of paint colours.
+- $r_i$ is the **residual**, what is still wrong after $i$ codebooks. It starts as the whole frame, $r_0 = z$.
+- $k_i$ is the number of the closest codebook entry. $\arg\min_j$ means "the $j$ that makes this smallest", and $\lVert \cdot \rVert$ is distance.
+- $Q$ is how many codebooks are used, and $\hat z$ (z-hat) is the rebuilt frame: the sum of the chosen entries.
+
+In words: find the closest colour, subtract it, find the closest colour to what is left, and repeat $Q$ times. The frame is then stored as $Q$ whole numbers, $k_1, \dots, k_Q$.
+
+VALL-E uses EnCodec at 75 frames per second with Q = 8 codebooks of 1,024 entries. That is 600 integers for every second of speech, and each integer carries at most log₂ 1024 = 10 bits.
+
+### The mosaic and the painting
+
+Think of quantization as building a picture from mosaic tiles. You have a fixed box of colours; every patch of the image is replaced by the closest tile. Add more boxes (more codebooks) and the residual gets finer, but there is always a gap between the true colour and the tile you placed.
+
+<figure class="blog-figure blog-figure--wide">
+  <TilesVsTrajectory alt="Left, a smooth curve forced onto eight horizontal levels as a staircase of tiles. Right, the same curve kept as a continuous line." />
+  <figcaption><strong>Figure 1. The mosaic against the painting.</strong> One latent channel over time. Quantization rounds every frame to the nearest of a few levels; a continuous latent keeps the value. Schematic.</figcaption>
+</figure>
+
+That gap shows up in four ways:
+
+- **Lost texture.** Breathiness, creak and fine spectral detail live in small differences between frames. They are exactly what gets rounded away first.
+- **Artifacts.** Once a wrong integer is sampled, it is wrong by a whole codebook cell. There is no "slightly off" token, which is how metallic or robotic glitches enter.
+- **Flattened prosody.** Subtle pitch and energy movement depends on low-amplitude residuals carried by the last codebooks, the ones models predict least reliably.
+- **A length bottleneck.** Fidelity is bought with more codebooks, and every codebook is more integers to predict per second. Systems then need extra machinery (delays between codebook levels, a second small transformer over the codebook axis) to keep generation tractable.
+
+### The continuous alternative
+
+CALM removes the quantizer. The codec is trained as a variational autoencoder whose bottleneck is a plain continuous vector. For speech, the paper's VAE uses Mimi's architecture at **12.5 frames per second with 32 latent channels**, operating on 24 kHz audio. One second of speech is therefore a 12.5 × 32 matrix of floats: 400 numbers, against VALL-E's 600 integers.
+
+This is not perfect fidelity. The VAE is still a lossy compressor, and its decoder has its own reconstruction error. What disappears is the *second* loss, the rounding step, and with it the trade-off between more codebooks and longer sequences. One latent per frame, one prediction per frame.
+
+The price is that a softmax can no longer produce the next frame. There is no vocabulary to normalise over. The model has to output a sample from a continuous distribution in 32 dimensions, and that is the problem the rest of this post is about.
+
+## Part 2: The transformer brain
+
+<figure class="blog-figure blog-figure--wide">
+  <PocketTtsPipeline alt="Animated: a voice clip and a sentence become the first cells of one sequence. For each of six frames the causal transformer attends over every cell, the head collapses 32 noise values into one latent in a single call, and that latent is appended to the sequence and decoded into 80 ms of waveform." />
+  <figcaption><strong>Figure 2. The whole pipeline, as it runs.</strong> One sequence holds the voice, the text and every generated latent. Shapes are from the released English config; the voice clip is assumed to be 10 seconds long, and the tape shows 8 of its 125 frames. Attention weights are illustrative.</figcaption>
+</figure>
+
+### Text in
+
+Take the prompt "Hello world." A SentencePiece-style tokenizer with a 4,000-entry vocabulary turns it into a short list of integer ids, say n<sub>text</sub> of them. A lookup table, an ordinary embedding matrix of shape 4,000 × 1,024, replaces each id with its row:
+
+$$
+E_{\text{text}} = W_{\text{lut}}[\text{ids}] \in \mathbb{R}^{n_{\text{text}} \times 1024}
+$$
+
+- $W_{\text{lut}}$ is the lookup table (lut): 4,000 rows, one per token, each 1,024 numbers long.
+- $[\text{ids}]$ means "take the rows with these numbers".
+- $\mathbb{R}^{n_{\text{text}} \times 1024}$ says what comes out: a table of real numbers with $n_{\text{text}}$ rows (one per token) and 1,024 columns.
+
+In words: each token number is swapped for its own learned list of 1,024 numbers. If "Hello world." becomes 4 tokens, $E_{\text{text}}$ is 4 rows of 1,024.
+
+### What a 1,024-dimensional hidden state is
+
+d<sub>model</sub> = 1024 means every position in the sequence is described by a list of 1,024 real numbers. Geometrically, each position is a point in ℝ¹⁰²⁴. Stack the whole sequence and you get a matrix of shape T × 1024, one row per position. Each transformer layer reads that matrix and writes a new one of the same shape.
+
+Nothing in this matrix is text and nothing is audio. It is a working representation that the layers progressively rewrite until the last row contains whatever the next audio frame needs to be predicted.
+
+### The causal backbone
+
+The Pocket TTS backbone is a stack of 6 transformer layers, 16 attention heads each, with a feed-forward width of 4 × 1024. In one layer, the matrix X ∈ ℝ<sup>T×1024</sup> is projected three ways:
+
+$$
+Q = XW_Q, \quad K = XW_K, \quad V = XW_V, \qquad W_Q, W_K, W_V \in \mathbb{R}^{1024 \times 1024}
+$$
+
+- $X$ is the sequence so far, one row of 1,024 numbers per position.
+- $W_Q$, $W_K$, $W_V$ are three learned 1,024 × 1,024 matrices. Multiplying by each gives three new views of every position.
+- $Q$ (**query**) is what each position is looking for, $K$ (**key**) is what each position offers, and $V$ (**value**) is the content it passes on if chosen.
+
+Think of a library: the query is your question, keys are the book titles, values are the books' contents.
+
+and split into 16 heads of width 64. For one head:
+
+$$
+\text{Attn}(Q,K,V) = \operatorname{softmax}\!\Big(\frac{QK^{\top}}{\sqrt{64}} + M\Big)V, \qquad M_{ij} = \begin{cases} 0 & j \le i \\ -\infty & j > i \end{cases}
+$$
+
+Reading it piece by piece:
+
+- $QK^{\top}$ compares every query with every key ($^{\top}$ means transpose, flipping rows and columns so the shapes line up). A big number means a good match.
+- $\sqrt{64}$ is 8. Dividing by it keeps the scores in a sensible range, because each head works with 64 numbers.
+- $M$ is the **mask**: 0 where position $j$ is now or earlier ($j \le i$), $-\infty$ where it is in the future.
+- $\operatorname{softmax}$ turns each row of scores into weights that are positive and add up to 1; a score of $-\infty$ becomes a weight of exactly 0.
+- Multiplying by $V$ takes the weighted average of the values.
+
+QKᵀ is a T × T table: entry (i, j) scores how relevant position j is to position i. The mask M sets every score for a future position to −∞, so after the softmax those weights are exactly zero. Row i of the output is a weighted average of the value vectors of positions 0 to i. This is what *causal* means: the representation of frame i can depend on the past and never on the future, which is what allows streaming generation.
+
+### What comes out
+
+The backbone emits no text tokens and no audio. At the last position it emits one context vector
+
+$$
+h_t \in \mathbb{R}^{1024}
+$$
+
+Here $h_t$ is the **context vector** for audio frame $t$: 1,024 numbers that summarise everything the model has read so far (voice, text and the audio already made). The symbol $\in \mathbb{R}^{1024}$ just means "is a list of 1,024 real numbers".
+
+which is layer-normalised and passed to a separate small network, the head, together with a fresh draw of Gaussian noise. The head returns the next latent x<sub>t</sub> ∈ ℝ³². That latent is then mapped back up to 1,024 dimensions by a linear layer (32 → 1024) and appended to the sequence, and the backbone runs again for the next frame. A separate linear output on h<sub>t</sub> predicts end-of-speech.
+
+So the loop is: **sequence → h<sub>t</sub> → head(noise, h<sub>t</sub>) → x<sub>t</sub> → append → repeat**, 12.5 times per second of audio.
+
+The CALM paper adds two refinements in its research models. The backbone's own past latents are fed in with injected noise, which stops it from relying on tiny details that drift during generation, and a short-context transformer over the last ten clean latents restores that local detail. The paper also places each word at the timestep where it is spoken, an "inner monologue" that keeps text and audio aligned. I describe the released Pocket TTS code below, which prepends text as a prefix.
+
+## Part 3: Voice cloning: attention over a prefix
+
+The roadmap version of this story has a dedicated audio encoder and a cross-attention block. **The released code does something simpler.** The reference audio becomes the first part of the same sequence the transformer is already reading.
+
+### Encoding the reference
+
+A 10-second clip at 24 kHz is 240,000 samples. The Mimi encoder turns it into 125 latent frames of 32 numbers each, and one learned matrix, `speaker_proj`, lifts each frame to the model width:
+
+$$
+C_{\text{ref}} = \operatorname{Mimi}_{\text{enc}}(\text{wav}) \, W_{\text{spk}}, \qquad \operatorname{Mimi}_{\text{enc}}(\text{wav}) \in \mathbb{R}^{125 \times 32}, \quad W_{\text{spk}} \in \mathbb{R}^{32 \times 1024}, \quad C_{\text{ref}} \in \mathbb{R}^{125 \times 1024}
+$$
+
+- $\text{wav}$ is the reference clip, the 240,000 samples.
+- $\operatorname{Mimi}_{\text{enc}}$ is the Mimi encoder; it returns 125 frames of 32 numbers.
+- $W_{\text{spk}}$ is the learned `speaker_proj` matrix, 32 × 1,024. Multiplying by it stretches each 32-number frame to the 1,024 numbers the transformer works with.
+- $C_{\text{ref}}$ (C for conditioning) is the result: 125 rows of 1,024, ready to sit in the sequence like any other position.
+
+The code puts a learned start vector in front, runs these 126 positions through the transformer once, and keeps the resulting key-value cache. That cache is the "voice state". The README's tip that a saved `.safetensors` voice loads much faster than a `.wav` is exactly this: the saved file skips re-encoding and re-running the prefix.
+
+### The Q, K, V interaction
+
+During generation the full sequence is [start, voice frames, text tokens, generated audio frames]. Consider the newest position, with query q<sub>t</sub>. Its attention weights over all earlier positions split into three groups:
+
+$$
+o_t = \sum_{j \in \text{voice}} \alpha_{tj}v_j \;+\; \sum_{j \in \text{text}} \alpha_{tj}v_j \;+\; \sum_{j \in \text{audio}} \alpha_{tj}v_j, \qquad \alpha_{tj} = \frac{\exp(q_t^{\top}k_j/8)}{\sum_{j' \le t}\exp(q_t^{\top}k_{j'}/8)}
+$$
+
+- $o_t$ is what attention returns for the newest position $t$.
+- $\alpha_{tj}$ is the **attention weight**: how much position $t$ listens to position $j$. All the weights add up to 1.
+- $v_j$ is the value vector of position $j$, and $q_t^{\top}k_j$ is the match score between the query and that position's key; the 8 is $\sqrt{64}$ again.
+- $\exp$ is the exponential function. Dividing each $\exp$ by their sum is the softmax written out by hand.
+
+In words: the output is a weighted average of everything earlier, and we have just split that average into three piles: voice, text, and audio made so far.
+
+Mathematically this is the same Q·K·V operation as cross-attention. The query comes from the current frame; the keys and values come from the reference. The difference is architectural: there is one attention, over one sequence, with one set of weights, rather than a second attention block with its own projections.
+
+<figure class="blog-figure blog-figure--wide">
+  <PrefixAttention alt="A row of cells: start marker, eight voice frames, six text tokens, five generated frames, then the current frame. Arcs run from the current frame back to earlier cells, thickest to some voice frames and to the text token being spoken." />
+  <figcaption><strong>Figure 3. Where one frame looks.</strong> Arc thickness is an attention weight. Illustrative weights, not measured from the model.</figcaption>
+</figure>
+
+### How the reference moves the target
+
+Here is the precise sense in which the voice "shifts" the output. Group the voice term:
+
+$$
+o_t = A_t \, \bar v^{\text{voice}}_t + (1 - A_t)\, \bar v^{\text{rest}}_t, \qquad A_t = \sum_{j \in \text{voice}} \alpha_{tj}, \quad \bar v^{\text{voice}}_t = \frac{1}{A_t}\sum_{j \in \text{voice}} \alpha_{tj} v_j
+$$
+
+- $A_t$ is the **share of attention** that goes to the voice frames: the voice weights added up. If $A_t = 0.3$, the voice gets 30% of this frame's attention.
+- $\bar v^{\text{voice}}_t$ (v-bar) is the average voice value, weighted by attention. $\bar v^{\text{rest}}_t$ is the same for text and audio.
+
+So the output is a blend: $A_t$ parts "what the voice says" and $1 - A_t$ parts "everything else".
+
+Every head in every layer adds a vector like this to the residual stream. Swap in a different speaker and v̄<sup>voice</sup> changes, so o<sub>t</sub> moves, and that movement compounds through six layers into a different h<sub>t</sub>. Since the head generates x<sub>t</sub> conditioned on h<sub>t</sub>, a different h<sub>t</sub> means a different distribution over the next latent: same words, different timbre.
+
+That is a mechanism, not a proof that timbre is captured. The proof is empirical: training on speech where the prompt and continuation come from the same speaker teaches the model that copying the prompt's acoustics minimises the loss.
+
+There is one more lever. With classifier-free guidance, the paper extrapolates between an unconditioned and a conditioned context vector,
+
+$$
+h^{\text{CFG}}_t = h^{\varnothing}_t + \alpha\,(h^{c}_t - h^{\varnothing}_t)
+$$
+
+- $h^{c}_t$ is the context vector **with** the condition (text and voice).
+- $h^{\varnothing}_t$ is the context vector **without** it ($\varnothing$ means empty).
+- $h^{c}_t - h^{\varnothing}_t$ is the direction the condition pushes in.
+- $\alpha$ is the guidance strength. With $\alpha = 1$ you get $h^c_t$ unchanged; with $\alpha = 1.5$ you go 50% further in that direction.
+
+Example in one number: if $h^{\varnothing} = 2$ and $h^{c} = 4$, then $\alpha = 1.5$ gives $2 + 1.5 \times 2 = 5$.
+
+which pushes h<sub>t</sub> further in the conditioning direction when α > 1. Pocket TTS bakes this in: a 24-layer teacher run with guidance (α = 1.5 in the paper) is distilled into the 6-layer student, so the student produces the guided vector in one pass instead of two.
+
+## Part 4: Flow matching from scratch
+
+The head's job is now precise. Given h<sub>t</sub>, draw a sample from p(x<sub>t</sub> ∣ h<sub>t</sub>), a distribution over ℝ³² we cannot write down. The family of tools for this is continuous normalizing flows.
+
+### Vector fields and flows
+
+Start with a point x drawn from a simple distribution, here a standard Gaussian in ℝ³². Define a velocity field v(x, τ): at every location x and every time τ ∈ [0, 1], it says which direction to move and how fast. Follow it:
+
+$$
+\frac{dx_\tau}{d\tau} = v(x_\tau, \tau), \qquad x_0 \sim \mathcal{N}(0, I)
+$$
+
+- $x_\tau$ is where the point is at flow time $\tau$ (tau).
+- $\frac{dx_\tau}{d\tau}$ is how fast and in which direction the point is moving at that moment: its velocity.
+- $v(x_\tau, \tau)$ is the velocity field: a rule that gives a direction for every place and time.
+- $x_0 \sim \mathcal{N}(0, I)$ says the start point is drawn ($\sim$) from a standard Gaussian, $\mathcal{N}$, centred on 0 with spread 1 in every direction ($I$).
+
+Think of a leaf dropped on a river. The river's current at each spot is $v$; the leaf's path is the flow.
+
+This ordinary differential equation (ODE) carries every starting point along a trajectory. Carry the whole Gaussian cloud along and, if v is right, the cloud at τ = 1 has the shape of the data distribution. The map from x<sub>0</sub> to x<sub>1</sub> is the flow. (I write τ for flow time, to keep t for the audio frame index.)
+
+The question is how to learn v without simulating the ODE during training. That is what flow matching solved.
+
+### The straight-line path
+
+Pick a noise sample x<sub>0</sub> and a real audio latent x<sub>1</sub>. Connect them with a straight line:
+
+$$
+x_\tau = (1 - \tau)\,x_0 + \tau\,x_1
+$$
+
+- x<sub>0</sub> ∈ ℝ³² is Gaussian noise, the starting point.
+- x<sub>1</sub> ∈ ℝ³² is a real Mimi latent from the training set, the destination.
+- τ ∈ [0, 1] is the position along the line: τ = 0 is pure noise, τ = 1 is pure data, τ = 0.5 is an even blend.
+
+Differentiate with respect to τ:
+
+$$
+\frac{dx_\tau}{d\tau} = x_1 - x_0
+$$
+
+τ has vanished. Along this one path the velocity is the same at every moment: constant speed, constant direction. This is the conditional velocity for the pair.
+
+### The training objective
+
+The network v<sub>θ</sub>(x, τ, h) never sees the pair. It sees only a point x<sub>τ</sub> on some line and the time τ. Train it to predict the pair's velocity anyway:
+
+$$
+\mathcal{L}_{\text{FM}}(\theta) = \mathbb{E}_{\tau,\, x_0,\, x_1}\Big[\big\lVert v_\theta(x_\tau, \tau, h) - (x_1 - x_0) \big\rVert^2\Big]
+$$
+
+- $\mathcal{L}_{\text{FM}}$ is the flow-matching loss, the number training tries to make small.
+- $\theta$ (theta) stands for all the network's weights.
+- $v_\theta(x_\tau, \tau, h)$ is the network's guess of the velocity, given the blended point, the time and the context $h$.
+- $x_1 - x_0$ is the right answer: the straight-line direction from this noise to this real latent.
+- $\lVert \cdot \rVert^2$ is the squared distance between guess and answer, and $\mathbb{E}$ means "averaged over many random draws" of $\tau$, noise and data.
+
+Example: if the true direction is $(1.3, -1.5)$ (Part 5) and the network guesses $(1.0, -1.0)$, the loss for that draw is $0.3^2 + 0.5^2 = 0.34$.
+
+The key result of [Lipman et al.](https://arxiv.org/abs/2210.02747) is that minimising this per-pair regression gives the same gradient as regressing on the true marginal velocity field, the average of x<sub>1</sub> − x<sub>0</sub> over all pairs whose lines pass through that point. No ODE is simulated in training; each step is one sample, one interpolation and one squared error.
+
+### Against diffusion
+
+<figure class="blog-figure blog-figure--wide">
+  <FlowVsDiffusion alt="Left, a noise point and a data point joined by a straight line with ticks at quarter intervals. Right, the same points joined by a jagged random walk." />
+  <figcaption><strong>Figure 4. Straight interpolation against a noising process.</strong> Schematic.</figcaption>
+</figure>
+
+Diffusion models learn the reverse of a process that adds noise gradually, with a schedule that makes the path between data and noise curved even in its deterministic form. Samplers like DDIM follow that curve with 20 to 50 steps because a large step on a curved path overshoots.
+
+Here is the subtlety the "straight line" picture hides. **Each conditional path is straight, but the learned marginal field is not.** Many lines cross every point, and the network learns their average direction, which bends as τ changes. So a flow-matching sampler still needs several Euler steps in general. Flow matching makes paths straighter, which means fewer steps; it does not make one step exact. Getting to one step needs Part 6.
+
+## Part 5: A worked example in two dimensions
+
+Shrink 32 dimensions to two and give them names, purely for intuition: axis 1 is "pitch" and axis 2 is "amplitude". Real Mimi channels do not have tidy meanings like these.
+
+$$
+x_0 = \begin{bmatrix} -0.5 \\ 0.9 \end{bmatrix} \text{(noise)}, \qquad x_1 = \begin{bmatrix} 0.8 \\ -0.6 \end{bmatrix} \text{(target sound)}
+$$
+
+**Velocity.** Subtract component by component:
+
+$$
+v = x_1 - x_0 = \begin{bmatrix} 0.8 - (-0.5) \\ -0.6 - 0.9 \end{bmatrix} = \begin{bmatrix} 1.3 \\ -1.5 \end{bmatrix}, \qquad \lVert v \rVert = \sqrt{1.3^2 + 1.5^2} = \sqrt{3.94} \approx 1.985
+$$
+
+**τ = 0.0.** The weights are 1 and 0:
+
+$$
+x_{0.0} = 1.0 \begin{bmatrix} -0.5 \\ 0.9 \end{bmatrix} + 0.0 \begin{bmatrix} 0.8 \\ -0.6 \end{bmatrix} = \begin{bmatrix} -0.5 \\ 0.9 \end{bmatrix}
+$$
+
+**τ = 0.5.** Equal weights:
+
+$$
+x_{0.5} = 0.5 \begin{bmatrix} -0.5 \\ 0.9 \end{bmatrix} + 0.5 \begin{bmatrix} 0.8 \\ -0.6 \end{bmatrix} = \begin{bmatrix} -0.25 + 0.40 \\ 0.45 - 0.30 \end{bmatrix} = \begin{bmatrix} 0.15 \\ 0.15 \end{bmatrix}
+$$
+
+**τ = 1.0.** The weights are 0 and 1:
+
+$$
+x_{1.0} = 0.0 \begin{bmatrix} -0.5 \\ 0.9 \end{bmatrix} + 1.0 \begin{bmatrix} 0.8 \\ -0.6 \end{bmatrix} = \begin{bmatrix} 0.8 \\ -0.6 \end{bmatrix}
+$$
+
+**Check with the velocity.** Starting from x<sub>0</sub> and moving at v for half a unit of time: x<sub>0</sub> + 0.5·v = (−0.5 + 0.65, 0.9 − 0.75) = (0.15, 0.15). Same answer, as it must be.
+
+<figure class="blog-figure blog-figure--wide">
+  <FlowSlider start={[-0.5, 0.9]} target={[0.8, -0.6]} alt="A plane from minus one to one. The noise point (−0.5, 0.9) joins the target (0.8, −0.6) by a straight line, with the midpoint (0.15, 0.15) at τ = 0.5 and a velocity arrow." />
+  <figcaption><strong>Figure 5. Drag t along the line.</strong> The point is (1 − t)·x₀ + t·x₁ and the readout updates live. Toy coordinates, not real latent channels.</figcaption>
+</figure>
+
+**What training sees.** Suppose training samples τ = 0.5 for this pair. The network gets the input (0.15, 0.15) and τ = 0.5, plus h<sub>t</sub>, and its regression target is (1.3, −1.5). If it predicted (1.0, −1.2), the loss for this sample would be (0.3)² + (0.3)² = 0.18.
+
+For this single pair, one Euler step of size 1 from x<sub>0</sub> lands exactly on x<sub>1</sub>. With a real data distribution, the network's answer at (0.15, 0.15) is the average over every pair whose line crosses there, and one step no longer lands on any one of them. That gap is what Pocket TTS closes.
+
+## Part 6: The breakthrough: one step via a learned flow map
+
+### The cost of solving the ODE
+
+Euler's method approximates the ODE with N equal steps:
+
+$$
+x_{(k+1)/N} = x_{k/N} + \frac{1}{N}\, v_\theta\big(x_{k/N}, \tfrac{k}{N}, h_t\big), \qquad k = 0, \dots, N-1
+$$
+
+- $N$ is the number of steps, and $k$ counts them: $0, 1, \dots, N-1$.
+- $x_{k/N}$ is where the point is after $k$ steps, at time $k/N$.
+- $\frac{1}{N}$ is the step size. Each step asks the network for the velocity here and moves along it for one step.
+
+With $N = 4$: start at $\tau = 0$, ask for the velocity, move a quarter; at $\tau = 0.25$ ask again, and so on until $\tau = 1$.
+
+Each step is one forward pass of the head. On a curved field, few steps miss. N = 8 is eight head calls per frame, 100 per second of audio. The head is small, but on a CPU it is not free.
+
+<figure class="blog-figure blog-figure--wide">
+  <OneStepSlider alt="Interactive: a curved dashed trajectory from a noise point to an endpoint. A purple Euler polyline with a slider-controlled number of steps misses the endpoint, less with more steps. A green arrow jumps straight to the endpoint in one call." />
+  <figcaption><strong>Figure 6. Watch the error build up.</strong> Play draws the Euler steps one at a time; the faint lines show how far each step lands from the exact path. More steps (the slider) shrink the error, and every step costs a head call. The flow map pays one call. A circular field stands in for a learned one.</figcaption>
+</figure>
+
+### Learn the solution, not the velocity
+
+Instead of the velocity, learn the **flow map**: a function that takes a point at time s and returns where the ODE carries it at time τ.
+
+$$
+X_{s,\tau}(x_s) = x_\tau
+$$
+
+Read it as: "the flow map from time $s$ to time $\tau$ takes the point $x_s$ and returns the point $x_\tau$". It is a shortcut that jumps along the river instead of following it step by step.
+
+Pocket TTS parameterises it the way [Boffi, Albergo and Vanden-Eijnden](https://arxiv.org/abs/2505.18825) do, as a jump with a learned average velocity:
+
+$$
+X_{s,\tau}(x) = x + (\tau - s)\, F_\theta(x, s, \tau, h_t)
+$$
+
+- $x$ is the starting point, at time $s$.
+- $\tau - s$ is how much time the jump covers. For the full trip, $\tau - s = 1 - 0 = 1$.
+- $F_\theta(x, s, \tau, h_t)$ is the network's **average velocity** over that stretch.
+
+So "where you end up = where you start + time × average speed", like a car trip: start at km 10, drive 2 hours at an average of 50 km/h, end at km 110.
+
+With s = 0 and τ = 1 this is x<sub>0</sub> + F<sub>θ</sub>(x<sub>0</sub>, 0, 1, h<sub>t</sub>): noise in, latent out, one call. You can read this directly in the released sampler, `lsd_decode`, whose default is `num_steps = 1`.
+
+### Lagrangian self-distillation
+
+How do you train F<sub>θ</sub> without first solving the ODE to get endpoints? Two facts.
+
+**The diagonal is a velocity.** As τ → s the jump shrinks to zero, and F<sub>θ</sub>(x, s, s) must equal the instantaneous velocity at x. So the diagonal can be trained with the ordinary flow-matching loss from Part 4.
+
+**Off the diagonal, the flow map must obey the ODE.** Moving the endpoint τ forward a little must move the output at the velocity of wherever it currently is. That is the Lagrangian equation, which follows a particle along its path:
+
+$$
+\frac{\partial}{\partial \tau} X_{s,\tau}(x) = v\big(X_{s,\tau}(x), \tau\big)
+$$
+
+- The left side, $\frac{\partial}{\partial \tau} X_{s,\tau}(x)$, is how fast the jump's landing point moves if you stretch the jump a little further in time. ($\partial$ is a derivative that holds everything except $\tau$ fixed.)
+- The right side is the river's velocity at the landing point.
+
+In words: a correct shortcut, nudged a little further, must move exactly as the river flows where it lands.
+
+LSD uses the model's own diagonal as v, with gradients stopped, and penalises the residual:
+
+$$
+\mathcal{L}_{\text{LSD}} = \mathbb{E}\Big[\big\lVert \partial_\tau X_{s,\tau}(x_s) - \operatorname{sg}\!\big[F_\theta(X_{s,\tau}(x_s), \tau, \tau)\big] \big\rVert^2\Big]
+$$
+
+- $\partial_\tau X_{s,\tau}(x_s)$ is the same "how fast does the landing point move" as above.
+- $F_\theta(X_{s,\tau}(x_s), \tau, \tau)$ is the network's own velocity at the landing point (a jump of zero length is just a velocity).
+- $\operatorname{sg}$ means **stop-gradient**: treat this value as a fixed target during the update, so the network does not cheat by moving the target.
+- The squared difference, averaged ($\mathbb{E}$), is the loss.
+
+"Self-distillation" because the teacher, the velocity on the diagonal, is the same network. Nothing is memorised; the model is trained to be consistent with its own velocity field at every (s, τ). The CALM paper reports splitting each batch 75 % to the flow-matching term and 25 % to the self-distillation term.
+
+The paper's main experiments use a different consistency-model objective in the TrigFlow parameterisation, which it reports as marginally higher quality but slower to sample. LSD is the variant the released Pocket TTS head uses.
+
+### Drifting: a third option
+
+The repository later added a third head objective, **drifting**, released as the `english_drifting_26-09` model. A drifting head maps noise to a latent in one step with no time input at all. For each position during training it draws 64 samples; each is pulled toward the real data latent and pushed away from the other samples by a kernel-based "drift field". The pull fits the data, and the push keeps the samples spread, so the head does not collapse onto the average latent. The released variant is again a 6-layer student, distilled from a 24-layer drifting teacher with guidance 2.0.
+
+### Temperature without a softmax
+
+Token models sample with a temperature on the logits. Here, the code samples the starting noise with variance equal to the temperature: x<sub>0</sub> ∼ 𝒩(0, τ<sub>temp</sub>·I), with a default of 0.3. Smaller starting noise pulls samples toward the high-density core of the distribution, the continuous analogue of a sharper softmax.
+
+### Where the speed comes from
+
+Three independent savings multiply:
+
+- **Fewer frames.** 12.5 latent frames per second, one prediction each.
+- **A small backbone.** 6 layers instead of the teacher's 24, with guidance distilled in, so one pass per frame instead of two.
+- **A one-call head.** One forward pass of a 6-block MLP per frame, instead of a loop.
+
+## Part 7: Mimi decodes the latent
+
+At this point the model has produced a sequence of 32-number vectors at 12.5 per second. The Mimi decoder turns them into sound, streaming as they arrive.
+
+<figure class="blog-figure blog-figure--wide">
+  <MimiDecoder alt="Five stages: a block of 12.5 latent frames by 32 channels widens to 512 channels, is upsampled 16 times to 200 frames per second, passes a small transformer, then is upsampled 120 times by convolutions into a 24,000-sample waveform." />
+  <figcaption><strong>Figure 7. From latent to waveform.</strong> Shapes for one second of audio, from the released config.</figcaption>
+</figure>
+
+The stages, for one second:
+
+1. **Widen.** A linear layer maps each 32-number latent to 512 channels: [12.5, 32] → [12.5, 512].
+2. **Upsample in time, ×16.** A transposed convolution with stride 16 turns 12.5 frames per second into 200: [200, 512].
+3. **Contextualise.** A small causal transformer (2 layers, 8 heads, width 512) refines the sequence at 200 frames per second. Its attention reaches back 250 frames, which at that rate is 1.25 seconds.
+4. **Synthesize, ×120.** The SEANet decoder applies transposed convolutions with strides 6, 5 and 4 (6 × 5 × 4 = 120), interleaved with residual blocks, while the channel count shrinks to one: [24,000].
+
+16 × 120 = 1,920 = 24,000 / 12.5. Every latent becomes 1,920 samples, 80 ms of audio. Because every layer is causal, the decoder can emit those 80 ms as soon as the latent exists. Combined with the per-frame generation loop, that is what makes the roughly 200 ms time-to-first-audio Kyutai reports possible.
+
+## The whole flow in code
+
+The script below follows the pipeline end to end with random weights. It makes noise, not speech, but every tensor has the shape the released model uses, so it is a map you can print and poke. It needs only NumPy.
+
+```python
+"""Shape-faithful toy of the Pocket TTS data flow, with random weights.
+
+It produces no intelligible speech. Every tensor has the shape the released
+model uses, so you can print and follow the pipeline end to end.
+"""
+import numpy as np
+
+rng = np.random.default_rng(0)
+
+SAMPLE_RATE = 24_000
+FRAME_RATE = 12.5
+HOP = int(SAMPLE_RATE / FRAME_RATE)  # 1 920 samples per latent frame
+D_LATENT = 32                         # Mimi latent channels
+D_MODEL = 1024                        # transformer width
+N_HEADS = 16
+VOCAB = 4_000
+
+
+def layer_norm(x, eps=1e-5):
+    mu = x.mean(-1, keepdims=True)
+    var = x.var(-1, keepdims=True)
+    return (x - mu) / np.sqrt(var + eps)
+
+
+def causal_self_attention(x, wq, wk, wv, wo):
+    """x: [T, D_MODEL] -> [T, D_MODEL], one layer, N_HEADS heads."""
+    T, D = x.shape
+    dh = D // N_HEADS
+    q = (x @ wq).reshape(T, N_HEADS, dh).transpose(1, 0, 2)  # [H, T, dh]
+    k = (x @ wk).reshape(T, N_HEADS, dh).transpose(1, 0, 2)
+    v = (x @ wv).reshape(T, N_HEADS, dh).transpose(1, 0, 2)
+    scores = q @ k.transpose(0, 2, 1) / np.sqrt(dh)            # [H, T, T]
+    scores += np.triu(np.full((T, T), -np.inf), k=1)            # no peeking ahead
+    weights = np.exp(scores - scores.max(-1, keepdims=True))
+    weights /= weights.sum(-1, keepdims=True)
+    out = (weights @ v).transpose(1, 0, 2).reshape(T, D)
+    return x + out @ wo
+
+
+def rand(*shape):
+    return rng.standard_normal(shape) / np.sqrt(shape[0])
+
+
+# --- 1. Voice prompt: 10 s of audio -> Mimi latents -> speaker_proj ---------
+voice_wave = rng.standard_normal(10 * SAMPLE_RATE) * 0.1     # [240 000]
+voice_latents = voice_wave.reshape(-1, HOP) @ rand(HOP, D_LATENT)  # stand-in encoder: [125, 32]
+speaker_proj = rand(D_LATENT, D_MODEL)
+voice_prefix = voice_latents @ speaker_proj                   # [125, 1024]
+
+# --- 2. Text: ids -> lookup table ---------------------------------------
+text_ids = np.array([17, 942, 3051, 8])                        # "Hello world." after tokenizing
+lookup_table = rng.standard_normal((VOCAB, D_MODEL)) * 0.02
+text_prefix = lookup_table[text_ids]                           # [4, 1024]
+
+# --- 3. Weights for one transformer layer, the head and the feedback ---
+wq, wk, wv, wo = (rand(D_MODEL, D_MODEL) for _ in range(4))
+input_linear = rand(D_LATENT, D_MODEL)
+bos = rng.standard_normal(D_MODEL) * 0.02
+head_cond = rand(D_MODEL, D_LATENT)
+head_noise = rand(D_LATENT, D_LATENT)
+
+
+def flow_map_one_step(h_t, noise):
+    """f(x_0; s=0, t=1, h_t): noise [32] -> latent [32] in a single call.
+
+    A real head is a 6-block MLP with AdaLN; this toy keeps the signature:
+    x_1 = x_0 + (1 - 0) * F(x_0, s, t, h_t).
+    """
+    velocity = np.tanh(layer_norm(h_t) @ head_cond + noise @ head_noise)
+    return noise + velocity
+
+
+# --- 4. Autoregressive generation, one latent frame per step -----------
+temperature = 0.3
+n_frames = 13                                                  # about one second
+generated = []
+for step in range(n_frames):
+    past = [bos] + [x @ input_linear for x in generated]
+    sequence = np.vstack([voice_prefix, text_prefix, np.array(past)])  # [125 + 4 + 1 + step, 1024]
+    hidden = causal_self_attention(sequence, wq, wk, wv, wo)
+    h_t = hidden[-1]                                           # context vector for this frame: [1024]
+    x0 = rng.standard_normal(D_LATENT) * np.sqrt(temperature)  # noise: [32]
+    generated.append(flow_map_one_step(h_t, x0))               # latent: [32]
+
+latents = np.stack(generated)                                  # [13, 32]
+
+# --- 5. Stand-in Mimi decoder: each latent -> 1 920 samples ------------
+decoder = rand(D_LATENT, HOP)
+waveform = np.tanh(latents @ decoder).reshape(-1)              # [24 960]
+
+print("voice prefix  ", voice_prefix.shape)
+print("text prefix   ", text_prefix.shape)
+print("last sequence ", sequence.shape)
+print("latents       ", latents.shape)
+print("waveform      ", waveform.shape, f"= {waveform.size / SAMPLE_RATE:.2f} s at {SAMPLE_RATE} Hz")
+
+# --- 6. The worked example from the article ---------------------------
+x0 = np.array([-0.5, 0.9])
+x1 = np.array([0.8, -0.6])
+for t in (0.0, 0.5, 1.0):
+    print(f"t={t:.1f}  x_t={(1 - t) * x0 + t * x1}  v={x1 - x0}")
+```
+
+Its output:
+
+```text
+voice prefix   (125, 1024)
+text prefix    (4, 1024)
+last sequence  (142, 1024)
+latents        (13, 32)
+waveform       (24960,) = 1.04 s at 24000 Hz
+t=0.0  x_t=[-0.5  0.9]  v=[ 1.3 -1.5]
+t=0.5  x_t=[0.15 0.15]  v=[ 1.3 -1.5]
+t=1.0  x_t=[ 0.8 -0.6]  v=[ 1.3 -1.5]
+```
+
+The toy re-runs attention over the whole sequence at every step to keep the code short. The real model keeps a key-value cache, so each new frame costs one position of attention rather than the whole prefix, which matters when the voice prompt alone is 125 positions.
+
+## What to take away
+
+Tokens made audio fit the language-model machinery, at the cost of a rounding step and a long sequence. CALM keeps the machinery (a causal transformer reading a prefix and predicting the next frame) and replaces the softmax with a generative head over continuous vectors. Pocket TTS then makes that head cheap: it learns the ODE's solution map directly, so each frame costs one call instead of a loop.
+
+<div class="note-related">
+
+## Related
+
+- Next: [Mimi: 24,000 samples in, 400 numbers out](/blog/mimi-codec-explained/), the codec at both ends of this pipeline, layer by layer
+- [Flow Matching review](/paper-reviews/flow-matching/), the loss behind the flow head, in depth
+- [Delayed Streams Modeling review](/paper-reviews/dsm/), Kyutai's streaming TTS and ASR on the same clock
+
+</div>

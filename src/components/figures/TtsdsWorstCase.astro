@@ -1,0 +1,53 @@
+---
+// TTSDS2 Table 3 (arXiv 2506.19441, p. 7): each metric's worst Spearman rho
+// with human scores across 4 domains x 3 rating types (MOS, CMOS, SMOS).
+// Only higher-is-better metrics are shown, so the sign reads the same way
+// for every bar. WER and MCD are left out for that reason.
+const { alt } = Astro.props;
+const rows = [
+  ["TTSDS2", 0.50, "Kids · CMOS"], ["SQUIM", 0.37, "Clean · SMOS"], ["X-Vector", 0.29, "Noisy · CMOS"],
+  ["RawNet3", 0.26, "Clean · CMOS"], ["ECAPA-TDNN", 0.22, "Noisy · CMOS"], ["UTMOSv2", -0.04, "Wild · SMOS"],
+  ["UTMOS", -0.26, "Wild · SMOS"], ["NISQA", -0.64, "Wild · SMOS"],
+] as const;
+const X0 = 130, W = 440, Y0 = 50, RH = 32;
+const sx = (v: number) => X0 + ((v + 1) / 2) * W;
+---
+<div class="blog-diagram tw" tabindex="0" role="region" aria-label={alt} data-tw>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 340" role="img" aria-labelledby="tw-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="tw-title">Lowest Spearman correlation with human scores for eight metrics</title>
+    <g stroke="#ececf1">{[-1, -0.5, 0, 0.5, 1].map((v) => <line x1={sx(v)} x2={sx(v)} y1={Y0 - 16} y2={Y0 + rows.length * RH - 8} />)}</g>
+    <line x1={sx(0)} x2={sx(0)} y1={Y0 - 16} y2={Y0 + rows.length * RH - 8} stroke="#2b2b30" />
+    <line x1={sx(0.5)} x2={sx(0.5)} y1={Y0 - 16} y2={Y0 + rows.length * RH - 8} stroke="#4F5D3A" stroke-dasharray="4 3" />
+    <text x={sx(0.5) + 6} y={Y0 - 22} font-size="10" fill="#4F5D3A">0.50</text>
+    <g font-size="9.5" fill="#5f5f66" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">{[-1, -0.5, 0, 0.5, 1].map((v) => <text x={sx(v)} y={Y0 + rows.length * RH + 6} text-anchor="middle">{v}</text>)}</g>
+    <text x={sx(0)} y={Y0 + rows.length * RH + 24} font-size="10.5" text-anchor="middle" fill="#2b2b30">lowest Spearman ρ with human scores across 12 settings</text>
+    {rows.map(([m, v, where], i) => (
+      <g transform={`translate(0 ${Y0 + i * RH})`}>
+        <text x={X0 - 12} y="4" font-size="11.5" text-anchor="end" fill="#2b2b30" font-weight={i === 0 ? 700 : 400}>{m}</text>
+        <rect data-bar data-x={Math.min(sx(0), sx(v))} data-w={Math.abs(sx(v) - sx(0))} x={sx(0)} y="-8" width="0" height="16" rx="2" fill={v < 0 ? "#a33b3b" : i === 0 ? "#4F5D3A" : "#594578"} fill-opacity="0.75" />
+        <text data-lab x={sx(1) + 14} y="4" font-size="10.5" fill="#2b2b30" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">{v.toFixed(2)}<tspan fill="#5f5f66" font-family="Inter, sans-serif">  {where}</tspan></text>
+      </g>
+    ))}
+  </svg>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { animate, dur, setupFigure, tween, wait } from "../../lib/figure-motion";
+
+  document.querySelectorAll<HTMLElement>("[data-tw]").forEach((root) => {
+    const bars = Array.from(root.querySelectorAll<SVGRectElement>("[data-bar]"));
+    const labs = Array.from(root.querySelectorAll<SVGTextElement>("[data-lab]"));
+    const zero = () => +bars[0].getAttribute("x")!;
+    const z0 = zero();
+    setupFigure(root, () => { bars.forEach((b) => { b.setAttribute("x", String(z0)); b.setAttribute("width", "0"); }); labs.forEach((l) => (l.style.opacity = "0")); }, async (alive) => {
+      for (let i = 0; i < bars.length; i++) {
+        if (!alive()) return;
+        const b = bars[i], x = +b.dataset.x!, w = +b.dataset.w!, left = x < z0;
+        tween(0.5, (t) => { b.setAttribute("width", String(w * t)); b.setAttribute("x", String(left ? z0 - w * t : z0)); });
+        animate(labs[i], { opacity: [0, 1] }, { duration: dur(0.4), delay: dur(0.3) });
+        await wait(0.18);
+      }
+    });
+  });
+</script>

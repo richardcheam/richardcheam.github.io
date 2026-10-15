@@ -1,0 +1,45 @@
+---
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" tabindex="0" role="region" aria-label={alt} data-pa>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 220" role="img" aria-labelledby="pa-title pa-desc" class="blog-diagram-svg" font-family="Inter, sans-serif">
+<title id="pa-title">Attention from the current audio frame to the voice prefix</title><desc id="pa-desc">A row of cells: one start marker, eight voice-prompt frames, six text tokens, five already generated audio frames, then the current frame. Arcs of varying thickness run from the current frame back to every earlier cell, thickest to several voice frames and to the text token being spoken.</desc>
+<g font-size="12" fill="#5f5f66"><text x="20" y="200">bos</text><text x="62" y="200">voice prompt (Mimi latents, projected)</text><text x="370" y="200">text tokens</text><text x="560" y="200">generated audio</text></g>
+<rect x="20" y="150" width="26" height="30" rx="3" fill="#ececf1"/>
+<g fill="#4F5D3A" fill-opacity="0.25" stroke="#4F5D3A"><rect x="56" y="150" width="30" height="30" rx="3"/><rect x="92" y="150" width="30" height="30" rx="3"/><rect x="128" y="150" width="30" height="30" rx="3"/><rect x="164" y="150" width="30" height="30" rx="3"/><rect x="200" y="150" width="30" height="30" rx="3"/><rect x="236" y="150" width="30" height="30" rx="3"/><rect x="272" y="150" width="30" height="30" rx="3"/><rect x="308" y="150" width="30" height="30" rx="3"/></g>
+<g fill="#ececf1" stroke="#d5d5dc"><rect x="370" y="150" width="26" height="30" rx="3"/><rect x="402" y="150" width="26" height="30" rx="3"/><rect x="434" y="150" width="26" height="30" rx="3" fill="#594578" fill-opacity="0.3" stroke="#594578"/><rect x="466" y="150" width="26" height="30" rx="3"/><rect x="498" y="150" width="26" height="30" rx="3"/><rect x="530" y="150" width="26" height="30" rx="3"/></g>
+<g fill="#fff" stroke="#d5d5dc"><rect x="566" y="150" width="26" height="30" rx="3"/><rect x="598" y="150" width="26" height="30" rx="3"/><rect x="630" y="150" width="26" height="30" rx="3"/><rect x="662" y="150" width="26" height="30" rx="3"/><rect x="694" y="150" width="26" height="30" rx="3"/></g>
+<rect data-query x="732" y="150" width="30" height="30" rx="3" fill="#594578"/><text x="736" y="140" fill="#594578" font-size="12">q_t</text>
+<g data-arcs fill="none" stroke="#594578" stroke-linecap="round">
+<path d="M747 150 Q420 -20 107 150" stroke-width="3" stroke-opacity="0.7"/><path d="M747 150 Q460 0 179 150" stroke-width="2" stroke-opacity="0.5"/><path d="M747 150 Q500 20 287 150" stroke-width="3.5" stroke-opacity="0.7"/>
+<path d="M747 150 Q600 50 447 150" stroke-width="4" stroke-opacity="0.85"/><path d="M747 150 Q730 110 707 150" stroke-width="2.5" stroke-opacity="0.6"/><path d="M747 150 Q700 90 643 150" stroke-width="1" stroke-opacity="0.4"/><path d="M747 150 Q580 70 511 150" stroke-width="1" stroke-opacity="0.3"/>
+</g>
+</svg>
+<button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+<p class="blog-figure-reading">The voice is not a separate input stream. It sits in the same causal sequence, so every new frame can read timbre from it through ordinary self-attention.</p>
+
+<script>
+  import { animate, drawStroke, dur, hideStroke, setupFigure } from "../../lib/figure-motion";
+
+  // The query lights up, then attention reaches back to every earlier position,
+  // weakest weights first so the strongest (voice and the spoken token) land last.
+  document.querySelectorAll<HTMLElement>("[data-pa]").forEach((root) => {
+    const query = root.querySelector<SVGRectElement>("[data-query]")!;
+    const arcs = Array.from(root.querySelectorAll<SVGPathElement>("[data-arcs] path")).sort(
+      (a, b) => +a.getAttribute("stroke-width")! - +b.getAttribute("stroke-width")!,
+    );
+    setupFigure(
+      root,
+      () => { arcs.forEach(hideStroke); query.style.opacity = "0.25"; },
+      async (alive) => {
+        await animate(query, { opacity: [0.25, 1] }, { duration: dur(0.4) });
+        for (let i = 0; i < arcs.length; i++) {
+          if (!alive()) return;
+          drawStroke(arcs[i], 0.7);
+          await new Promise((r) => setTimeout(r, dur(0.18) * 1000));
+        }
+      },
+    );
+  });
+</script>

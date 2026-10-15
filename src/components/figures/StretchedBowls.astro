@@ -1,0 +1,60 @@
+---
+// Foundations, normalisation post: gradient descent on the stretched bowl
+// w₁² + 25w₂² (η 0.035, from (4, 1)) and on the standardised bowl
+// w₁² + u₂² (η 0.3, from (4, 5)). Both start at loss 41. After 20 steps the
+// stretched one is at (0.937, 0.003), loss 0.878; the round one reaches
+// 0.0043 after 5 steps.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-bowls>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 290" role="img" aria-labelledby="sb-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="sb-title">A stretched bowl with a zigzag path and a round bowl with a straight path</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Stretched bowl η <strong data-v="e1"></strong></span><input class="scrub" data-k="e1" type="range" min="0.005" max="0.05" step="0.005" value="0.035" /></label>
+    <label><span class="fig-panel__name">Standardised bowl η <strong data-v="e2"></strong></span><input class="scrub" data-k="e2" type="range" min="0.05" max="1" step="0.05" value="0.3" /></label>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt, par } from "../../lib/tiny-net";
+  import { INK, MUTED, JADE, NEG, GOLD } from "../../lib/net-diagram";
+  import { frame, txt, bowlContours } from "../../lib/plot";
+  const N = 20;
+  document.querySelectorAll<HTMLElement>("[data-bowls]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const p: Record<string, number> = { e1: 0.035, e2: 0.3 };
+    const path = (b: number, start: number[], eta: number) => { const ps = [start]; for (let i = 0; i < N; i++) { const [x, y] = ps[i]; ps.push([x * (1 - 2 * eta), y * (1 - 2 * b * eta)]); } return ps; };
+    const L = (b: number, [x, y]: number[]) => x * x + b * y * y;
+    const P1 = () => path(25, [4, 1], p.e1), P2 = () => path(1, [4, 5], p.e2);
+    const steps = () => Array.from({ length: N }, (_, i) => {
+      const a = P1(), b = P2(), f1 = 1 - 2 * p.e1, f2 = 1 - 50 * p.e1, g = 1 - 2 * p.e2;
+      return {
+        say: i === 0 ? `Each step multiplies every coordinate by its own factor. Stretched: w₁ by ${fmt(f1, 3)}, w₂ by ${fmt(f2, 3)} (it flips side). Standardised: both by ${fmt(g, 3)}.` : i === 4 ? "Five steps: the round bowl is nearly at the bottom; the stretched one has barely moved along w₁." : `Step ${i + 1}.`,
+        math: `stretched: (${fmt(a[i][0], 4)} × ${fmt(f1, 3)}, ${fmt(a[i][1], 4)} × ${par(f2, 3)}) = (${fmt(a[i + 1][0], 4)}, ${fmt(a[i + 1][1], 4)}), loss ${fmt(L(25, a[i + 1]), 4)}\nstandardised: (${fmt(b[i][0], 4)} × ${par(g, 3)}, ${fmt(b[i][1], 4)} × ${par(g, 3)}) = (${fmt(b[i + 1][0], 4)}, ${fmt(b[i + 1][1], 4)}), loss ${fmt(L(1, b[i + 1]), 4)}`,
+      };
+    });
+    function draw(k: number) {
+      const n = k + 1;
+      let s = "";
+      ([[25, P1(), "Stretched: w₁² + 25w₂²", p.e1], [1, P2(), "Standardised: w₁² + u₂²", p.e2]] as const).forEach(([b, ps, title, eta], j) => {
+        const l = 30 + j * 380, F = frame({ l, t: 34, w: 300, h: 200, x0: j ? -7.5 : -6, x1: j ? 7.5 : 6, y0: j ? -5 : -2, y1: j ? 5 : 2 });
+        s += `<clipPath id="sb-c${j}"><rect x="${l}" y="34" width="300" height="200"/></clipPath>` + F.grid([-4, 0, 4], j ? [-4, 0, 4] : [-1, 0, 1], 0);
+        s += txt(l, 22, `${title}, η = ${fmt(eta)}`, `font-size="12" font-weight="700" fill="${INK}"`);
+        s += `<g clip-path="url(#sb-c${j})">${bowlContours(F, 1, b, [1, 4, 10, 20, 41], JADE)}`;
+        const pts = ps.slice(0, n + 1);
+        s += `<polyline fill="none" stroke="${j ? GOLD : NEG}" stroke-width="2.2" points="${pts.map(([x, y]) => `${F.X(x).toFixed(1)},${F.Y(y).toFixed(1)}`).join(" ")}"/>`;
+        const [x, y] = pts[pts.length - 1];
+        s += `<circle cx="${F.X(x)}" cy="${F.Y(y)}" r="6" fill="${j ? GOLD : NEG}" stroke="#fff" stroke-width="2"/></g>`;
+        s += txt(l, 258, `after ${n} step${n === 1 ? "" : "s"}: (${fmt(x, 3)}, ${fmt(y, 3)})`, `font-size="12" fill="${INK}"`) + txt(l, 278, `loss ${fmt(L(b, [x, y]), 4)} (started at 41)`, `font-size="12" font-weight="700" fill="${INK}"`);
+      });
+      $("[data-draw]").innerHTML = s;
+      root.querySelectorAll<HTMLElement>("[data-v]").forEach((el) => (el.textContent = fmt(p[el.dataset.v!], 3)));
+    }
+    const redraw = stepper(root, steps, draw, { delay: 1.1 });
+    root.querySelectorAll<HTMLInputElement>("[data-k]").forEach((inp) => inp.addEventListener("input", () => { p[inp.dataset.k!] = +inp.value; redraw(); }));
+  });
+</script>

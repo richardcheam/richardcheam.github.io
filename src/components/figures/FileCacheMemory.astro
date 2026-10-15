@@ -1,0 +1,47 @@
+---
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" tabindex="0" role="region" aria-label={alt} data-fcm>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 52 780 188" role="img" aria-labelledby="file-cache-memory-title file-cache-memory-desc" class="blog-diagram-svg" font-family="Inter, sans-serif">
+  <title id="file-cache-memory-title">Two possible owners after checkpoint loading</title><desc id="file-cache-memory-desc">A checkpoint file can populate reclaimable file-backed pages, while a loader may construct a separate runtime tensor. A loader retaining its mapping has a different lifetime.</desc>
+  <text x="26" y="86" fill="#111111" font-size="17">Checkpoint on storage</text>
+  <path data-trunk d="M225 82 H300" fill="none" stroke="#5f5f66" stroke-width="2" /><path data-branch d="M300 82 V130 H348" fill="none" stroke="#5f5f66" stroke-width="2" /><path data-branch d="M300 82 V190 H348" fill="none" stroke="#5f5f66" stroke-width="2" />
+  <circle data-node cx="300" cy="82" r="4" fill="#5f5f66" />
+  <text data-owner="0" x="355" y="136" fill="#111111" font-size="17">File-backed pages</text>
+  <text data-owner="0" x="355" y="158" fill="#5f5f66" font-size="15">Kernel cache · reclaimable when unused</text>
+  <text data-owner="1" x="355" y="196" fill="#111111" font-size="17">Runtime allocation</text>
+  <text data-owner="1" x="355" y="218" fill="#5f5f66" font-size="15">Live tensor · lifetime set by serving runtime</text>
+</svg>
+<button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { alongPath, animate, drawStroke, dur, hideStroke, setupFigure, wait } from "../../lib/figure-motion";
+
+  // Loaded checkpoint bytes reach one point, then the question is who owns
+  // them: the kernel's file cache or the runtime's live tensors.
+  document.querySelectorAll<HTMLElement>("[data-fcm]").forEach((root) => {
+    const svg = root.querySelector("svg")!;
+    const trunk = root.querySelector<SVGPathElement>("[data-trunk]")!;
+    const branches = Array.from(root.querySelectorAll<SVGPathElement>("[data-branch]"));
+    const node = root.querySelector<SVGCircleElement>("[data-node]")!;
+    const owners = [0, 1].map((k) => Array.from(root.querySelectorAll<SVGElement>(`[data-owner="${k}"]`)));
+    const dot = () => { const c = document.createElementNS("http://www.w3.org/2000/svg", "circle"); c.setAttribute("r", "5"); c.setAttribute("fill", "#754a94"); svg.append(c); return c; };
+    setupFigure(root, () => {
+      hideStroke(trunk); branches.forEach(hideStroke); node.style.opacity = "0";
+      owners.flat().forEach((t) => (t.style.opacity = "0"));
+      svg.querySelectorAll("circle[r='5']").forEach((c) => c.remove());
+    }, async (alive) => {
+      const d = dot();
+      await Promise.all([drawStroke(trunk, 0.7, "linear"), animate(d, { transform: alongPath(trunk, 2) }, { duration: dur(0.7), ease: "linear" })]);
+      d.remove(); if (!alive()) return;
+      animate(node, { opacity: [0, 1] }, { duration: dur(0.2) });
+      await Promise.all(branches.map(async (b, k) => {
+        const c = dot();
+        await Promise.all([drawStroke(b, 0.8, "linear"), animate(c, { transform: alongPath(b, 20) }, { duration: dur(0.8), ease: "linear" })]);
+        c.remove();
+        await Promise.all(owners[k].map((t, i) => animate(t, { opacity: [0, 1] }, { duration: dur(0.4), delay: dur(i * 0.15) })));
+      }));
+    });
+  });
+</script>

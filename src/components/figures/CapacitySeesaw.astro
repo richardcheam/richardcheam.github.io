@@ -1,0 +1,76 @@
+---
+// SoundStream review, Figure 7: Table I (p. 9). Encoder and decoder widths,
+// parameter count, real-time factor on one Pixel 4 CPU thread, and ViSQOL at
+// 6 kbps. Decode time per second of audio = 1 / RTF.
+const { alt } = Astro.props;
+const rows = [
+  { e: 32, d: 32, p: "8.4 M", re: 2.4, rd: 2.3, v: 4.01 },
+  { e: 16, d: 16, p: "2.4 M", re: 7.5, rd: 7.1, v: 3.98 },
+  { e: 16, d: 32, p: "5.5 M", re: 7.5, rd: 2.3, v: 4.02 },
+  { e: 8, d: 32, p: "4.8 M", re: 18.6, rd: 2.3, v: 3.99 },
+  { e: 32, d: 16, p: "5.3 M", re: 2.4, rd: 7.1, v: 3.97 },
+  { e: 32, d: 8, p: "4.4 M", re: 2.4, rd: 17.1, v: 3.90 },
+];
+---
+<div class="blog-diagram csw" role="region" aria-label={alt} data-csw data-rows={JSON.stringify(rows)}>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 320" role="img" aria-labelledby="csw-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="csw-title">Shrinking the encoder or the decoder: speed against quality</title>
+    <g data-art></g>
+    <text data-r1 x="20" y="270" font-size="12.5" font-weight="700" fill="#2b2b30"></text>
+    <text data-r2 x="20" y="292" font-size="12" fill="#2b2b30"></text>
+    <text x="20" y="312" font-size="11" fill="#5f5f66">Values from Table I (p. 9). ViSQOL ± 0.03 in every row.</text>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Encoder / decoder channels</span><div class="fig-chips">
+      {rows.map((r, i) => <button type="button" class="fig-chip" data-row={i} aria-pressed={i === 0 ? "true" : "false"}>{r.e} / {r.d}</button>)}
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { setupFigure, tween, wait } from "../../lib/figure-motion";
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-csw]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const R: { e: number; d: number; p: string; re: number; rd: number; v: number }[] = JSON.parse(root.dataset.rows!);
+    const mk = (g: Element, tag: string, a: Record<string, string | number>, txt?: string) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, String(a[k])); if (txt !== undefined) e.textContent = txt; g.append(e); return e; };
+    let cur = { ...R[0] }, sel = 0;
+    function draw() {
+      const g = $("[data-art]"); g.replaceChildren();
+      const box = (x: number, ch: number, lab: string, col: string) => { const h = 20 + ch * 4; mk(g, "rect", { x, y: 150 - h / 2, width: 120, height: h, rx: 6, fill: col, "fill-opacity": 0.85 }); mk(g, "text", { x: x + 60, y: 154, "font-size": 12, "font-weight": 700, "text-anchor": "middle", fill: "#fff" }, `${lab} ${Math.round(ch)}`); };
+      box(30, cur.e, "encoder", "#35588a");
+      mk(g, "rect", { x: 170, y: 140, width: 40, height: 20, rx: 3, fill: "#b9b9c2" }); mk(g, "text", { x: 190, y: 154, "font-size": 9.5, "text-anchor": "middle", fill: "#2b2b30" }, "RVQ");
+      box(230, cur.d, "decoder", "#594578");
+      // Speed meters: RTF bars on a log scale from 1x to 20x.
+      const L = (r: number) => (Math.log10(r) / Math.log10(20)) * 220;
+      [["encoder speed", cur.re, "#35588a"], ["decoder speed", cur.rd, "#594578"]].forEach(([n, r, c], i) => {
+        const y = 40 + i * 50;
+        mk(g, "text", { x: 400, y: y, "font-size": 11, "font-weight": 700, fill: "#2b2b30" }, n as string);
+        mk(g, "rect", { x: 400, y: y + 6, width: 220, height: 16, fill: "#f2f2f5" });
+        mk(g, "rect", { x: 400, y: y + 6, width: L(r as number), height: 16, fill: c as string, "fill-opacity": 0.85 });
+        mk(g, "text", { x: 628, y: y + 19, "font-size": 11, fill: "#2b2b30", "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace" }, `${(r as number).toFixed(1)}× real time`);
+      });
+      // ViSQOL dial from 3.85 to 4.05.
+      const v = cur.v, a = Math.PI * (1 - (v - 3.85) / 0.2), cx = 510, cy = 230;
+      mk(g, "path", { d: `M${cx - 70} ${cy} A70 70 0 0 1 ${cx + 70} ${cy}`, fill: "none", stroke: "#ececf1", "stroke-width": 12 });
+      mk(g, "line", { x1: cx, y1: cy, x2: cx + 62 * Math.cos(a), y2: cy - 62 * Math.sin(a), stroke: v < 3.95 ? "#a33b3b" : "#4F5D3A", "stroke-width": 3 });
+      mk(g, "text", { x: cx, y: cy - 22, "font-size": 15, "font-weight": 700, "text-anchor": "middle", fill: v < 3.95 ? "#a33b3b" : "#2b2b30" }, v.toFixed(2));
+      mk(g, "text", { x: cx - 74, y: cy + 14, "font-size": 9.5, fill: "#5f5f66" }, "3.85");
+      mk(g, "text", { x: cx + 74, y: cy + 14, "font-size": 9.5, "text-anchor": "end", fill: "#5f5f66" }, "4.05");
+      mk(g, "text", { x: cx + 100, y: cy - 30, "font-size": 11, "font-weight": 700, fill: "#2b2b30" }, "ViSQOL");
+      const r = R[sel];
+      $("[data-r1]").textContent = `${r.p} parameters. One second of audio decodes in ${(1000 / r.rd).toFixed(0)} ms and encodes in ${(1000 / r.re).toFixed(0)} ms.`;
+      $("[data-r2]").textContent = r.e < r.d ? "Thin encoder: much faster encoding, quality unchanged." : r.d < r.e ? (r.d === 8 ? "Thin decoder: faster decoding, but the biggest quality drop in the table." : "Thinner decoder: quality starts to slip.") : r.e === 16 ? "Both halved: both faster, a small quality cost." : "The default: both sides at 32 channels.";
+      root.querySelectorAll("[data-row]").forEach((b, i) => b.setAttribute("aria-pressed", String(i === sel)));
+    }
+    const pick = async (i: number, alive = () => true) => {
+      const from = { ...cur }, to = R[i]; sel = i;
+      await tween(0.7, (e) => { if (!alive()) return; cur = { ...to, e: from.e + (to.e - from.e) * e, d: from.d + (to.d - from.d) * e, re: from.re * (to.re / from.re) ** e, rd: from.rd * (to.rd / from.rd) ** e, v: from.v + (to.v - from.v) * e }; draw(); });
+      cur = { ...to }; draw();
+    };
+    root.querySelectorAll<HTMLButtonElement>("[data-row]").forEach((b) => b.addEventListener("click", () => pick(+b.dataset.row!)));
+    draw();
+    setupFigure(root, () => { cur = { ...R[0] }; sel = 0; draw(); }, async (alive) => { for (const i of [3, 5, 0]) { await wait(0.9); if (!alive()) return; await pick(i, alive); } });
+  });
+</script>

@@ -1,0 +1,12 @@
+---
+// Richard Cheam's mark: RC in brushed calligraphy inside an Ensō ring
+// painted in the Angkor dawn colours. "painted" uses the textured version.
+import flat from "../assets/enso-mark.svg?raw";
+import painted from "../assets/enso-painted.svg?raw";
+const { class: cls = "signature-mark", label, painted: isPainted = false } = Astro.props;
+// Give every gradient and filter id a unique suffix, since the mark can appear twice on a page.
+const uid = Math.random().toString(36).slice(2, 8);
+const src = (isPainted ? painted : flat).replace(/id="([^"]+)"/g, `id="$1-${uid}"`).replace(/url\(#([^)]+)\)/g, `url(#$1-${uid})`);
+const svg = src.replace("<svg ", `<svg class="${cls}" ${label ? `role="img" aria-label="${label}"` : 'aria-hidden="true"'} `);
+---
+<Fragment set:html={svg} />

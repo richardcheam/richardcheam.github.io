@@ -1,0 +1,95 @@
+---
+title: "XAI Vision Transfer"
+area: "Computer Vision"
+date: "April 2026"
+order: 4
+headline: "The hybrid transformer was the most accurate, the plain ViT the most robust to texture changes, and freezing the backbone to save compute cost up to 22 accuracy points."
+question: "How do CNNs, vision transformers and a hybrid compare when data is scarce, images are corrupted, or a model must be transferred cheaply to a new task, and do their explanations make sense?"
+approach: "Three compact models trained under one protocol on CIFAR-10, stress-tested for robustness, then transferred to satellite images and brain MRI three ways, with explanation maps for every model."
+stack: "PyTorch · CNN · ViT · DHVT · Grad-CAM · attention rollout"
+links:
+  - { label: "Source code and full results", url: "https://github.com/richardcheam/xai-vision-transfer" }
+  - { label: "Report (PDF)", url: "https://github.com/richardcheam/xai-vision-transfer/blob/main/report/report.pdf" }
+numbers:
+  - { value: "88.88%", label: "CIFAR-10, DHVT: best clean accuracy at the source stage" }
+  - { value: "97.52%", label: "EuroSAT satellite images, DHVT trained from scratch" }
+  - { value: "94.00%", label: "Brain tumour MRI, DHVT pretrained on CIFAR-10, fully fine-tuned" }
+---
+
+## What I did
+
+I wrote one configurable PyTorch pipeline for three compact models: a CNN in the LeNet and VGG tradition, a small ViT, and an adaptation of **DHVT**, a hybrid that adds convolution-like components to a transformer so it works on small datasets ([Lu et al., 2022](https://openreview.net/forum?id=bfz-jhJ8wn)). Every run trained for 100 epochs and saved its checkpoint, and every table and plot is regenerated from those checkpoints.
+
+**Stage 1, CIFAR-10.** Train all three models on small 32 × 32 images, with 10%, 25%, 50% and 100% of the training data, then test them on clean images, images with patches blacked out (occlusion), and images whose textures are disrupted.
+
+**Stage 2, transfer.** Reuse the CIFAR-10 checkpoints on two very different tasks, EuroSAT satellite images and brain tumour MRI, in three ways:
+
+- **Scratch:** ignore the checkpoint and train from random weights.
+- **Linear probe:** freeze the pretrained network and train only a final classifier. Cheap, but the features cannot adapt.
+- **Full fine-tune:** start from the checkpoint and train everything.
+
+**Explanations.** Grad-CAM for the CNN, attention rollout for the ViT, and for DHVT both rollout and the influence of its extra "head tokens", plus confusion matrices and inspection of misclassified images.
+
+## What I found
+
+### Accuracy and robustness pull in different directions
+
+| Model | Clean | Occluded | Texture disrupted |
+| --- | ---: | ---: | ---: |
+| DHVT | **88.88%** | **83.78%** | 41.96% |
+| CNN | 85.70% | 80.32% | 32.98% |
+| ViT | 73.36% | 68.81% | **50.26%** |
+
+DHVT is best on clean and occluded images, and it fixes much of the plain ViT's weakness with little data. But when textures are disrupted, the plain ViT holds up best. A model that relies more on shape than texture loses less when texture is destroyed, and the convolutional parts DHVT adds seem to bring back some texture reliance.
+
+### The cheap transfer is rarely worth it
+
+| Model | Task | Scratch | Linear probe | Full fine-tune |
+| --- | --- | ---: | ---: | ---: |
+| DHVT | EuroSAT | **97.52%** | 87.52% | 96.96% |
+| DHVT | Brain MRI | 87.88% | 76.88% | **94.00%** |
+| ViT | EuroSAT | 93.59% | 79.00% | **94.15%** |
+| ViT | Brain MRI | 85.88% | 76.00% | **93.00%** |
+| CNN | EuroSAT | 96.52% | 85.78% | **96.74%** |
+| CNN | Brain MRI | 82.56% | 67.31% | **89.38%** |
+
+Linear probing loses between about 9 and 22 accuracy points against full fine-tuning. It does save time for the transformers, for example about 44 minutes for DHVT on EuroSAT, but never enough to justify the drop. For the CNN on brain MRI it was not even faster.
+
+### Pretraining helps where the new task is hard
+
+On EuroSAT, CIFAR-10 pretraining did not help DHVT: training from scratch was slightly better. On brain MRI it mattered most, lifting DHVT from 87.88% to 94.00% and the ViT from 85.88% to 93.00%.
+
+### The errors are mostly understandable
+
+The hardest CIFAR-10 classes were cat, dog and bird, with cat and dog often swapped. On EuroSAT, permanent crops were confused with other vegetation, and highways with rivers: long thin structures that look alike from above. For DHVT, the rollout maps and head-token maps largely overlap, so the extra mechanism reinforces the same regions rather than looking somewhere new.
+
+## Limits
+
+The three models are compact research baselines written for this study, not the published full-size architectures, so the ranking may not hold at scale. Differences of a point or less, such as DHVT scratch against fine-tuned on EuroSAT, may be within run-to-run variation, which the tables do not measure.
+
+## Figures
+
+<figure>
+  <img src="/assets/projects/xai-vision-transfer/source_overview.png" alt="Source stage: accuracy, data efficiency and robustness of the three models on CIFAR-10" loading="lazy" />
+  <figcaption>Source stage: accuracy, data efficiency and robustness of the three models on CIFAR-10.</figcaption>
+</figure>
+
+<figure>
+  <img src="/assets/projects/xai-vision-transfer/downstream_dynamics.png" alt="Validation curves on EuroSAT (top) and brain MRI (bottom) for CNN, ViT and DHVT; solid lines are scratch, dotted linear probe, dashed full fine-tune" loading="lazy" />
+  <figcaption>Validation curves on EuroSAT (top) and brain MRI (bottom) for CNN, ViT and DHVT; solid lines are scratch, dotted linear probe, dashed full fine-tune.</figcaption>
+</figure>
+
+<figure>
+  <img src="/assets/projects/xai-vision-transfer/interpretability_overview.png" alt="Where each model looks on CIFAR-10: Grad-CAM for the CNN, attention rollout for the ViT, head-token influence for DHVT" loading="lazy" />
+  <figcaption>Where each model looks on CIFAR-10: Grad-CAM for the CNN, attention rollout for the ViT, head-token influence for DHVT.</figcaption>
+</figure>
+
+<figure>
+  <img src="/assets/projects/xai-vision-transfer/downstream_interpretability_overview.png" alt="Explanation maps after transfer, EuroSAT (top) and brain MRI (bottom)" loading="lazy" />
+  <figcaption>Explanation maps after transfer, EuroSAT (top) and brain MRI (bottom).</figcaption>
+</figure>
+
+<figure>
+  <img src="/assets/projects/xai-vision-transfer/error_analysis_overview.png" alt="Error analysis: confusion matrices and the hardest classes" loading="lazy" />
+  <figcaption>Error analysis: confusion matrices and the hardest classes.</figcaption>
+</figure>

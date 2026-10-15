@@ -1,0 +1,58 @@
+---
+// Foundations, autoencoders post: the 2-number code space of a plain
+// autoencoder and a VAE trained on twelve 5 × 5 glyphs (src/lib/glyphs.ts).
+// Click to decode any point. Over 200 draws from N(0, I), the decoded glyph
+// is on average 2.43 (plain) and 0.52 (VAE) squared pixels from the
+// nearest real glyph.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-holes>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 320" role="img" aria-labelledby="lh-title" class="blog-diagram-svg" font-family="Inter, sans-serif" style="cursor: crosshair">
+    <title id="lh-title">A map of codes; clicking a point decodes it into a small glyph</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Model</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-m="plain" aria-pressed="true">Plain autoencoder</button>
+      <button type="button" class="fig-chip" data-m="vae" aria-pressed="false">VAE</button>
+    </div></div>
+    <div><span class="fig-panel__name">Sample</span><div class="fig-chips"><button type="button" class="fig-chip" data-draws>Decode 5 random draws from N(0, 1)</button></div></div>
+  </div>
+</div>
+
+<script>
+  import { fmt, mulberry } from "../../lib/tiny-net";
+  import { INK, MUTED, GOLD, NEG, JADE } from "../../lib/net-diagram";
+  import { frame, txt } from "../../lib/plot";
+  import { codes, decode, nearest, glyphSvg, NAMES, priorNear, type Model } from "../../lib/glyphs";
+  const COL: Record<string, string> = { "vertical bar": "#2F6E5F", "horizontal bar": "#3E6E9E", ring: "#B5533C", cross: "#9A7420" };
+  document.querySelectorAll<HTMLElement>("[data-holes]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    let m: Model = "plain", pick: number[] = [0, 0], draws: number[][] = [], seed = 1;
+    const box = () => { const R = m === "plain" ? 12 : 3; return { l: 30, t: 20, w: 280, h: 280, x0: -R, x1: R, y0: -R, y1: R }; };
+    function draw() {
+      const B = box(), F = frame(B), R = B.x1;
+      let s = `<rect x="30" y="20" width="280" height="280" fill="#fafafa" stroke="#e3e7e6"/>` + F.grid([-R, 0, R], [-R, 0, R], 0);
+      s += `<circle cx="${F.X(0)}" cy="${F.Y(0)}" r="${Math.abs(F.X(2) - F.X(0))}" fill="${GOLD}" fill-opacity="0.08" stroke="${GOLD}" stroke-dasharray="4 3"/>` + txt(F.X(0) + 4, F.Y(2) - 4, "where N(0, 1) draws land", `font-size="10" fill="${GOLD}"`);
+      codes(m).forEach((c, i) => (s += `<circle cx="${F.X(c[0])}" cy="${F.Y(c[1])}" r="5" fill="${COL[NAMES[i]]}"/>`));
+      draws.forEach((d) => (s += `<circle cx="${F.X(d[0])}" cy="${F.Y(d[1])}" r="4" fill="none" stroke="${INK}"/>`));
+      s += `<path d="M${F.X(pick[0]) - 7} ${F.Y(pick[1])} h14 M${F.X(pick[0])} ${F.Y(pick[1]) - 7} v14" stroke="${INK}" stroke-width="2"/>`;
+      // Decoded glyph at the picked point.
+      const img = decode(m, pick), nr = nearest(img);
+      s += txt(350, 34, `decoded at (${fmt(pick[0], 2)}, ${fmt(pick[1], 2)})`, `font-size="12" font-weight="700" fill="${INK}"`) + glyphSvg(img, 350, 46, 22);
+      s += txt(480, 70, `nearest real glyph: ${NAMES[nr.i]}`, `font-size="12" fill="${INK}"`) + txt(480, 92, `squared distance ${fmt(nr.d, 2)}`, `font-size="13" font-weight="700" fill="${nr.d > 1.5 ? NEG : JADE}"`) + txt(480, 112, nr.d > 1.5 ? "not like any training glyph: a hole" : "close to a real glyph", `font-size="11" fill="${MUTED}"`);
+      if (draws.length) draws.slice(0, 5).forEach((d, i) => { const im = decode(m, d); s += glyphSvg(im, 350 + i * 76, 196, 12) + txt(350 + i * 76, 270, `dist ${fmt(nearest(im).d, 1)}`, `font-size="10.5" fill="${MUTED}"`); });
+      s += txt(350, 186, draws.length ? "five random draws from N(0, 1), decoded:" : "", `font-size="11.5" fill="${INK}"`);
+      s += txt(350, 296, `Average over 200 draws: ${fmt(priorNear(m), 2)} (plain 2.43, VAE 0.52)`, `font-size="11.5" font-weight="700" fill="${INK}"`);
+      $("[data-draw]").innerHTML = s;
+    }
+    root.querySelector("svg")!.addEventListener("click", (e) => {
+      const r = (e.currentTarget as SVGSVGElement).getBoundingClientRect(), px = ((e.clientX - r.left) / r.width) * 760, py = ((e.clientY - r.top) / r.height) * 320, B = box();
+      if (px < 30 || px > 310 || py < 20 || py > 300) return;
+      pick = [B.x0 + ((px - 30) / 280) * (B.x1 - B.x0), B.y1 - ((py - 20) / 280) * (B.y1 - B.y0)]; draw();
+    });
+    root.querySelectorAll<HTMLButtonElement>("[data-m]").forEach((b) => b.addEventListener("click", () => { m = b.dataset.m as Model; root.querySelectorAll("[data-m]").forEach((o) => o.setAttribute("aria-pressed", String(o === b))); draw(); }));
+    $("[data-draws]").addEventListener("click", () => { const r = mulberry(seed++), n = () => Math.sqrt(-2 * Math.log(1 - r())) * Math.cos(2 * Math.PI * r()); draws = Array.from({ length: 5 }, () => [n(), n()]); draw(); });
+    draw();
+  });
+</script>

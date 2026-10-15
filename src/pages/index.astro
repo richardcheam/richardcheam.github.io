@@ -1,0 +1,55 @@
+---
+import { titleHtml } from "../lib/title";
+import Base from "../layouts/Base.astro";
+import top from "../page-content/home-top.html?raw";
+import contact from "../page-content/home-contact.html?raw";
+import { categoryLabel, postUrl, publishedPosts, publishedReviews, reviewUrl, shortDate, stripHtml, truncate, typeLabel } from "../lib/content";
+
+// Newest first; same-date posts in reverse filename order, as Jekyll's sort-then-reverse produced.
+const latestPosts = (await publishedPosts())
+  .sort((a, b) => b.data.date.getTime() - a.data.date.getTime() || b.id.localeCompare(a.id))
+  .slice(0, 4);
+const latestReviews = (await publishedReviews()).slice(0, 3);
+---
+<Base title="Richard Cheam">
+  <Fragment set:html={top} />
+
+  <section id="blog" class="section-block" data-reveal>
+    <header class="section-head">
+      <p class="section-eyebrow">Blog</p>
+      <h2>Technical blog posts and explainers</h2>
+    </header>
+    <div class="blog-grid">
+      {latestPosts.map((post) => {
+        const label = categoryLabel(post.data.category);
+        return (
+          <article class="premium-card" data-reveal>
+            <p class="card-meta">{label} · {shortDate(post.data.date)}</p>
+            <h3 class="card-title" set:html={titleHtml(post.data.title, post.data.title_key)} />
+            <p class="card-summary">{truncate(stripHtml(post.data.excerpt), 125)}</p>
+            <a class="card-link" href={postUrl(post)}>Read post</a>
+          </article>
+        );
+      })}
+    </div>
+  </section>
+
+  <section id="paper-reviews" class="section-block" data-reveal>
+    <header class="section-head">
+      <p class="section-eyebrow">Paper Reviews</p>
+      <h2>Research takeaways worth revisiting</h2>
+    </header>
+    <div class="notes-grid">
+      {latestReviews.map((review) => (
+        <article class="premium-card" data-reveal>
+          <p class="card-meta">{typeLabel(review.data.type, true)} · {shortDate(review.data.date)}</p>
+          <h3 class="card-title" set:html={titleHtml(review.data.title, review.data.title_key)} />
+          <p class="card-summary">{truncate(stripHtml(review.data.excerpt ?? "Concise research summary with reusable takeaways."), 138)}</p>
+          <a class="card-link" href={reviewUrl(review)}>Read review</a>
+        </article>
+      ))}
+    </div>
+  </section>
+
+  <Fragment set:html={contact} />
+</Base>

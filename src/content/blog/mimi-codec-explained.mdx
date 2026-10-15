@@ -1,0 +1,502 @@
+---
+title: "Mimi: 24,000 samples in, 400 numbers out"
+date: 2026-10-11
+category: "speech-ai"
+read_time: "20 min"
+series_order: 10
+series: speech-ai
+featured: false
+excerpt: "The codec under Pocket TTS turns each second of speech into 12.5 frames of 32 numbers and back. Every layer, stride and tensor shape on the way down and up, and why the latent is continuous."
+question: "How does Mimi compress a second of 24 kHz speech into 400 numbers, stream it with 80 ms frames, and rebuild the waveform?"
+my_work: "A concept note. I read the Mimi code shipped with Pocket TTS and the original Mimi config in Moshi, recorded every layer's kernel, stride and channel count, and wrote a NumPy script that reproduces each tensor shape."
+result: "Strides 4, 5 and 6 take the audio to 200 frames per second, a stride-16 convolution takes it to 12.5, and the decoder mirrors the path: 16 × 120 = 1,920 samples per latent frame."
+evidence_limit: "This explains released code and published methods. I did not train the codec or measure its quality; quality figures are the CALM paper's."
+lesson: "Compression happens at one layer. Every convolution before it holds more numbers per second than the raw audio, not fewer."
+---
+
+import MimiCompression from "../../components/figures/MimiCompression.astro";
+import StridedConvAnimation from "../../components/figures/StridedConvAnimation.astro";
+import MimiSignalSize from "../../components/figures/MimiSignalSize.astro";
+import LatentGridVsContinuous from "../../components/figures/LatentGridVsContinuous.astro";
+
+The [Pocket TTS post](/blog/pocket-tts-calm-explained/) treated the codec as a black box at both ends. A voice clip went in and came out as 32-number vectors; generated vectors went in and came out as sound. This post opens the box.
+
+The codec is **Mimi**, built by Kyutai for the [Moshi](https://arxiv.org/abs/2410.00037) speech model. Pocket TTS ships a variant of it, described in the [CALM paper](https://arxiv.org/abs/2509.06926), in which the quantizer is replaced by a continuous bottleneck. Two versions matter below, and they are easy to mix up:
+
+- **Original Mimi** (Moshi): SEANet strides 8, 6, 5, 4, then a stride-2 convolution, 8-layer transformers, and a residual vector quantizer with up to 32 codebooks.
+- **Pocket TTS Mimi** (CALM speech VAE): SEANet strides 6, 5, 4, then a stride-16 convolution, 2-layer transformers, and a 32-channel continuous latent.
+
+Both land on 12.5 frames per second. Unless I say otherwise, every shape in this post is the Pocket TTS variant, read from its released config and code.
+
+## A second of sound, and why it is too long
+
+### What 24 kHz means
+
+A microphone measures air pressure. A digital recording samples that pressure at a fixed rate and stores each sample as a number. At a sampling rate of 24,000 Hz, one second of mono audio is a vector of 24,000 floats, one every 41.7 microseconds:
+
+$$
+x \in \mathbb{R}^{24000}, \qquad \Delta t = \frac{1}{24000}\,\text{s} \approx 41.7\,\mu\text{s}
+$$
+
+- $x$ is the recording: $\in \mathbb{R}^{24000}$ means "a list of 24,000 real numbers".
+- $\Delta t$ (delta t) is the time between two samples: one 24,000th of a second, about 41.7 microseconds ($\mu$s, millionths of a second).
+
+The rate sets the highest frequency the recording can represent. By the Nyquist limit that is half the sampling rate, 12 kHz, which comfortably covers the energy of speech.
+
+### Why a transformer cannot read it directly
+
+Self-attention compares every position with every other. For a sequence of length T, the attention matrix has T² entries per head per layer. Ten seconds of speech at 24 kHz is T = 240,000, so a single attention matrix would have 5.76 × 10¹⁰ entries. The structure the model needs, a syllable lasting around 200 ms, spans 4,800 positions. The sequence is both far too long and far too fine-grained.
+
+### The target
+
+Mimi compresses time. Its encoder maps each 1,920-sample hop to one latent frame of 32 numbers:
+
+$$
+\frac{24000\ \text{samples/s}}{1920\ \text{samples/frame}} = 12.5\ \text{frames/s}, \qquad 12.5 \times 32 = 400\ \text{numbers/s}, \qquad \frac{24000}{400} = 60
+$$
+
+Ten seconds becomes 125 frames, a sequence a transformer handles easily, and each frame covers 80 ms, about the length of a phoneme.
+
+<figure class="blog-figure blog-figure--wide">
+  <MimiCompression alt="A long strip with a waveform, area 24,000 units, beside a small block of 12.5 by 32 cells, area 400 units. The strip is sixty times larger." />
+  <figcaption><strong>Figure 1. Sixty to one, drawn to scale.</strong> Both are 32-bit floats, so this is a count of numbers, not of bits.</figcaption>
+</figure>
+
+A caution on "60× compression". Both sides are floats. The codec does not keep 1/60 of the information in any strict sense; it keeps what a trained decoder needs to produce audio that sounds the same. Phase details a listener cannot hear are free to change.
+
+## The encoder: a downsampling ladder
+
+### The layer list
+
+The encoder is a SEANet convolutional stack, followed by a transformer and one more strided convolution. With n<sub>filters</sub> = 64 and strides applied in the order 4, 5, 6, the layers are:
+
+<div class="blog-table-scroll" role="region" aria-label="Encoder layers" tabindex="0">
+
+| Layer | Kernel | Stride | Channels | Frames per second |
+|---|---|---|---|---|
+| input | | | 1 | 24,000 |
+| conv | 7 | 1 | 1 → 64 | 24,000 |
+| residual block + ELU + conv | 8 | 4 | 64 → 128 | 6,000 |
+| residual block + ELU + conv | 10 | 5 | 128 → 256 | 1,200 |
+| residual block + ELU + conv | 12 | 6 | 256 → 512 | 200 |
+| ELU + conv | 3 | 1 | 512 → 512 | 200 |
+| transformer, 2 layers | | | 512 | 200 |
+| conv (to latent) | 32 | 16 | 512 → 32 | 12.5 |
+
+</div>
+
+The arithmetic that matters:
+
+$$
+4 \times 5 \times 6 = 120, \qquad \frac{24000}{120} = 200\ \text{Hz}, \qquad 120 \times 16 = 1920, \qquad \frac{24000}{1920} = 12.5\ \text{Hz}
+$$
+
+Every time the stride shrinks the frame rate, the channel count doubles. The signal trades length for depth. Each 200 Hz frame is a 512-number description of a 5 ms window, with context reaching further back through the stacked kernels.
+
+### One strided convolution, in full
+
+A 1D convolution with C<sub>in</sub> input channels, C<sub>out</sub> output channels, kernel size k and stride s has a weight tensor W ∈ ℝ<sup>C<sub>out</sub> × C<sub>in</sub> × k</sup>. Output frame n is a weighted sum over a window of k input frames that starts at n·s:
+
+$$
+y[o, n] = b_o + \sum_{c=1}^{C_{\text{in}}} \sum_{j=0}^{k-1} W[o, c, j]\; \tilde{x}[c,\, n s + j]
+$$
+
+Reading it symbol by symbol:
+
+- $y[o, n]$ is output channel $o$ at output frame $n$.
+- $b_o$ is a learned constant (the **bias**) added to that channel.
+- $\sum_{c=1}^{C_{\text{in}}}$ adds over every input channel $c$, and $\sum_{j=0}^{k-1}$ adds over the $k$ positions in the window.
+- $W[o, c, j]$ is the learned weight for that output channel, input channel and window position.
+- $\tilde{x}[c,\, n s + j]$ is the input at channel $c$, position $ns + j$. The window for output $n$ starts at $n \times s$, which is why a stride $s$ makes the output $s$ times shorter.
+
+Tiny example with one channel, $k = 2$, $s = 2$ and weights $(1, 1)$: input $3, 5, 2, 4$ gives $3 + 5 = 8$ and $2 + 4 = 6$. Four numbers in, two out.
+
+where x̃ is the input with padding added. Take the first downsampling layer: k = 8, s = 4, 64 channels in and 128 out. Its weight is 128 × 64 × 8, about 65,000 numbers. Each output frame reads 8 consecutive input frames across all 64 channels, a 512-number patch, and produces 128 numbers. Moving to the next output frame slides the window forward 4 positions, so neighbouring windows overlap by half.
+
+Every resampling layer in Mimi follows this same rule, kernel = 2 × stride: 8 for 4, 10 for 5, 12 for 6, 32 for 16. Each output then depends on exactly two strides of input, which keeps the resampling smooth without making kernels long.
+
+### Causal padding, and why streaming needs it
+
+To keep the output length at exactly T/s, the input must be padded by k − s frames. Where those frames go decides whether the encoder can run live.
+
+A standard "same" convolution pads both sides, so output n depends on a little of the future. Mimi pads **only the left**:
+
+$$
+\tilde{x} = [\underbrace{p_1, \dots, p_{k-s}}_{\text{past}},\; x_0, x_1, \dots, x_{T-1}], \qquad T_{\text{out}} = \frac{T + (k - s) - k}{s} + 1 = \frac{T}{s}
+$$
+
+- $p_1, \dots, p_{k-s}$ are the $k - s$ padding values placed **before** the signal (zeros, or remembered past input when streaming).
+- $x_0, \dots, x_{T-1}$ is the real input, $T$ frames long.
+- $T_{\text{out}}$ is the output length. The padding exactly makes up for the window overhang, so $T$ frames in give $T/s$ frames out.
+
+Example: $T = 8$, $k = 8$, $s = 4$ gives $(8 + 4 - 8)/4 + 1 = 2$ outputs, which is $8/4$.
+
+With k = 8 and s = 4, output y₁ reads x₀ to x₇: the newest sample it needs is x₇, and it is computed once x₇ arrives. No layer ever waits for a future sample.
+
+In streaming mode the padding is not zeros. Each layer keeps the last k − s frames of input it saw as state and prepends them to the next chunk. Feed the encoder 80 ms at a time and it produces exactly one latent frame per chunk, identical to what it would have produced on the whole file.
+
+<figure class="blog-figure blog-figure--wide">
+  <StridedConvAnimation alt="Top: sixteen input samples with four padding cells on the left and four brackets of width eight, four apart, each producing one output. Bottom: three frames each stamp an eight-wide kernel into the output, four apart, overlapping and adding, with the final four samples carried to the next chunk." />
+  <figcaption><strong>Figure 2. Strided convolution and its mirror.</strong> Switch between the encoder and the decoder; every bar is computed from the real kernel and inputs. The animation starts when the figure scrolls into view.</figcaption>
+</figure>
+
+### The residual blocks
+
+Before each downsampling convolution sits one residual block. With the config's compression factor of 2 it is
+
+$$
+r(x) = x + W_2 * \operatorname{ELU}\big(W_1 * \operatorname{ELU}(x)\big), \qquad W_1: C \to C/2,\ k = 3, \qquad W_2: C/2 \to C,\ k = 1
+$$
+
+- $x$ is the block's input and $r(x)$ its output. The leading $x +$ is the **skip connection**: the block only has to learn a correction to add.
+- $*$ means convolution. $W_1$ halves the channels ($C \to C/2$) looking 3 frames wide; $W_2$ restores them ($C/2 \to C$) looking at 1 frame.
+- $\operatorname{ELU}$ is the activation function described just below.
+
+The kernel-3 convolution mixes neighbouring frames through a half-width bottleneck; the kernel-1 convolution projects back. ELU, the exponential linear unit, is the activation throughout: x for positive x, eˣ − 1 otherwise. The SEANet design allows several blocks with growing dilation per stage; this config uses one block per stage with dilation 1, so long-range context comes from the strides and the transformer instead.
+
+### Weight normalization
+
+The original Mimi config notes that the model is trained with weight normalization, and that the weights are then pre-processed so inference uses plain convolutions. Weight normalization rewrites each filter as a direction times a learned length:
+
+$$
+W = g\,\frac{V}{\lVert V \rVert}
+$$
+
+- $V$ is a learned tensor that sets the filter's **direction** (its pattern).
+- $\lVert V \rVert$ is its length, so $V / \lVert V \rVert$ has length 1.
+- $g$ is a learned number that sets the filter's **strength**.
+
+Like an arrow described as "which way" plus "how long", learned separately.
+
+Separating length from direction makes training better conditioned, especially with adversarial losses. After training, g · V / ‖V‖ is just a fixed tensor, so it is computed once and folded in. It shapes how the weights were learned and costs nothing at run time.
+
+### The encoder transformer
+
+At 200 Hz the signal goes through a small transformer: 2 layers, 8 heads, width 512, feed-forward width 2,048, rotary position embeddings, and residual updates scaled by a learned layer scale initialized at 0.01. Its attention is causal and limited to the last **250 frames**, which at 200 Hz is 1.25 seconds. The stacked convolutions before it have a receptive field of 560 samples, about 23 ms; this layer lets each frame draw on more than a second of context before the final squeeze.
+
+(The original Mimi places an 8-layer transformer at 25 Hz, where the same 250-frame context is 10 seconds.)
+
+### The last squeeze
+
+One convolution does the final compression: kernel 32, stride 16, 512 channels to 32, no bias, with the left padding filled by repeating the first frame rather than zeros. It maps [200, 512] to [12.5, 32] per second. In the code this output is the latent; there is no separate projection after it.
+
+<figure class="blog-figure blog-figure--wide">
+  <MimiSignalSize alt="Interactive bar chart, one bar per layer, log scale of numbers per second. It rises from 24,000 at the input to 1.5 million after the first convolution, falls stage by stage to 102,400 at 200 Hz, drops to 400 at the latent, then mirrors back up through the decoder to 24,000." />
+  <figcaption><strong>Figure 3. How big the signal is at every layer.</strong> The bars rise in the order the signal passes through the layers; Replay runs it again, and the slider or a click inspects any layer. Values computed from the config; the script at the end prints the same numbers.</figcaption>
+</figure>
+
+Figure 3 shows the fact the "waterfall" picture hides. The first convolution expands 24,000 numbers per second into 1,536,000, sixty-four times more than the raw audio. Each stage then shrinks that count, but at 200 Hz the signal is still 102,400 numbers per second, more than four times the waveform. **All of the compression happens in one layer**, the stride-16 convolution from 102,400 to 400. Everything before it is analysis, re-describing the signal in a richer form, so that one linear map can then keep what matters.
+
+## The bottleneck: continuous, and regularized
+
+### What the original Mimi does here
+
+Original Mimi quantizes. Its residual vector quantizer replaces each 12.5 Hz frame with a list of integers, one per codebook, each picking the nearest of 2,048 learned vectors and passing the remaining error to the next codebook:
+
+$$
+r_0 = z, \qquad k_i = \arg\min_j \big\lVert r_{i-1} - c^{(i)}_j \big\rVert, \qquad r_i = r_{i-1} - c^{(i)}_{k_i}, \qquad \hat z = \sum_{i=1}^{Q} c^{(i)}_{k_i}
+$$
+
+- $z$ is the encoder's frame; $c^{(i)}_j$ is entry $j$ of codebook $i$ (2,048 entries each).
+- $k_i$ is the chosen entry's number: $\arg\min_j$ means "the $j$ with the smallest distance $\lVert \cdot \rVert$".
+- $r_i$ is the leftover error after $i$ codebooks, and $\hat z$ is the rebuilt frame, the sum of the chosen entries over all $Q$ codebooks.
+
+In words: pick the closest entry, subtract it, and quantize what is left with the next codebook.
+
+With Q = 8 codebooks, as Moshi uses, each frame is 8 × log₂ 2048 = 88 bits, and the bitrate is 88 × 12.5 = 1.1 kbps. That is a remarkable rate, and it is what lets Moshi treat audio as tokens. The cost is the final residual r<sub>Q</sub>, discarded every frame, and a hard ceiling set by the number of codebooks.
+
+### What the Pocket TTS variant does instead
+
+The CALM speech VAE removes the quantizer. The encoder output is used to define a Gaussian, and during training the latent is a sample from it:
+
+$$
+q_\phi(z \mid x) = \mathcal{N}\big(\mu_\phi(x),\ \operatorname{diag}\sigma^2_\phi(x)\big), \qquad z \in \mathbb{R}^{32}
+$$
+
+- $q_\phi(z \mid x)$ is the encoder's answer to "which latents $z$ fit this audio $x$?", given as a probability distribution. $\phi$ (phi) stands for the encoder's weights.
+- $\mathcal{N}(\mu, \cdot)$ is a Gaussian (bell curve) centred at $\mu_\phi(x)$, the encoder's best guess.
+- $\operatorname{diag}\sigma^2_\phi(x)$ gives each of the 32 channels its own spread $\sigma$ (sigma), independent of the others.
+
+So the encoder says "the latent is about here, give or take this much", channel by channel.
+
+Sampling is not differentiable, so it is rewritten with the **reparameterization trick**. Draw noise that does not depend on the parameters, then shift and scale it:
+
+$$
+z = \mu_\phi(x) + \sigma_\phi(x) \odot \varepsilon, \qquad \varepsilon \sim \mathcal{N}(0, I_{32})
+$$
+
+- $\varepsilon$ (epsilon) is plain random noise from a standard Gaussian, 32 numbers.
+- $\odot$ multiplies element by element: channel 1 by channel 1, and so on.
+
+Example for one channel: mean $\mu = 0.4$, spread $\sigma = 0.1$, noise $\varepsilon = -2$ gives $z = 0.4 + 0.1 \times (-2) = 0.2$.
+
+Now z is a deterministic function of μ, σ and ε, and gradients flow back through μ and σ into the encoder. Each of the 32 channels gets its own mean and its own noise scale; ⊙ multiplies them element by element. At inference the noise is dropped and the mean is used.
+
+### The KL term
+
+A plain autoencoder can place its codes anywhere: scattered clusters, huge values, gaps between regions. That is fine for reconstruction and bad for generation, because Pocket TTS later has to sample latents from noise. The KL divergence pulls each frame's Gaussian toward a standard normal prior p(z) = 𝒩(0, I). For diagonal Gaussians it has a closed form, summed over the 32 channels:
+
+$$
+\mathrm{KL}\big(q_\phi(z \mid x)\ \big\Vert\ \mathcal{N}(0, I)\big) = \frac{1}{2}\sum_{d=1}^{32}\Big(\mu_d^2 + \sigma_d^2 - \log \sigma_d^2 - 1\Big)
+$$
+
+- $\mathrm{KL}$ is the Kullback–Leibler divergence, a measure of how different two distributions are. It is 0 when they are identical.
+- $d$ runs over the 32 channels; $\mu_d$ and $\sigma_d$ are that channel's mean and spread.
+
+Check it on one channel: with $\mu = 0$ and $\sigma = 1$ the bracket is $0 + 1 - 0 - 1 = 0$, no penalty. With $\mu = 2$, $\sigma = 1$ it is $4 + 1 - 0 - 1 = 4$, halved to **2**.
+
+Read the terms one at a time. μ<sub>d</sub>² penalizes means far from the origin. σ<sub>d</sub>² − log σ<sub>d</sub>² − 1 is zero at σ<sub>d</sub> = 1 and grows on both sides: it penalizes noise that is too large and, through the logarithm, noise that collapses to zero. A zero-variance code would be a point, and the KL term is what stops the latent from becoming a lookup table of points.
+
+The full training loss in the CALM paper adds this term to the usual codec losses:
+
+$$
+\mathcal{L}_{\text{VAE}} = \lambda_t \mathcal{L}_t + \lambda_f \mathcal{L}_f + \lambda_{\text{adv}} \mathcal{L}_{\text{adv}} + \lambda_{\text{feat}} \mathcal{L}_{\text{feat}} + \lambda_{\text{KL}} \mathcal{L}_{\text{KL}} + \lambda_{\text{distill}} \mathcal{L}_{\text{distill}}
+$$
+
+Each $\mathcal{L}$ is one loss term and each $\lambda$ (lambda) is its weight, a dial for how much that term counts. The subscripts are named in the next paragraph: $t$ for time, $f$ for frequency, adv for adversarial, feat for feature matching, KL for the prior and distill for distillation.
+
+reconstruction in time and in frequency, an adversarial loss and feature matching from discriminators, the KL term, and semantic distillation from WavLM, which Mimi uses to make its latents carry linguistic content and not only acoustics. The KL weight is small (the paper's hyperparameter table lists 0.01), so the prior shapes the space without overriding reconstruction.
+
+<figure class="blog-figure blog-figure--wide">
+  <LatentGridVsContinuous alt="Left: encoder outputs with arrows to the nearest node of a five by five grid. Right: the same outputs left in place inside the rings of a standard Gaussian, each with a small cloud of sampled noise." />
+  <figcaption><strong>Figure 4. Snap or keep.</strong> Two of the 32 dimensions. Schematic.</figcaption>
+</figure>
+
+### What that buys Pocket TTS
+
+Three things connect directly to the previous post:
+
+- **No rounding gap.** Nothing is discarded at the bottleneck beyond what the encoder itself chose not to keep. The decoder receives the value, not the nearest code.
+- **A space that generation can fill.** The flow-matching head starts from Gaussian noise and moves it toward a latent. That is easiest when latents themselves live in a compact, roughly Gaussian cloud with no holes, which is what the KL term encourages. Pocket TTS also centers and normalizes the latents with stored per-channel statistics before modeling them.
+- **One vector per frame.** No codebook axis, so no delay pattern or depth transformer. One prediction per 80 ms.
+
+The CALM paper reports that this 32-dimensional VAE matches or beats an 8-codebook Mimi on its speech reconstruction metrics, for example PESQ 2.42 against 2.13 and STOI 0.90 against 0.87.
+
+## The decoder, part 1: widen, upsample, contextualize
+
+Decoding mirrors encoding, with one ordering detail that is easy to get wrong: the decoder upsamples to 200 Hz **before** its transformer, mirroring the encoder, which ran its transformer before downsampling.
+
+**Widen.** A 1×1 convolution, which is a linear map applied independently to each frame, lifts 32 channels to 512:
+
+$$
+h = W_{\text{out}}\,z, \qquad W_{\text{out}} \in \mathbb{R}^{512 \times 32}, \qquad [12.5, 32] \to [12.5, 512]
+$$
+
+- $z$ is one 32-number latent frame, and $h$ is the widened 512-number frame.
+- $W_{\text{out}}$ is a learned 512 × 32 matrix, the same for every frame.
+- $[12.5, 32] \to [12.5, 512]$ reads "12.5 frames per second of 32 numbers become 12.5 frames per second of 512".
+
+**Upsample ×16.** A transposed convolution with kernel 32 and stride 16 turns 12.5 frames per second into 200. It is depthwise: with groups = 512, each channel has its own 32-tap kernel and channels do not mix. The layer only interpolates in time; mixing is left to the transformer that follows.
+
+**Contextualize.** The decoder transformer has the same shape as the encoder's: 2 layers, 8 heads, width 512, causal attention over the last 250 frames, which is 1.25 s at 200 Hz. Each 5 ms frame can now draw on the frames around it before the convolutions turn it into samples. This is where continuity across the 80 ms latent boundaries is enforced: the upsampled frames from neighbouring latents meet here.
+
+### How a transposed convolution upsamples
+
+A transposed convolution runs the strided convolution's bookkeeping in reverse. Instead of each output reading a window of inputs, each input writes a window of outputs:
+
+$$
+y[o,\, n s + j] \mathrel{+}= \sum_{c} W[c, o, j]\; x[c, n], \qquad j = 0, \dots, k-1
+$$
+
+- $x[c, n]$ is input channel $c$ at frame $n$; $y[o, \cdot]$ is output channel $o$.
+- $\mathrel{+}=$ means "add to what is already there", because neighbouring stamps land on the same output positions.
+- $W[c, o, j]$ is the learned stamp: the value written at offset $j$ after the start position $n \times s$.
+
+Example with one channel, $s = 2$, $k = 4$, stamp $(0.5, 1, 1, 0.5)$ and inputs $2, 4$: the first stamp writes $1, 2, 2, 1$ at positions 0 to 3, the second writes $2, 4, 4, 2$ at positions 2 to 5, and the overlap adds up to $1, 2, 4, 5, 4, 2$.
+
+Input frame n stamps a k-long pattern into the output starting at position n·s. With k = 2s, consecutive stamps overlap by s positions, and the overlaps are added. That overlap-add is what blends neighbouring frames instead of producing blocky steps.
+
+The output is T·s + (k − s) long. The trailing k − s positions are unfinished: the next input frame will add to them. In streaming mode the layer returns the first T·s positions and keeps the tail as state, the bottom half of Figure 2.
+
+## The decoder, part 2: back to a waveform
+
+The SEANet decoder unwinds the encoder's ladder with strides in the opposite order, 6, 5, 4:
+
+<div class="blog-table-scroll" role="region" aria-label="Decoder layers" tabindex="0">
+
+| Layer | Kernel | Stride | Channels | Frames per second |
+|---|---|---|---|---|
+| conv | 7 | 1 | 512 → 512 | 200 |
+| ELU + transposed conv, residual block | 12 | 6 | 512 → 256 | 1,200 |
+| ELU + transposed conv, residual block | 10 | 5 | 256 → 128 | 6,000 |
+| ELU + transposed conv, residual block | 8 | 4 | 128 → 64 | 24,000 |
+| ELU + conv | 3 | 1 | 64 → 1 | 24,000 |
+
+</div>
+
+Here the residual block comes after each upsampling step rather than before, so it refines the signal at its new, finer resolution. The channel count halves at every step, 512 → 256 → 128 → 64, and a last convolution collapses 64 channels into one: the waveform.
+
+The full upsampling product closes the loop:
+
+$$
+\underbrace{16}_{\text{depthwise}} \times \underbrace{6 \times 5 \times 4}_{\text{SEANet}} = 16 \times 120 = 1920\ \text{samples per latent frame} = 80\ \text{ms}
+$$
+
+Every 32-number latent becomes exactly 1,920 samples. Because every layer is causal and keeps its own small state, the decoder can emit those 80 ms as soon as the latent exists. That is the property Pocket TTS relies on to play audio while it is still generating.
+
+## Every shape, verified in NumPy
+
+The script below builds the whole codec from NumPy primitives: a causal strided convolution with left padding, a transposed convolution with overlap-add, the residual block, a windowed causal transformer and the depthwise upsampler. Weights are random, so the output is noise, but every kernel, stride, channel count and padding rule matches the released config. It prints the shape after each layer. It uses 2 seconds of input because 1 second is 12.5 frames, and a tensor cannot have half a frame.
+
+```python
+"""Shape-faithful NumPy walk through Mimi as configured in Pocket TTS.
+
+Random weights, freshly drawn per layer, so the output is noise. Every
+layer has the kernel, stride, channel count and causal padding of the
+released config; the toy transformer leaves out rotary position embeddings.
+"""
+import numpy as np
+from numpy.lib.stride_tricks import sliding_window_view
+
+rng = np.random.default_rng(0)
+SR, N_FILTERS, RATIOS, D, LATENT = 24_000, 64, [6, 5, 4], 512, 32
+
+
+def weight(c_out, c_in, k):
+    return rng.standard_normal((c_out, c_in, k)) / np.sqrt(c_in * k)
+
+
+def elu(x):
+    return np.where(x > 0, x, np.expm1(np.minimum(x, 0)))
+
+
+def conv1d(x, w, stride=1, pad="zeros"):
+    """Causal conv. x: [C_in, T], w: [C_out, C_in, K] -> [C_out, T // stride]."""
+    k = w.shape[-1]
+    left = x[:, :1].repeat(k - stride, 1) if pad == "replicate" else np.zeros((x.shape[0], k - stride))
+    x = np.concatenate([left, x], axis=1)                       # only the past is padded
+    windows = sliding_window_view(x, k, axis=1)[:, ::stride]    # [C_in, T_out, K]
+    return np.einsum("ctk,ock->ot", windows, w)
+
+
+def conv_transpose1d(x, w, stride, depthwise=False):
+    """Causal transposed conv. x: [C_in, T] -> [C_out, T * stride].
+
+    Each input frame stamps a K-long kernel into the output, frames `stride`
+    apart; overlapping stamps add. The last K - stride samples would overlap
+    the next chunk, so streaming keeps them as state; here we drop them.
+    """
+    k = w.shape[-1]
+    c_out, t = (x.shape[0] if depthwise else w.shape[0]), x.shape[1]
+    y = np.zeros((c_out, t * stride + k - stride))
+    for j in range(k):
+        contrib = w[:, 0, j, None] * x if depthwise else np.einsum("oc,ct->ot", w[:, :, j], x)
+        y[:, j : j + t * stride : stride] += contrib
+    return y[:, : t * stride]
+
+
+def resblock(x):
+    """ELU -> conv k3 (C -> C/2) -> ELU -> conv k1 (C/2 -> C), plus skip."""
+    c = x.shape[0]
+    h = conv1d(elu(x), weight(c // 2, c, 3))
+    return x + conv1d(elu(h), weight(c, c // 2, 1))
+
+
+def transformer(x, layers=2, heads=8, context=250, ff=2048, layer_scale=0.01):
+    """x: [512, T] -> [512, T]. Causal attention limited to the last 250 frames."""
+    h = x.T                                                     # [T, 512]
+    t, dh = h.shape[0], D // heads
+    i, j = np.arange(t)[:, None], np.arange(t)[None, :]
+    mask = np.where((j <= i) & (i - j < context), 0.0, -np.inf)  # [T, T]
+    norm = lambda z: (z - z.mean(-1, keepdims=True)) / (z.std(-1, keepdims=True) + 1e-5)
+    for _ in range(layers):
+        project = lambda z: (z @ (rng.standard_normal((D, D)) / np.sqrt(D))).reshape(t, heads, dh).transpose(1, 0, 2)
+        q, k, v = project(norm(h)), project(norm(h)), project(norm(h))   # each [8, T, 64]
+        s = q @ k.transpose(0, 2, 1) / np.sqrt(dh) + mask       # [8, T, T]
+        a = np.exp(s - s.max(-1, keepdims=True)); a /= a.sum(-1, keepdims=True)
+        h = h + layer_scale * ((a @ v).transpose(1, 0, 2).reshape(t, D) @ (rng.standard_normal((D, D)) / np.sqrt(D)))
+        f = np.maximum(norm(h) @ (rng.standard_normal((D, ff)) / np.sqrt(D)), 0)
+        h = h + layer_scale * (f @ (rng.standard_normal((ff, D)) / np.sqrt(ff)))
+    return h.T
+
+
+def show(name, x):
+    rate = x.shape[1] / seconds
+    print(f"{name:<34} {str(list(x.shape)):<14} {rate:>8g} Hz  {x.size / seconds:>10,.0f} numbers/s")
+
+
+seconds = 2.0                                     # 2 s = exactly 25 latent frames
+wave = rng.standard_normal((1, int(SR * seconds))) * 0.1
+
+print("ENCODER")
+show("input waveform", wave)
+x = conv1d(wave, weight(N_FILTERS, 1, 7)); show("conv k7, 1 -> 64", x)
+ch = N_FILTERS
+for r in reversed(RATIOS):                        # strides 4, 5, 6
+    x = resblock(x)
+    x = conv1d(elu(x), weight(ch * 2, ch, 2 * r), stride=r); ch *= 2
+    show(f"resblock + conv k{2 * r} s{r}, -> {ch}", x)
+x = conv1d(elu(x), weight(D, ch, 3)); show("conv k3, 512 -> 512", x)
+x = transformer(x); show("encoder transformer @ 200 Hz", x)
+latent = conv1d(x, weight(LATENT, D, 32), stride=16, pad="replicate")
+show("conv k32 s16, 512 -> 32  (latent)", latent)
+
+print("\nDECODER")
+x = conv1d(latent, weight(D, LATENT, 1)); show("1x1 conv, 32 -> 512", x)
+x = conv_transpose1d(x, weight(D, 1, 32), stride=16, depthwise=True); show("depthwise conv-T k32 s16", x)
+x = transformer(x); show("decoder transformer @ 200 Hz", x)
+x = conv1d(x, weight(D, D, 7)); show("conv k7, 512 -> 512", x)
+for r in RATIOS:                                  # strides 6, 5, 4
+    x = conv_transpose1d(elu(x), weight(ch // 2, ch, 2 * r), stride=r); ch //= 2
+    x = resblock(x)
+    show(f"conv-T k{2 * r} s{r} + resblock, -> {ch}", x)
+out = conv1d(elu(x), weight(1, N_FILTERS, 3)); show("conv k3, 64 -> 1  (waveform)", out)
+
+print(f"\nsamples per latent frame: {out.shape[1] // latent.shape[1]}")
+print(f"compression, numbers in / numbers in latent: {wave.size / latent.size:g}x")
+```
+
+Its output:
+
+```text
+ENCODER
+input waveform                     [1, 48000]        24000 Hz      24,000 numbers/s
+conv k7, 1 -> 64                   [64, 48000]       24000 Hz   1,536,000 numbers/s
+resblock + conv k8 s4, -> 128      [128, 12000]       6000 Hz     768,000 numbers/s
+resblock + conv k10 s5, -> 256     [256, 2400]        1200 Hz     307,200 numbers/s
+resblock + conv k12 s6, -> 512     [512, 400]          200 Hz     102,400 numbers/s
+conv k3, 512 -> 512                [512, 400]          200 Hz     102,400 numbers/s
+encoder transformer @ 200 Hz       [512, 400]          200 Hz     102,400 numbers/s
+conv k32 s16, 512 -> 32  (latent)  [32, 25]           12.5 Hz         400 numbers/s
+
+DECODER
+1x1 conv, 32 -> 512                [512, 25]          12.5 Hz       6,400 numbers/s
+depthwise conv-T k32 s16           [512, 400]          200 Hz     102,400 numbers/s
+decoder transformer @ 200 Hz       [512, 400]          200 Hz     102,400 numbers/s
+conv k7, 512 -> 512                [512, 400]          200 Hz     102,400 numbers/s
+conv-T k12 s6 + resblock, -> 256   [256, 2400]        1200 Hz     307,200 numbers/s
+conv-T k10 s5 + resblock, -> 128   [128, 12000]       6000 Hz     768,000 numbers/s
+conv-T k8 s4 + resblock, -> 64     [64, 48000]       24000 Hz   1,536,000 numbers/s
+conv k3, 64 -> 1  (waveform)       [1, 48000]        24000 Hz      24,000 numbers/s
+
+samples per latent frame: 1920
+compression, numbers in / numbers in latent: 60x
+```
+
+Read the last column top to bottom and you get Figure 3: up by 64× at the first convolution, down to 400 at the latent, and a mirror image on the way back.
+
+## What to take away
+
+Mimi does not shrink the signal gradually. It first expands it into a much richer description, uses strided convolutions and a short-context transformer to trade time resolution for channel depth, and then compresses once, at a single layer, into 32 numbers per 80 ms. The Pocket TTS variant keeps those 32 numbers continuous and pushes them toward a Gaussian with a KL term, which is what makes them easy for a flow-matching head to generate. The decoder runs the same ladder in reverse, and because every layer only looks backwards, both directions stream.
+
+<div class="note-related">
+
+## Related
+
+- Previous: [Speech without tokens: how Pocket TTS works](/blog/pocket-tts-calm-explained/)
+- Next: [Walkie-talkie or conversation: cascaded vs full-duplex speech](/blog/cascade-vs-full-duplex/)
+- [SoundStream review](/paper-reviews/soundstream/), the codec Mimi descends from
+- [Moshi review](/paper-reviews/moshi/), the model Mimi was built for
+
+
+## Sources
+
+- Défossez et al. (2024), [Moshi: a speech-text foundation model for real-time dialogue](https://arxiv.org/abs/2410.00037), which introduces Mimi
+- Rouard et al. (2025), [Continuous Audio Language Models](https://arxiv.org/abs/2509.06926), which describes the continuous speech VAE
+- [kyutai-labs/pocket-tts](https://github.com/kyutai-labs/pocket-tts), `pocket_tts/models/mimi.py`, `modules/seanet.py`, `modules/conv.py` and the English config
+- [kyutai-labs/moshi](https://github.com/kyutai-labs/moshi), `moshi/models/loaders.py`, for the original Mimi config
+- Kingma and Welling (2014), [Auto-Encoding Variational Bayes](https://arxiv.org/abs/1312.6114)
+- Salimans and Kingma (2016), [Weight Normalization](https://arxiv.org/abs/1602.07868)
+
+</div>
+

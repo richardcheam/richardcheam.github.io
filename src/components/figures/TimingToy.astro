@@ -1,0 +1,178 @@
+---
+// Toy 1 in the browser: a Monte Carlo of the timing budget. Each dot is one
+// simulated exchange. Assumptions are mine, not the paper's: back-end latency
+// lognormal (sigma 0.35) around the chosen median, plus the 0.5 s ASR wait;
+// keyword delay normal(3.1, 0.8) s, floored at 0.8 s; 65-token reference.
+const { alt } = Astro.props;
+const X0 = 70, Y0 = 296, PXX = 84, PXY = 42, XMAX = 5, YMAX = 6;
+const sx = (t: number) => X0 + t * PXX;
+const sy = (t: number) => Y0 - t * PXY;
+const encoders = [
+  { key: "t5", label: "T5", l: 65 },
+  { key: "arc4", label: "ARC ×4", l: 17 },
+  { key: "arc8", label: "ARC ×8", l: 9 },
+];
+---
+<div class="blog-diagram tt" role="region" aria-label={alt} data-tt data-cfg={JSON.stringify({ X0, Y0, PXX, PXY, XMAX, YMAX, encoders })}>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 340" role="img" aria-labelledby="tt-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="tt-title">Simulated retrieval delays against keyword delays</title>
+    <defs><clipPath id="tt-clip"><rect x={X0} y={sy(YMAX)} width={XMAX * PXX} height={YMAX * PXY} /></clipPath></defs>
+    <g stroke="#ececf1">
+      {[1, 2, 3, 4, 5].map((t) => <line x1={sx(t)} y1={sy(0)} x2={sx(t)} y2={sy(YMAX)} />)}
+      {[1, 2, 3, 4, 5, 6].map((t) => <line x1={sx(0)} y1={sy(t)} x2={sx(XMAX)} y2={sy(t)} />)}
+    </g>
+    <g clip-path="url(#tt-clip)">
+      <!-- above the upper line: fully injected; between: partly; below the diagonal: late -->
+      <path data-zone-late d={`M${sx(0)} ${sy(0)} L${sx(XMAX)} ${sy(XMAX)} L${sx(XMAX)} ${sy(0)} Z`} fill="#a33b3b" fill-opacity="0.06" />
+      <path data-zone-full d="" fill="#4F5D3A" fill-opacity="0.07" />
+      <line x1={sx(0)} y1={sy(0)} x2={sx(XMAX)} y2={sy(XMAX)} stroke="#a33b3b" stroke-dasharray="4 3" />
+      <line data-fullline x1="0" y1="0" x2="0" y2="0" stroke="#4F5D3A" stroke-dasharray="4 3" />
+      <g data-dots></g>
+    </g>
+    <line x1={sx(0)} y1={sy(0)} x2={sx(XMAX)} y2={sy(0)} stroke="#2b2b30" />
+    <line x1={sx(0)} y1={sy(0)} x2={sx(0)} y2={sy(YMAX)} stroke="#2b2b30" />
+    <g font-size="9.5" fill="#5f5f66" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">
+      {[0, 1, 2, 3, 4, 5].map((t) => <text x={sx(t)} y={Y0 + 14} text-anchor="middle">{t}</text>)}
+      {[0, 1, 2, 3, 4, 5, 6].map((t) => <text x={X0 - 6} y={sy(t) + 3} text-anchor="end">{t}</text>)}
+    </g>
+    <text x={sx(XMAX / 2)} y={Y0 + 32} font-size="11" text-anchor="middle" fill="#2b2b30">retrieval delay, s (ASR wait + back end)</text>
+    <text x="16" y={sy(YMAX / 2)} font-size="11" fill="#2b2b30" transform={`rotate(-90 16 ${sy(YMAX / 2)})`} text-anchor="middle">keyword delay, s</text>
+    <text x={sx(4.1)} y={sy(4.4)} font-size="9.5" fill="#a33b3b" transform={`rotate(-26.6 ${sx(4.1)} ${sy(4.4)})`}>arrives after the keyword</text>
+
+    <!-- tallies -->
+    <g transform="translate(540 40)">
+      <text font-size="11" letter-spacing="1" fill="#5f5f66">BEFORE THE KEYWORD</text>
+      {[
+        { k: "full", label: "fully injected", c: "#4F5D3A" },
+        { k: "part", label: "partly injected", c: "#8a6a1f" },
+        { k: "late", label: "not started", c: "#a33b3b" },
+      ].map((s, i) => (
+        <g transform={`translate(0 ${28 + i * 46})`}>
+          <circle cx="5" cy="-4" r="4" fill={s.c} />
+          <text x="16" y="0" font-size="11" fill="#2b2b30">{s.label}</text>
+          <text data-pct={s.k} x="226" y="0" font-size="18" font-weight="700" fill={s.c} text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">0%</text>
+          <rect x="16" y="8" width="210" height="5" rx="2" fill="#ececf1" />
+          <rect data-meter={s.k} x="16" y="8" width="0" height="5" rx="2" fill={s.c} />
+        </g>
+      ))}
+      <text data-median y="180" font-size="10.5" fill="#5f5f66"></text>
+      <text y="200" font-size="10.5" fill="#5f5f66">Paper: accuracy falls past 1.5 s (Fig 6b).</text>
+    </g>
+  </svg>
+  <div class="tt__controls">
+    <label class="tt__ctl">
+      <span class="tt__name">Back-end median latency<strong data-val>0.8 s</strong></span>
+      <input class="scrub" data-input type="range" min="0.3" max="3.5" step="0.1" value="0.8" style="--n: 32; --p: 15.6%" />
+    </label>
+    <div>
+      <span class="tt__name">Reference encoder</span>
+      <div class="tt__chips">
+        {encoders.map((e) => <button type="button" class="tt__chip" data-enc={e.key} aria-pressed={e.key === "arc4" ? "true" : "false"}>{e.label} <span>{e.l} frames</span></button>)}
+        <button type="button" class="tt__chip" data-rerun>New sample</button>
+      </div>
+    </div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<style>
+  .tt__controls { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0.5rem 2rem; margin-top: 0.4rem; font-size: 0.85rem; color: var(--text-secondary); }
+  .tt__ctl { display: block; }
+  .tt__name { display: flex; gap: 0.5rem; margin-bottom: 0.35rem; }
+  .tt__name strong { margin-left: auto; color: var(--text); font-family: var(--font-mono); font-size: 0.8rem; }
+  .tt__chips { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+  .tt__chip { padding: 0.25rem 0.55rem; border: 1px solid var(--border-strong); border-radius: 4px; background: transparent; color: var(--text-secondary); font: inherit; font-size: 0.78rem; cursor: pointer; }
+  .tt__chip span { font-family: var(--font-mono); font-size: 0.72rem; opacity: 0.75; }
+  .tt__chip[aria-pressed="true"] { border-color: #594578; color: var(--text); box-shadow: inset 0 -2px 0 #594578; }
+  @media (max-width: 760px) { .tt__controls { grid-template-columns: 1fr; } }
+</style>
+
+<script>
+  import { setupFigure, wait } from "../../lib/figure-motion";
+
+  const N = 400, ASR = 0.5, F = 0.08;
+  // Seeded generator so the first view is the same for every reader.
+  function rng(seed: number) {
+    return () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+  }
+  function gauss(r: () => number) {
+    const u = Math.max(r(), 1e-12), v = r();
+    return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+  }
+
+  document.querySelectorAll<HTMLElement>("[data-tt]").forEach((root) => {
+    const c = JSON.parse(root.dataset.cfg!);
+    const sx = (t: number) => c.X0 + t * c.PXX;
+    const sy = (t: number) => c.Y0 - t * c.PXY;
+    const NS = "http://www.w3.org/2000/svg";
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const input = $<HTMLInputElement>("[data-input]");
+    const dotsG = $<SVGGElement>("[data-dots]");
+    const chips = Array.from(root.querySelectorAll<HTMLButtonElement>("[data-enc]"));
+    let enc = c.encoders[1], seed = 7;
+    // Standard-normal draws, fixed per sample; the scrubber only rescales them.
+    let z: { a: number; b: number }[] = [];
+    const draw = () => { const r = rng(seed); z = Array.from({ length: N }, () => ({ a: gauss(r), b: gauss(r) })); };
+
+    const dots: SVGCircleElement[] = Array.from({ length: N }, () => {
+      const d = document.createElementNS(NS, "circle"); d.setAttribute("r", "2.6"); dotsG.append(d); return d;
+    });
+
+    const points = () => {
+      const med = +input.value;
+      return z.map(({ a, b }) => ({ ret: ASR + Math.exp(Math.log(med) + 0.35 * a), kd: Math.max(0.8, 3.1 + 0.8 * b) }));
+    };
+    const cls = (p: { ret: number; kd: number }) => (p.ret + enc.l * F <= p.kd ? "full" : p.ret < p.kd ? "part" : "late");
+    const ink = { full: "#4F5D3A", part: "#8a6a1f", late: "#a33b3b" } as const;
+
+    function frame(shown: number) {
+      const med = +input.value;
+      $("[data-val]").textContent = `${med.toFixed(1)} s`;
+      input.style.setProperty("--p", `${((med - 0.3) / 3.2) * 100}%`);
+      const lsec = enc.l * F;
+      $("[data-fullline]").setAttribute("x1", String(sx(0))); $("[data-fullline]").setAttribute("y1", String(sy(lsec)));
+      $("[data-fullline]").setAttribute("x2", String(sx(c.XMAX))); $("[data-fullline]").setAttribute("y2", String(sy(c.XMAX + lsec)));
+      $("[data-zone-full]").setAttribute("d", `M${sx(0)} ${sy(lsec)} L${sx(c.XMAX)} ${sy(c.XMAX + lsec)} L${sx(c.XMAX)} ${sy(c.YMAX + 2)} L${sx(0)} ${sy(c.YMAX + 2)} Z`);
+      const pts = points();
+      const count = { full: 0, part: 0, late: 0 };
+      pts.forEach((p, i) => {
+        const k = cls(p), d = dots[i];
+        d.setAttribute("cx", String(sx(Math.min(p.ret, c.XMAX + 1))));
+        d.setAttribute("cy", String(sy(Math.min(p.kd, c.YMAX + 1))));
+        d.setAttribute("fill", ink[k]);
+        d.setAttribute("fill-opacity", "0.7");
+        d.style.display = i < shown ? "" : "none";
+        if (i < shown) count[k]++;
+      });
+      const tot = Math.max(1, shown);
+      (["full", "part", "late"] as const).forEach((k) => {
+        $(`[data-pct=${k}]`).textContent = `${Math.round((count[k] / tot) * 100)}%`;
+        $(`[data-meter=${k}]`).setAttribute("width", String((count[k] / tot) * 210));
+      });
+      const sorted = pts.map((p) => p.ret).sort((a, b) => a - b);
+      $("[data-median]").textContent = `median retrieval delay ${sorted[N >> 1].toFixed(2)} s · window ${lsec.toFixed(2)} s`;
+    }
+
+    input.addEventListener("input", () => frame(N));
+    chips.forEach((b) => b.addEventListener("click", () => {
+      enc = c.encoders.find((e: { key: string }) => e.key === b.dataset.enc);
+      chips.forEach((o) => o.setAttribute("aria-pressed", String(o === b)));
+      frame(N);
+    }));
+    $("[data-rerun]").addEventListener("click", () => { seed = (seed * 31 + 17) >>> 0; draw(); frame(N); });
+
+    draw();
+    setupFigure(
+      root,
+      () => frame(0),
+      async (alive) => {
+        for (let k = 0; k <= N; k += 8) {
+          if (!alive()) return;
+          frame(k);
+          await wait(0.03);
+        }
+        frame(N);
+      },
+    );
+  });
+</script>

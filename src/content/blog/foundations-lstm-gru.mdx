@@ -1,0 +1,482 @@
+---
+title: "LSTM and GRU: gates that decide what to keep"
+title_key: ["LSTM and GRU"]
+date: 2026-10-15
+category: "deep-learning"
+read_time: "30 min"
+series_order: 9
+series: foundations
+featured: false
+excerpt: "A plain recurrent network forgets its first input because the gradient is multiplied by a small number at every step. The LSTM adds a second memory lane that is updated by adding, with small dimmer switches called gates deciding what to keep, what to write and what to show. This post runs one by hand, then a GRU, and trains both kinds on the remember-the-first-input task."
+question: "How can a recurrent network keep something in memory for forty steps when a plain one loses it after ten?"
+my_work: "A concept note. I worked every example by hand, checked every number with a short script (including a finite-difference check of the LSTM gradients), and specified the figures from the standard formulas."
+result: "In a one-unit LSTM whose forget gate sits at 0.9526, the backward factor along the cell state after 20 steps is 0.38, against 0.00000095 for the plain network of the last post. On the remember-the-first-input task, the plain network never learns a delay of 20; a one-unit LSTM with forget bias 2 learns delays 5, 10, 20 and 40 in 30, 27, 31 and 73 passes."
+evidence_limit: "This explains textbook methods on toy data. The trainer is a deterministic one-unit toy with one bit to remember; real LSTMs have hundreds of units and harder tasks, and the exact pass counts depend on the learning rate and starting weights."
+lesson: "Gates are sigmoids that multiply. Because the LSTM's cell state is updated by adding, the gradient along it is multiplied only by the forget gate, so a gate that stays near 1 lets the gradient survive for as long as the network chooses to remember."
+---
+
+import GateDimmer from "../../components/figures/GateDimmer.astro";
+import LstmCellStepper from "../../components/figures/LstmCellStepper.astro";
+import ConveyorGradient from "../../components/figures/ConveyorGradient.astro";
+import GruCellStepper from "../../components/figures/GruCellStepper.astro";
+import EchoLstmTrainer from "../../components/figures/EchoLstmTrainer.astro";
+import RecurrentParamCounter from "../../components/figures/RecurrentParamCounter.astro";
+import LstmArchitecture from "../../components/figures/LstmArchitecture.astro";
+
+[The last post](/blog/foundations-recurrent-networks/) ended with a network that could not remember. A one-unit recurrent neural network (RNN) was shown a single number, $+1$ or $-1$, and then a string of zeros, and asked at the end what the first number was. With a delay of 10 steps it learned. With a delay of 20 it never did, however long it trained.
+
+This post fixes that, with an idea from 1997 that carried speech recognition and speech synthesis for most of the 2010s: the **long short-term memory** (LSTM) cell, and its lighter cousin the **gated recurrent unit** (GRU). We will run both by hand on tiny numbers, see exactly why the gradient survives, and then train an LSTM on the same task that defeated the plain RNN.
+
+
+## The whole model at a glance
+
+Here is a whole LSTM at work on the same task as the [RNN post's opening figure](/blog/foundations-recurrent-networks/): read "hell" one character at a time and predict the next character, "ello". The cell is tiny: 2 numbers on its long-term belt and 2 in its hidden state, with weights trained offline and rounded to one decimal. The gates, the belt and the hidden state are each explained below; step through once now to see where each one sits and what it does to the numbers.
+
+<figure class="blog-figure blog-figure--wide">
+  <LstmArchitecture alt="Four columns, one per character of hell. From the bottom: the one-hot input, the hidden state h, four pairs of gate bars (forget, input, candidate, output), the cell belt c linked left to right, and next-character probability bars at the top. Stepping fills each column in three stages: gates, belt and hidden state, then probabilities and loss." />
+  <figcaption><strong>Figure 1. An LSTM from input to output.</strong> At each character the gates decide what to forget, what to write and what to show; the belt carries the memory forward; the hidden state is read out as next-character probabilities. Same task and same layout as the RNN figure, so the two can be compared step by step.</figcaption>
+</figure>
+
+## The problem, in one line
+
+Recall the plain scalar RNN from post 8:
+
+$$
+h_t = \tanh\left(w_x \, x_t + w_h \, h_{t-1} + b\right)
+$$
+
+Going back one step, the gradient is multiplied by $w_h \times (1 - h_t^2)$. Going back $k$ steps multiplies $k$ such factors together. With $w_h = 0.5$, the echo task from post 8 kept only **0.0014** of its first input after ten steps, and over 20 steps the backward product was about $0.5^{20} = 0.00000095$, roughly one in a million. With the $\tanh$ slopes included it is even smaller, **0.00000079**.
+
+The everyday picture from post 8 was a whispering game: each child repeats the message at half volume, and the twentieth child hears nothing. The cause is that the memory has only one road, and that road is "multiply by $w_h$, then squash" at every step. Nothing can travel far along it.
+
+The fix is to build a second road where the message is not forced through a multiplication by a fixed weight at each step, and to let the network decide, step by step, how much to keep. The tool for "decide how much" is called a gate.
+
+## The gate: a dimmer switch
+
+In one sentence: a gate is a number between 0 and 1, computed by a sigmoid, that multiplies another number to let all of it, none of it, or some of it through.
+
+The **sigmoid** from [post 1](/blog/foundations-neurons-backprop/) squashes any number into the range from 0 to 1:
+
+$$
+\sigma(z) = \frac{1}{1 + e^{-z}}
+$$
+
+- $z$ is any number, the gate's "score".
+- $e$ is Euler's number, about 2.718.
+- $\sigma(z)$ is the gate value: near 0 for very negative $z$, exactly $0.5$ at $z = 0$, near 1 for very positive $z$.
+
+A few values you will see again and again in this post:
+
+| $z$ | −4 | −2 | −1 | 0 | 1 | 2 | 3 | 4 |
+|---|---|---|---|---|---|---|---|---|
+| $\sigma(z)$ | 0.0180 | 0.1192 | 0.2689 | 0.5 | 0.7311 | 0.8808 | 0.9526 | 0.9820 |
+
+A gate is used by **multiplying**: $\text{output} = \sigma(z) \times v$, where $v$ is the value being gated. The everyday picture is a dimmer switch on a lamp. The lamp's full brightness is $v$; the dimmer decides what fraction reaches the room.
+
+Worked: the value is $v = 0.8$.
+
+- Score $z = -2$: gate $0.1192$, output $0.1192 \times 0.8 = 0.0954$. Almost shut.
+- Score $z = 0$: gate $0.5$, output $0.4$. Half open.
+- Score $z = 2$: gate $0.8808$, output $0.7046$. Almost fully open.
+
+Why a sigmoid and not a hard on/off switch? Because a hard switch has slope zero everywhere, and gradient descent from [post 2](/blog/foundations-loss-gradient-descent/) needs a slope to learn which way to turn the dial. The sigmoid is a soft switch that can be learned. And the score $z$ is computed from the current input and memory with its own weights, so the network learns **when** to open each gate.
+
+When the value is a vector, a gate is a vector of the same length, and the multiplication is **elementwise**: number 1 times number 1, number 2 times number 2, and so on. This is written $\odot$. For example $(0.9, 0.1) \odot (2, 5) = (1.8, 0.5)$: each memory slot gets its own dimmer.
+
+<figure class="blog-figure blog-figure--wide">
+  <GateDimmer alt="A slider sets the gate score z from minus 6 to 6. A sigmoid curve shows the current point. Beside it, a bar of height v passes through a dimmer drawn as a door opened by sigma of z, and the output bar is drawn after it. Readouts show sigma of z, v and the product." />
+  <figcaption><strong>Figure 2. A gate is a dimmer.</strong> Defaults z = 2, v = 0.8: gate 0.8808, output 0.7046. At z = 0 the output is 0.4; at z = −2 it is 0.0954. The gate never quite reaches 0 or 1.</figcaption>
+</figure>
+
+## The LSTM cell
+
+Hochreiter and Schmidhuber (1997) introduced the LSTM. The version used today, and in this post, also has a **forget gate**, which Gers, Schmidhuber and Cummins (2000) added; the 1997 cell could not erase its own memory.
+
+### Two memories: the cell state and the hidden state
+
+An LSTM carries **two** numbers (or vectors) from step to step:
+
+- The **cell state** $c_t$: the long-term memory. This is the new road.
+- The **hidden state** $h_t$: what the cell shows to the outside world at this step, and what the gates look at next step. It plays the role of post 8's $h_t$.
+
+The everyday picture for the cell state is a **conveyor belt** running along a factory line. Items ride along it untouched unless a worker reaches in. At each station (time step) one worker may take some items off (forget), another may put new items on (write), and a third looks at the belt and reports a summary (output). Crucially, the belt itself does not squash or rescale what it carries: what is not removed simply rides on.
+
+### The six equations, in plain words first
+
+At each step the cell does four small calculations from the same two inputs, $x_t$ and $h_{t-1}$, and then two updates. In plain words:
+
+1. **Forget gate** $f_t$: how much of the old belt to keep.
+2. **Input gate** $i_t$: how much of the new candidate to write.
+3. **Candidate** $g_t$: what new content could be written.
+4. **Output gate** $o_t$: how much of the belt to show.
+5. **Cell update**: keep part of the old belt, add part of the candidate.
+6. **Hidden update**: show a squashed, gated view of the belt.
+
+For one unit (everything is a single number), they are:
+
+$$
+\begin{aligned}
+f_t &= \sigma\left(w_f \, x_t + u_f \, h_{t-1} + b_f\right) \\
+i_t &= \sigma\left(w_i \, x_t + u_i \, h_{t-1} + b_i\right) \\
+g_t &= \tanh\left(w_g \, x_t + u_g \, h_{t-1} + b_g\right) \\
+o_t &= \sigma\left(w_o \, x_t + u_o \, h_{t-1} + b_o\right) \\
+c_t &= f_t \, c_{t-1} + i_t \, g_t \\
+h_t &= o_t \, \tanh(c_t)
+\end{aligned}
+$$
+
+- $x_t$, $h_{t-1}$: the new input and the previous hidden state, as in post 8.
+- $c_{t-1}$, $c_t$: the belt before and after this step. Both start at zero: $c_0 = 0$, $h_0 = 0$.
+- $w_\ast$: the input weight of each gate ($w_f$ for the forget gate, and so on).
+- $u_\ast$: the recurrent weight of each gate: how much it looks at $h_{t-1}$.
+- $b_\ast$: each gate's bias. $b_f$ will matter a lot [later](#the-forget-gate-bias-trick).
+- $\sigma$: the sigmoid, so $f_t$, $i_t$, $o_t$ are dimmers between 0 and 1.
+- $\tanh$: the candidate $g_t$ uses $\tanh$, so it can be negative or positive, between $-1$ and $1$; it is content, not a dimmer. (Some papers call it $\tilde{c}_t$.)
+
+Each of the four gate lines is exactly one neuron from post 1, with two inputs. An LSTM unit is four neurons that share their inputs, plus the two update lines.
+
+The heart is line five: $c_t = f_t \, c_{t-1} + i_t \, g_t$. The old belt is **multiplied by a dimmer** and then **added** to the new write. There is no weight matrix and no $\tanh$ on that path. Hold on to that; it is the whole reason the gradient survives.
+
+In the vector version every symbol becomes a vector, each $w_\ast$ and $u_\ast$ becomes a matrix, and the products in lines five and six are elementwise ($\odot$):
+
+$$
+\mathbf{c}_t = \mathbf{f}_t \odot \mathbf{c}_{t-1} + \mathbf{i}_t \odot \mathbf{g}_t, \qquad \mathbf{h}_t = \mathbf{o}_t \odot \tanh(\mathbf{c}_t)
+$$
+
+### Running it by hand
+
+Take the echo task from post 8: input $x = (1,\ 0,\ 0,\ 0)$, and the cell must still remember the $1$ at the end. Weights chosen so the arithmetic is easy, and so that each gate has an obvious job:
+
+- Forget gate: $w_f = 0$, $u_f = 0$, $b_f = 3$. So $f_t = \sigma(3) = 0.9526$ at every step: "keep about 95 percent".
+- Input gate: $w_i = 4$, $u_i = 0$, $b_i = -2$. So $i_t = \sigma(4x_t - 2)$: open ($\sigma(2) = 0.8808$) when the input is 1, nearly shut ($\sigma(-2) = 0.1192$) when it is 0.
+- Candidate: $w_g = 2$, $u_g = 0$, $b_g = 0$. So $g_t = \tanh(2 x_t)$.
+- Output gate: all weights 0, so $o_t = \sigma(0) = 0.5$: "always show half".
+
+To keep the arithmetic short, every recurrent weight $u_\ast$ here is zero, so the gates only look at the input. In a trained LSTM they also look at $h_{t-1}$, and Figure 3 has sliders for them.
+
+**Step 1** ($x_1 = 1$, belt empty: $c_0 = 0$).
+
+$$
+f_1 = \sigma(3) = 0.9526, \quad i_1 = \sigma(4 \times 1 - 2) = \sigma(2) = 0.8808, \quad g_1 = \tanh(2) = 0.9640, \quad o_1 = 0.5
+$$
+
+$$
+c_1 = 0.9526 \times 0 + 0.8808 \times 0.9640 = 0 + 0.8491 = 0.8491
+$$
+
+$$
+h_1 = 0.5 \times \tanh(0.8491) = 0.5 \times 0.6906 = 0.3453
+$$
+
+The input gate was open and the candidate was strong, so **0.8491** went onto the belt.
+
+**Step 2** ($x_2 = 0$).
+
+$$
+f_2 = 0.9526, \quad i_2 = \sigma(-2) = 0.1192, \quad g_2 = \tanh(0) = 0, \quad o_2 = 0.5
+$$
+
+$$
+c_2 = 0.9526 \times 0.8491 + 0.1192 \times 0 = 0.8088, \qquad h_2 = 0.5 \times \tanh(0.8088) = 0.5 \times 0.6690 = 0.3345
+$$
+
+**Step 3** ($x_3 = 0$). The same gates: $c_3 = 0.9526 \times 0.8088 = 0.7705$, $h_3 = 0.5 \times 0.6472 = 0.3236$.
+
+**Step 4** ($x_4 = 0$). $c_4 = 0.9526 \times 0.7705 = 0.7339$, $h_4 = 0.5 \times 0.6255 = 0.3127$.
+
+| step | $x_t$ | $f_t$ | $i_t$ | $g_t$ | $o_t$ | $c_t$ | $h_t$ |
+|---|---|---|---|---|---|---|---|
+| 1 | 1 | 0.9526 | 0.8808 | 0.9640 | 0.5 | 0.8491 | 0.3453 |
+| 2 | 0 | 0.9526 | 0.1192 | 0 | 0.5 | 0.8088 | 0.3345 |
+| 3 | 0 | 0.9526 | 0.1192 | 0 | 0.5 | 0.7705 | 0.3236 |
+| 4 | 0 | 0.9526 | 0.1192 | 0 | 0.5 | 0.7339 | 0.3127 |
+
+Compare post 8's plain RNN on the same input ($w_h = 0.5$): its memory at step 4 was **0.0896**, and it was halving every step. The LSTM's belt is at **0.7339** and losing under 5 percent per step. After 20 steps the belt still holds $0.8491 \times 0.9526^{19} = $ **0.3373**; the plain RNN's memory after ten was already 0.0014.
+
+What would change? Lower $b_f$ to 0 and $f_t = 0.5$: the belt now halves each step, just like the plain RNN. Raise $b_f$ to 6 and $f_t = 0.9975$: the belt barely moves. Set $w_i = 0$ and $b_i = -4$ so the input gate is always nearly shut ($0.0180$): the 1 at step 1 is hardly written at all, $c_1 = 0.0180 \times 0.9640 = 0.0174$. Set the output gate's bias to $-4$: the belt keeps its memory, but $h_t$ shows only 2 percent of it. The memory is there, just not on display.
+
+<figure class="blog-figure blog-figure--wide">
+  <LstmCellStepper alt="The LSTM cell drawn as the standard diagram: the cell-state belt running straight across the top, with a multiply node for the forget gate and an add node for the write; below it four small boxes for f, i, g and o fed by x_t and h_(t−1); and a tanh then multiply on the way out to h_t. Each step lights up one part in order (f, i, g, o, the belt multiply, the belt add, the output) and prints its arithmetic. A timeline below shows four steps with c_t and h_t bars." />
+  <figcaption><strong>Figure 3. One LSTM cell, step by step.</strong> Defaults: input 1, 0, 0, 0; b_f = 3, w_i = 4, b_i = −2, w_g = 2, all other weights 0. The belt reads 0.8491, 0.8088, 0.7705, 0.7339 and the output 0.3453, 0.3345, 0.3236, 0.3127. Drag b_f to 0 and watch the belt halve each step instead. The figure keeps every recurrent weight at 0, as in the text.</figcaption>
+</figure>
+
+## Why the belt keeps the gradient alive
+
+Now the backward pass, the part that broke the plain RNN.
+
+In one sentence: a small nudge to the old belt $c_{t-1}$ reaches the new belt $c_t$ multiplied only by the forget gate.
+
+Look again at the cell update, $c_t = f_t \, c_{t-1} + i_t \, g_t$. If you nudge $c_{t-1}$ by a tiny amount, the first term moves by $f_t$ times that amount, and the second term does not involve $c_{t-1}$ at all. So, along the belt,
+
+$$
+\frac{\partial c_t}{\partial c_{t-1}} = f_t
+$$
+
+- $\frac{\partial c_t}{\partial c_{t-1}}$ reads "how much the new belt moves per unit nudge of the old belt".
+- $f_t$ is the forget gate at that step.
+
+Compare the plain RNN's link, $w_h \times (1 - h_t^2)$: a fixed weight times a $\tanh$ slope that shrinks whenever the memory is strong. The belt's link has **no fixed weight and no squashing slope**. It is whatever the forget gate says, and the network learns to set it near 1 exactly when it wants to remember.
+
+By the chain rule from post 1, going back $k$ steps along the belt multiplies the forget gates:
+
+$$
+\frac{\partial c_t}{\partial c_{t-k}} = f_t \times f_{t-1} \times \dots \times f_{t-k+1}
+$$
+
+Worked over 20 steps, each factor written as the same number for simplicity:
+
+| backward factor per step | after 10 steps | after 20 steps | after 30 steps |
+|---|---|---|---|
+| plain RNN, $w_h = 0.5$ (slopes = 1) | 0.00098 | 0.00000095 | 0.00000000093 |
+| LSTM belt, $f = \sigma(1) = 0.7311$ | 0.0436 | 0.0019 | 0.000083 |
+| LSTM belt, $f = \sigma(2) = 0.8808$ | 0.2810 | 0.0790 | 0.0222 |
+| LSTM belt, $f = \sigma(3) = 0.9526$ | 0.6152 | **0.3784** | 0.2328 |
+
+With the forget gate at 0.9526, **38 percent** of the gradient survives 20 steps; the plain RNN keeps less than a millionth. That is a factor of about 400,000.
+
+The everyday picture: on the conveyor belt, an item placed at the start of the line reaches the end unless a worker removes it. Sending a complaint back up the line ("the item at the end was wrong") travels the same belt in reverse, and it is only weakened at stations where workers were removing things.
+
+Hochreiter and Schmidhuber's 1997 cell had no forget gate at all; its self-connection was fixed at exactly 1, which they called the **constant error carousel**: the backward factor along the cell was exactly 1, forever. The forget gate, added in 2000, gives that up deliberately, so the cell can also **clear** memory it no longer needs, for example at the start of a new sentence.
+
+Two honest caveats.
+
+- This is the **direct** path along the belt. The total gradient also flows through the hidden state and the gates ($h_{t-1}$ feeds every gate), and those side paths can still vanish or explode. In our hand example every $u_\ast$ is 0, so the belt is the only path and the formula is exact. In general, the belt guarantees that **at least one** path does not have to vanish.
+- A forget gate below 1 still shrinks the gradient, just slowly. $0.9526^{100} = 0.0077$. LSTMs remember for hundreds of steps in practice, not forever.
+
+<figure class="blog-figure blog-figure--wide">
+  <ConveyorGradient alt="A log-scale line chart of gradient size against steps back, 0 to 30. Two lines: the plain RNN product (w_h times the tanh slope, using the echo-task run) in blue, and the LSTM belt product (the forget gate to the power k) in gold. A horizontal line marks 1. Sliders set w_h for the RNN and b_f for the LSTM; readouts at 10, 20 and 30 steps for both." />
+  <figcaption><strong>Figure 4. Two roads for the gradient.</strong> Defaults: RNN w_h = 0.5 with tanh slopes on, LSTM b_f = 3 (f = 0.9526). At 20 steps back the RNN line reads 0.00000079 and the LSTM line 0.3784. Set b_f = 0 and the gold line falls on top of 0.5 to the power k.</figcaption>
+</figure>
+
+## The forget-gate bias trick
+
+If the forget gate decides everything, what should it be **before** training? Weights usually start as small random numbers, and biases at 0. A forget bias of 0 gives $f = \sigma(0) = 0.5$: the belt halves at every step, exactly the plain RNN's failure. The network starts out forgetting, and, as post 8 showed, if the gradient has already vanished at the start, there is nothing to learn from.
+
+The fix is one line: **start the forget bias at a positive number**, usually $b_f = 1$, so $f$ starts around $0.73$ and the belt begins by remembering. Gers, Schmidhuber and Cummins (2000) already started their forget gates with positive biases, and Jozefowicz, Zaremba and Sutskever (2015), after an automated search over more than ten thousand recurrent architectures, singled it out: adding a bias of 1 to the forget gate closed most of the gap between the LSTM and the best gated designs they found. Many libraries now offer it as an option.
+
+What does it buy? From the table above: after 20 steps, $\sigma(0)^{20} = 0.00000095$, $\sigma(1)^{20} = 0.0019$, $\sigma(2)^{20} = 0.0790$. Each step up in the bias multiplies the surviving gradient by roughly 40 at 20 steps. You will see this in [the trainer](#an-lstm-learns-what-the-rnn-could-not): forget bias 0 fails at a delay of 20, bias 1 succeeds at 20 but fails at 40, bias 2 succeeds at all four delays.
+
+A side note on **peepholes**. Gers and Schmidhuber (2000, "Recurrent nets that time and count") also let the gates look directly at the cell state, adding a term like $p_f \, c_{t-1}$ inside each gate's score. Greff et al. (2017) compared eight LSTM variants on speech, handwriting and music and found peepholes made no significant difference on those tasks; the forget gate and the output activation were the parts that mattered most. Most libraries leave peepholes out.
+
+## The GRU: two gates instead of three
+
+Cho et al. (2014) proposed a simpler gated cell as part of their encoder-decoder for machine translation; it is now called the **gated recurrent unit** (GRU). It merges the belt and the hidden state into one memory, $h_t$, and uses two gates.
+
+### The equations
+
+In plain words: the **reset gate** decides how much of the old memory to use when drafting a new candidate; the **update gate** decides how much of that candidate replaces the old memory.
+
+$$
+\begin{aligned}
+z_t &= \sigma\left(w_z \, x_t + u_z \, h_{t-1} + b_z\right) \\
+r_t &= \sigma\left(w_r \, x_t + u_r \, h_{t-1} + b_r\right) \\
+\tilde{h}_t &= \tanh\left(w_h \, x_t + u_h \, (r_t \, h_{t-1}) + b_h\right) \\
+h_t &= (1 - z_t) \, h_{t-1} + z_t \, \tilde{h}_t
+\end{aligned}
+$$
+
+- $z_t$: the **update gate**, between 0 and 1. In this form, it is the fraction of **new** content.
+- $r_t$: the **reset gate**. Near 0, the candidate ignores the old memory and drafts from the input alone.
+- $\tilde{h}_t$ ("h tilde"): the candidate new memory.
+- $w_h$, $u_h$, $b_h$: the candidate's weights. (Here $w_h$ is the candidate's input weight, not post 8's recurrent weight.)
+
+The last line is an **interpolation**: a weighted average of old and new, with weights $1 - z_t$ and $z_t$ that always add up to 1. The everyday picture is a mixing tap: one handle sets the blend between the hot pipe (old memory) and the cold pipe (new candidate). You cannot get more water by opening both; the GRU's "keep" and "write" are tied together, where the LSTM has separate forget and input dials.
+
+**A naming warning.** Which side $z_t$ multiplies differs between sources. Cho et al. (2014) wrote $h_t = z_t \, h_{t-1} + (1 - z_t) \, \tilde{h}_t$, so their $z$ is the fraction **kept**. Chung et al. (2014) wrote it the other way, as above, so $z$ is the fraction **written**. PyTorch's `nn.GRU` documentation follows Cho's form, $h_t = (1 - z_t) \odot n_t + z_t \odot h_{t-1}$, and also applies the reset gate after the recurrent multiplication rather than before. Both conventions describe the same family of cells; a learned network simply flips the sign of the gate's weights. This post uses Chung's form because "z = how much new" reads more naturally next to the LSTM's input gate.
+
+### Running it by hand
+
+Same input $x = (1,\ 0,\ 0,\ 0)$, $h_0 = 0$. Weights:
+
+- Update gate: $w_z = 4$, $u_z = 0$, $b_z = -2$, so $z_t = \sigma(4x_t - 2)$: $0.8808$ when the input is 1, $0.1192$ when it is 0.
+- Reset gate: all zero, so $r_t = 0.5$.
+- Candidate: $w_h = 2$, $u_h = 1$, $b_h = 0$.
+
+**Step 1.** $z_1 = 0.8808$, $r_1 = 0.5$, $r_1 h_0 = 0$.
+
+$$
+\tilde{h}_1 = \tanh(2 \times 1 + 1 \times 0) = \tanh(2) = 0.9640
+$$
+
+$$
+h_1 = (1 - 0.8808) \times 0 + 0.8808 \times 0.9640 = 0 + 0.8491 = 0.8491
+$$
+
+**Step 2.** $z_2 = 0.1192$, $r_2 = 0.5$, $r_2 h_1 = 0.5 \times 0.8491 = 0.4246$.
+
+$$
+\tilde{h}_2 = \tanh(0 + 1 \times 0.4246) = 0.4008
+$$
+
+$$
+h_2 = 0.8808 \times 0.8491 + 0.1192 \times 0.4008 = 0.7479 + 0.0478 = 0.7957
+$$
+
+**Step 3.** $r_3 h_2 = 0.3978$, $\tilde{h}_3 = 0.3781$, $h_3 = 0.8808 \times 0.7957 + 0.1192 \times 0.3781 = 0.7008 + 0.0451 = 0.7459$.
+
+**Step 4.** $r_4 h_3 = 0.3729$, $\tilde{h}_4 = 0.3566$, $h_4 = 0.6570 + 0.0425 = 0.6995$.
+
+| step | $z_t$ | $r_t h_{t-1}$ | $\tilde{h}_t$ | kept $(1-z_t) h_{t-1}$ | written $z_t \tilde{h}_t$ | $h_t$ |
+|---|---|---|---|---|---|---|
+| 1 | 0.8808 | 0 | 0.9640 | 0 | 0.8491 | 0.8491 |
+| 2 | 0.1192 | 0.4246 | 0.4008 | 0.7479 | 0.0478 | 0.7957 |
+| 3 | 0.1192 | 0.3978 | 0.3781 | 0.7008 | 0.0451 | 0.7459 |
+| 4 | 0.1192 | 0.3729 | 0.3566 | 0.6570 | 0.0425 | 0.6995 |
+
+The GRU holds **0.6995** at step 4, against the plain RNN's 0.0896. The memory leaks slowly because, with $z = 0.1192$, 88 percent of the old value is kept, and the small write pulls it only partly towards the weaker candidate.
+
+The backward story is the same as the belt: along the direct path, $\frac{\partial h_t}{\partial h_{t-1}}$ includes the term $1 - z_t$, and with $1 - z_t = 0.8808$ for 20 steps that path keeps $0.8808^{20} = 0.0790$. To keep longer, the network learns to push $z_t$ closer to 0 on quiet steps. (The other terms, through the gates and the candidate, add to this; they do not replace it.)
+
+What would change? Set the reset gate's bias to $-4$ ($r = 0.018$): the candidate almost ignores the past ($\tilde{h}_2 = \tanh(0.018 \times 0.8491) = 0.0153$), so step 2 is nearly just the kept 88 percent: $h_2 = 0.7479 + 0.1192 \times 0.0153 = 0.7497$. Set $b_z = 0$: $z = 0.5$ on quiet steps, and the memory is half replaced each time.
+
+A limit of these hand-picked weights: the update gate opens because the input is **positive**. With $x_1 = -1$ it would score $\sigma(-6) = 0.0025$ and barely write. The same is true of the LSTM example's input gate. Trained networks find weights that work for both signs; the trainer below learns them.
+
+<figure class="blog-figure blog-figure--wide">
+  <GruCellStepper alt="The GRU cell drawn with one memory line: h_(t−1) enters from the left, splits into a reset-gated branch that feeds the candidate box and a direct branch to a mixing node controlled by z, with the candidate from below. Each step lights up z, then the reset branch, then the candidate, then the blend of kept and written parts, printing the arithmetic. A four-step timeline below." />
+  <figcaption><strong>Figure 5. One GRU cell, step by step.</strong> Defaults: input 1, 0, 0, 0; w_z = 4, b_z = −2, reset weights 0, w_h = 2, u_h = 1. The memory reads 0.8491, 0.7957, 0.7459, 0.6995. A toggle switches to Cho's naming (z = fraction kept); the numbers do not change, only the label.</figcaption>
+</figure>
+
+## An LSTM learns what the RNN could not
+
+Now the payoff. The task is exactly post 8's: input $(s,\ 0,\ 0,\ \dots,\ 0)$ of length $T$ (the **delay**), with $s = +1$ or $-1$, and the target at the last step is $s$. The output is $y = v \, h_T$, and the loss is half the squared error, averaged over the two examples. Every pass computes the full gradient by backpropagation through time and takes one gradient-descent step. There is no randomness.
+
+- **Plain RNN**: post 8's setup unchanged. Start $w_x = w_h = w_o = 0.5$, learning rate $\eta = 0.5$.
+- **LSTM**: one unit, the six equations above plus $y = v \, h_T$, so 13 weights. Start every input weight $w_\ast$ and $v$ at 0.5, every recurrent weight $u_\ast$ at 0, every bias at 0 except the forget bias $b_f$. Learning rate $\eta = 0.3$ (with 0.5 the LSTM's updates were sometimes too large and threw it off course).
+
+"Learned" means the loss first falls below 0.01. Each run is capped at 3,000 passes.
+
+| delay $T$ | 5 | 10 | 20 | 40 |
+|---|---|---|---|---|
+| plain RNN | 8 | 25 | never | never |
+| LSTM, $b_f = 0$ | 97 | 745 | never | never |
+| LSTM, $b_f = 1$ | 42 | 64 | 339 | never |
+| LSTM, $b_f = 2$ | 30 | 27 | **31** | **73** |
+
+And the very first gradient for the weight that writes $s$ into memory ($w_x$ for the RNN, the candidate's $w_g$ for the LSTM):
+
+| delay $T$ | 5 | 10 | 20 | 40 |
+|---|---|---|---|---|
+| plain RNN | −0.0226 | −0.00072 | −0.00000070 | −0.00000000000067 |
+| LSTM, $b_f = 2$ | −0.0557 | −0.0306 | −0.0088 | −0.00070 |
+
+Four things to notice.
+
+1. **At delay 40 the LSTM's first gradient is a billion times larger** than the RNN's. The RNN's signal passes through 39 factors of about 0.5; the LSTM's passes through 39 forget gates of $\sigma(2) = 0.8808$, and $0.8808^{39} = 0.0071$.
+2. **The forget bias decides everything.** With $b_f = 0$ the LSTM is no better than the plain RNN at long delays, because $\sigma(0) = 0.5$ is post 8's $w_h = 0.5$ in disguise. That is the bias trick, measured.
+3. **At short delays the RNN is faster.** It has 3 weights and a bigger learning rate; the LSTM has 13. Gates are not free; they pay off when memory has to be long.
+4. In every successful LSTM run, training pushed $b_f$ up to about **2.35**, so $f \approx 0.91$ on quiet steps: the network learned to keep its belt.
+
+Post 8 also rescued the RNN by starting $w_h$ at 1.0. That works for one bit, but it fixes the memory's decay rate for every input. The LSTM can keep at one moment and clear at the next, because its forget gate is computed fresh from each input.
+
+<figure class="blog-figure blog-figure--wide">
+  <EchoLstmTrainer alt="Two training panels side by side, plain RNN on the left and LSTM on the right, both on the same remember-the-first-input task. Each shows the unrolled memory for s = +1 as a strip of bars (h_t for the RNN, c_t for the LSTM) and a loss curve over passes. Controls: delay 5, 10, 20 or 40; LSTM forget bias 0, 1 or 2; Train (Pause while running), One pass and Start over. Readouts: pass, loss, first pass below 0.01 for each model." />
+  <figcaption><strong>Figure 6. Remember the first input, again.</strong> Defaults: delay 20, forget bias 2. The RNN stays at loss 0.5; the LSTM passes below 0.01 at pass 31. Choose delay 40: LSTM at pass 73. Set forget bias 0: the LSTM fails at 20 too.</figcaption>
+</figure>
+
+## How many weights?
+
+A recurrent layer's size is set by two numbers: $n$, the input size (for example 80 mel numbers per frame), and $m$, the hidden size (for example 256 units).
+
+In one sentence: each gate (or candidate) is one ordinary layer reading both the input and the old hidden state, so it costs $n m + m^2 + m$ weights, and an LSTM has four of them while a GRU has three.
+
+$$
+\text{RNN} = n m + m^2 + m, \qquad \text{LSTM} = 4\,(n m + m^2 + m), \qquad \text{GRU} = 3\,(n m + m^2 + m)
+$$
+
+- $n m$: the input matrix, one weight per (input number, hidden unit) pair.
+- $m^2$: the recurrent matrix, one weight per (old unit, new unit) pair.
+- $m$: one bias per unit.
+
+Worked with $n = 80$, $m = 256$:
+
+$$
+n m + m^2 + m = 20{,}480 + 65{,}536 + 256 = 86{,}272
+$$
+
+So the plain RNN has **86,272** weights, the GRU $3 \times 86{,}272 = $ **258,816**, and the LSTM $4 \times 86{,}272 = $ **345,088**. A GRU is 25 percent smaller than an LSTM of the same width. For our one-unit toys ($n = m = 1$): 3, 9 and 12, which, plus the output weight, is the LSTM trainer's 13.
+
+Library counts can differ slightly. PyTorch, for example, keeps two bias vectors per gate (one on the input side, one on the recurrent side), adding $m$ per gate: 346,112 for that LSTM and 259,584 for the GRU.
+
+You can check all three in PyTorch:
+
+```python
+import torch.nn as nn
+
+count = lambda m: sum(p.numel() for p in m.parameters())
+print("RNN ", count(nn.RNN(80, 256)))
+print("GRU ", count(nn.GRU(80, 256)))
+print("LSTM", count(nn.LSTM(80, 256)))
+# the four gates are stacked: 4 × 256 rows
+print(nn.LSTM(80, 256).weight_ih_l0.shape)
+```
+
+It prints:
+
+```text
+RNN  86528
+GRU  259584
+LSTM 346112
+torch.Size([1024, 80])
+```
+
+The plain RNN reads 86,528, the formula's 86,272 plus the second bias of 256. The last line shows how PyTorch stores the four gates: one input matrix with $4 \times 256 = 1{,}024$ rows, the gates stacked on top of each other.
+
+Which is better? Chung et al. (2014) compared them on music and raw speech-signal modelling and found both gated units clearly beat the plain $\tanh$ RNN, with no consistent winner between them. Jozefowicz et al. (2015) and Greff et al. (2017) reached similar conclusions on larger studies: with a sensible forget bias, the LSTM is hard to beat, and the GRU is a good, cheaper alternative.
+
+<figure class="blog-figure blog-figure--wide">
+  <RecurrentParamCounter alt="Two sliders set the input size n (1 to 1024) and hidden size m (1 to 1024). Three stacked bars show the RNN, GRU and LSTM counts, each split into its n times m, m squared and bias parts, with the formula printed under each bar using the current numbers. A toggle adds PyTorch's second bias." />
+  <figcaption><strong>Figure 7. Counting weights.</strong> Defaults n = 80, m = 256: RNN 86,272, GRU 258,816, LSTM 345,088. With the PyTorch toggle: 346,112 and 259,584. Set n = m = 1: 3, 9, 12.</figcaption>
+</figure>
+
+## Bidirectional and stacked
+
+Two ways to build bigger recurrent models from these cells, briefly.
+
+- **Bidirectional.** Run one LSTM left to right and a second one right to left over the same sequence, and join their hidden states at each step (Schuster and Paliwal, 1997). Each position then knows both what came before and what comes after. That is useful when the whole recording is available, as in offline speech recognition, but impossible for streaming, where the future has not arrived yet. It doubles the weights.
+- **Stacked** (or deep). Feed the sequence of hidden states from one recurrent layer in as the input sequence of the next. Lower layers tend to capture short, local patterns and higher layers longer ones. The second layer's input size $n$ is the first layer's hidden size $m$ (doubled if the first layer is bidirectional).
+
+## LSTMs in speech, and what replaced them
+
+- **Speech recognition.** Graves, Mohamed and Hinton (2013) trained deep bidirectional LSTMs end to end and reached 17.7 percent phoneme error on the TIMIT benchmark, the best published result at the time.
+- **Text to speech.** Tacotron 2 (Shen et al., 2018) encodes the text with a bidirectional LSTM and generates the mel spectrogram, one frame at a time, with a decoder of two stacked LSTM layers of 1,024 units. WaveRNN (Kalchbrenner et al., 2018), which generates the waveform itself one sample at a time, uses a single recurrent layer whose cell is a GRU-style gated unit.
+
+Then attention, and the Transformer built on it, replaced them almost everywhere, for two reasons that follow directly from this post.
+
+- **Parallelism.** An LSTM still needs $c_9$ before it can compute $c_{10}$. A 1,000-frame recording is 1,000 steps one after another. Attention lets all positions be computed at once.
+- **Direct paths.** Even a good forget gate shrinks the gradient a little every step; $0.95^{100}$ is 0.006. Attention connects step 1 and step 1,000 in a single hop, with no long product at all.
+
+The gate idea did not disappear, though. The Transformer's residual connections (post 11) are an always-open version of the belt's "add, don't overwrite", and gating reappears in modern state-space models. The next step is [attention](/blog/foundations-attention/); you can already see it at work in the speech model of [the Pocket TTS post](/blog/pocket-tts-calm-explained/).
+
+## What to remember
+
+- A **gate** is a sigmoid between 0 and 1 that multiplies a value: a learned dimmer switch. On vectors it multiplies elementwise.
+- An **LSTM** carries a cell state (the belt) and a hidden state. Forget, input and output gates plus a candidate update them: $c_t = f_t c_{t-1} + i_t g_t$, $h_t = o_t \tanh(c_t)$.
+- Along the belt, $\partial c_t / \partial c_{t-1} = f_t$. No fixed weight, no squashing slope. With $f = 0.9526$, 38 percent of the gradient survives 20 steps; the plain RNN keeps one in a million.
+- Start the forget bias positive (1 is the usual default). With bias 0 the LSTM starts out as forgetful as a plain RNN.
+- A **GRU** uses an update gate and a reset gate, and blends old and new: $h_t = (1 - z_t) h_{t-1} + z_t \tilde{h}_t$ in Chung's convention. Cho's paper and PyTorch put $z$ on the other side.
+- Weights: LSTM $4(nm + m^2 + m)$, GRU $3(nm + m^2 + m)$. With $n = 80$, $m = 256$: 345,088 and 258,816.
+- On the echo task, a one-unit LSTM with forget bias 2 learns a delay of 40 in 73 passes; the plain RNN never learns 20.
+
+## Try it yourself
+
+- **GateDimmer:** set $z = 3$, $v = 1$ with the sliders. The output should read $0.9526$. Set $z = -4$: $0.0180$.
+- **LstmCellStepper:** step through the defaults. The belt should read $0.8491$, $0.8088$, $0.7705$, $0.7339$ and the output $0.3453$, $0.3345$, $0.3236$, $0.3127$. Set $b_f = 0$: the belt reads $0.8491$, $0.4246$, $0.2123$, $0.1061$.
+- **ConveyorGradient:** set $b_f = 1$. The LSTM line at 20 steps should read $0.0019$. Set $b_f = 2$: $0.0790$.
+- **GruCellStepper:** step through the defaults: $0.8491$, $0.7957$, $0.7459$, $0.6995$. Set the reset bias to $-4$: step 2 shows $h_2 = 0.7497$.
+- **EchoLstmTrainer:** delay 40, forget bias 2: the LSTM passes below 0.01 at pass **73**. Forget bias 1 at delay 20: pass **339**.
+- **RecurrentParamCounter:** set $n = 80$, $m = 512$. You should see RNN $303{,}616$, GRU $910{,}848$, LSTM $1{,}214{,}464$.
+
+## Sources
+
+- Hochreiter, S. and Schmidhuber, J. (1997). Long short-term memory. *Neural Computation* 9(8), 1735 to 1780.
+- Schuster, M. and Paliwal, K. K. (1997). Bidirectional recurrent neural networks. *IEEE Transactions on Signal Processing* 45(11), 2673 to 2681.
+- Gers, F. A., Schmidhuber, J. and Cummins, F. (2000). Learning to forget: continual prediction with LSTM. *Neural Computation* 12(10), 2451 to 2471.
+- Gers, F. A. and Schmidhuber, J. (2000). Recurrent nets that time and count. *Proceedings of the IEEE-INNS-ENNS International Joint Conference on Neural Networks (IJCNN 2000)*, Como, Italy.
+- Graves, A., Mohamed, A. and Hinton, G. (2013). Speech recognition with deep recurrent neural networks. *ICASSP 2013*. arXiv:1303.5778.
+- Cho, K., van Merriënboer, B., Gulcehre, C., Bahdanau, D., Bougares, F., Schwenk, H. and Bengio, Y. (2014). Learning phrase representations using RNN encoder-decoder for statistical machine translation. *EMNLP 2014*. arXiv:1406.1078.
+- Chung, J., Gulcehre, C., Cho, K. and Bengio, Y. (2014). Empirical evaluation of gated recurrent neural networks on sequence modeling. arXiv:1412.3555.
+- Jozefowicz, R., Zaremba, W. and Sutskever, I. (2015). An empirical exploration of recurrent network architectures. *ICML 2015*.
+- Greff, K., Srivastava, R. K., Koutník, J., Steunebrink, B. R. and Schmidhuber, J. (2017). LSTM: a search space odyssey. *IEEE Transactions on Neural Networks and Learning Systems* 28(10), 2222 to 2232.
+- Shen, J. et al. (2018). Natural TTS synthesis by conditioning WaveNet on mel spectrogram predictions. *ICASSP 2018*. arXiv:1712.05884.
+- Kalchbrenner, N. et al. (2018). Efficient neural audio synthesis. *ICML 2018*. arXiv:1802.08435.
+

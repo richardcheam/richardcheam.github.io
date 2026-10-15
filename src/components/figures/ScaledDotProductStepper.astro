@@ -1,0 +1,54 @@
+---
+// Foundations, attention post: softmax(QKᵀ/√2)V on three tokens.
+// Q = [[1,0],[1,1],[2,1]], K = [[1,1],[0,1],[1,2]], V = [[2,0],[0,2],[2,2]].
+// Weights 0.401 0.198 0.401 / 0.284 0.140 0.576 / 0.306 0.074 0.620;
+// output (1.604, 1.198), (1.720, 1.432), (1.851, 1.389).
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-sdpa>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 295" role="img" aria-labelledby="sd-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="sd-title">Scaled dot-product attention computed cell by cell: scores, scaling, softmax and output</title>
+    <g data-draw></g>
+  </svg>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt } from "../../lib/tiny-net";
+  import { INK, MUTED, GOLD, TINT, JADE } from "../../lib/net-diagram";
+  import { txt } from "../../lib/plot";
+  import { attend } from "../../lib/attention";
+  const Q = [[1, 0], [1, 1], [2, 1]], K = [[1, 1], [0, 1], [1, 2]], V = [[2, 0], [0, 2], [2, 2]];
+  const A = attend(Q, K, V), f3 = (v: number) => fmt(v, 3);
+  document.querySelectorAll<HTMLElement>("[data-sdpa]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const steps = () => [
+      ...Array.from({ length: 9 }, (_, n) => { const i = Math.floor(n / 3), j = n % 3; return { say: n === 0 ? "Score every query against every key: row i is query i, column j is key j." : `Query ${i + 1} against key ${j + 1}.`, math: `(${Q[i].join(", ")}) dot (${K[j].join(", ")}) = ${Q[i][0]} × ${K[j][0]} + ${Q[i][1]} × ${K[j][1]} = ${A.raw[i][j]}` }; }),
+      { say: "Divide every score by √d. Here d = 2, so √2 = 1.414.", math: A.raw.map((r) => r.map((v) => `${v} / 1.414 = ${f3(v / Math.SQRT2)}`).join(",  ")).join("\n") },
+      ...[0, 1, 2].map((i) => { const e = A.scaled[i].map(Math.exp), t = e.reduce((a, b) => a + b, 0); return { say: `Softmax row ${i + 1}: how much query ${i + 1} takes from each token. The row adds up to 1.`, math: `${A.scaled[i].map((v, j) => `e^${f3(v)} = ${f3(e[j])}`).join(",  ")};  total ${f3(t)}\nweights ${A.w[i].map(f3).join(", ")}` }; }),
+      ...Array.from({ length: 6 }, (_, n) => { const i = Math.floor(n / 2), c = n % 2; return { say: n === 0 ? "Blend the values with each row of weights." : `Row ${i + 1}, ${c ? "second" : "first"} number.`, math: `${A.w[i].map((w, j) => `${f3(w)} × ${V[j][c]}`).join(" + ")} = ${f3(A.out[i][c])}` }; }),
+      { say: "Every row of weights adds up to 1, so every output is a weighted average of the values.", math: A.w.map((r) => `${r.map(f3).join(" + ")} = 1`).join("\n") },
+      { say: "Three tokens in, three tokens out, same shape: attention layers can be stacked.", math: `output: ${A.out.map((r) => `(${r.map(f3).join(", ")})`).join(", ")}` },
+    ];
+    const grid = (l: number, t: number, title: string, rows: string[][], cw: number, hl: (i: number, j: number) => boolean, shade?: number[][]) => {
+      let s = txt(l, t - 10, title, `font-size="11.5" font-weight="700" fill="${INK}"`);
+      rows.forEach((r, i) => r.forEach((v, j) => { const on = hl(i, j); s += `<rect x="${l + j * cw}" y="${t + i * 34}" width="${cw - 4}" height="30" rx="4" fill="${shade && v ? `rgba(47,110,95,${(shade[i][j] * 0.6).toFixed(2)})` : on ? TINT : "#fff"}" stroke="${on ? GOLD : "#cfd5d4"}" stroke-width="${on ? 2.5 : 1}"/>` + txt(l + j * cw + (cw - 4) / 2, t + i * 34 + 20, v, `font-size="12" font-weight="700" text-anchor="middle" fill="${v ? INK : "#B9C0BF"}"`); }));
+      return s;
+    };
+    function draw(k: number) {
+      const show = (n: number) => k >= n;
+      const cur = k >= 0 && k < 9 ? [Math.floor(k / 3), k % 3] : null;
+      let s = grid(20, 40, "Q", Q.map((r) => r.map(String)), 34, (i) => !!cur && cur[0] === i) + grid(110, 40, "K", K.map((r) => r.map(String)), 34, (i) => !!cur && cur[1] === i) + grid(200, 40, "V", V.map((r) => r.map(String)), 34, (i, j) => k >= 13 && k <= 18 && Math.floor((k - 13) / 2) >= 0 && (k - 13) % 2 === j);
+      const sc = A.raw.map((r, i) => r.map((v, j) => (show(i * 3 + j) ? (show(9) ? f3(v / Math.SQRT2) : String(v)) : "")));
+      s += grid(300, 40, k >= 9 ? "scores ÷ √2" : "scores QKᵀ", sc, 62, (i, j) => !!cur && cur[0] === i && cur[1] === j);
+      const wt = A.w.map((r, i) => r.map((v) => (show(10 + i) ? f3(v) : "")));
+      s += grid(500, 40, "weights (softmax per row)", wt, 62, (i) => k === 10 + i, A.w);
+      const out = A.out.map((r, i) => r.map((v, c) => (show(13 + i * 2 + c) ? f3(v) : "")));
+      s += grid(560, 180, "output", out, 72, (i, c) => k === 13 + i * 2 + c);
+      s += txt(20, 200, "Each output row is one token's new vector: a mixture of all three values.", `font-size="11" fill="${MUTED}"`);
+      $("[data-draw]").innerHTML = s;
+    }
+    stepper(root, steps, draw, { delay: 1 });
+  });
+</script>

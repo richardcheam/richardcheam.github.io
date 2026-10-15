@@ -1,0 +1,50 @@
+---
+// Foundations, Transformer post: one token's trip from its id to output
+// scores through a pre-norm (or post-norm) block. Diagram only; shapes are
+// shown for 3 tokens of width d, 4d inside the feed-forward network, and V
+// scores at the head.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-tblock>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 420" role="img" aria-labelledby="tb-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="tb-title">A Transformer block diagram with a token vector moving through it</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Arrangement</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-n="pre" aria-pressed="true">Pre-norm</button>
+      <button type="button" class="fig-chip" data-n="post" aria-pressed="false">Post-norm (2017)</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { INK, MUTED, GOLD, TINT, JADE } from "../../lib/net-diagram";
+  import { txt, arrow } from "../../lib/plot";
+  document.querySelectorAll<HTMLElement>("[data-tblock]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    let pre = true;
+    // Boxes bottom to top: [label, shape, explanation].
+    const boxes = () => (pre
+      ? [["token id 2", "3 numbers", "Each token is just a number: its row in the vocabulary."], ["embedding row", "3 × d", "Look up the token's row of the embedding table: a vector of d numbers."], ["+ position", "3 × d", "Add the position vector, so order is no longer invisible."], ["norm", "3 × d", "Normalise a copy for the attention branch; the highway is untouched."], ["multi-head attention", "3 × d", "Tokens look at each other and blend what they find."], ["add", "3 × d", "Add attention's output back onto the highway."], ["norm", "3 × d", "Normalise a copy for the feed-forward branch."], ["feed-forward: d → 4d → d", "3 × 4d inside", "Each token alone: widen to 4d, activate, narrow back to d."], ["add", "3 × d", "Add the feed-forward output onto the highway."], ["× N blocks", "3 × d", "Repeat the whole block N times; the shape never changes."], ["final norm", "3 × d", "One last normalisation of the highway."], ["linear head", "3 × V", "Turn each vector into one score per vocabulary entry."], ["softmax", "3 × V", "Scores become probabilities for the next token."]]
+      : [["token id 2", "3 numbers", "Each token is just a number."], ["embedding row", "3 × d", "Look up its embedding row."], ["+ position", "3 × d", "Add the position vector."], ["multi-head attention", "3 × d", "Attention reads the highway directly."], ["add", "3 × d", "Add attention's output to its input."], ["norm", "3 × d", "Post-norm: normalise after the addition, highway included."], ["feed-forward: d → 4d → d", "3 × 4d inside", "Widen, activate, narrow."], ["add", "3 × d", "Add."], ["norm", "3 × d", "Normalise after the addition again."], ["× N blocks", "3 × d", "Repeat N times."], ["linear head", "3 × V", "Scores per vocabulary entry."], ["softmax", "3 × V", "Probabilities."]]) as [string, string, string][];
+    const steps = () => boxes().map(([lab, shape, say]) => ({ say, math: `${lab}: shape ${shape}` }));
+    function draw(k: number) {
+      const B = boxes(), n = B.length, y = (i: number) => 395 - i * (380 / n);
+      let s = `<line x1="240" x2="240" y1="${y(2)}" y2="${y(n - 3)}" stroke="${GOLD}" stroke-width="7" stroke-opacity="0.25"/>` + txt(250, (y(2) + y(n - 3)) / 2, "residual highway", `font-size="10.5" fill="${GOLD}"`);
+      B.forEach(([lab], i) => {
+        const on = i === k, done = i < k, branch = /norm|attention|feed-forward/.test(lab) && !/final/.test(lab) && i > 2 && i < n - 3, x = branch ? 330 : 140;
+        s += `<rect x="${x}" y="${y(i) - 12}" width="200" height="24" rx="6" fill="${on ? TINT : "#fff"}" stroke="${on ? JADE : done ? INK : "#cfd5d4"}" stroke-width="${on ? 2.5 : 1.2}"/>` + txt(x + 100, y(i) + 4, lab, `font-size="11.5" font-weight="${on ? 700 : 400}" text-anchor="middle" fill="${INK}"`);
+        if (i > 0) s += arrow(branch ? 430 : 240, y(i - 1) - 12, branch ? 430 : 240, y(i) + 13, done || on ? MUTED : "#e3e7e6", 1.2);
+        if (on) s += `<circle cx="${x - 14}" cy="${y(i)}" r="7" fill="${GOLD}"/>`;
+      });
+      if (k >= 0) s += txt(570, 60, "shape here", `font-size="11" fill="${MUTED}"`) + txt(570, 84, B[k][1], `font-size="16" font-weight="700" fill="${INK}"`);
+      s += txt(570, 130, "3 tokens, model width d,", `font-size="11" fill="${MUTED}"`) + txt(570, 146, "vocabulary size V.", `font-size="11" fill="${MUTED}"`);
+      $("[data-draw]").innerHTML = s;
+    }
+    const redraw = stepper(root, steps, draw, { delay: 1.2 });
+    root.querySelectorAll<HTMLButtonElement>("[data-n]").forEach((b) => b.addEventListener("click", () => { pre = b.dataset.n === "pre"; root.querySelectorAll("[data-n]").forEach((o) => o.setAttribute("aria-pressed", String(o === b))); redraw(); }));
+  });
+</script>

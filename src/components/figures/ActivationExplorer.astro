@@ -1,0 +1,78 @@
+---
+// Foundations, neurons post: ReLU, sigmoid and tanh with their slopes at a
+// chosen z. At z = 4 the S curves are flat (slopes 0.018 and 0.001) while
+// ReLU's slope stays 1, which is why deep stacks train better with ReLU.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-actx>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 320" role="img" aria-labelledby="ax-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="ax-title">Three activation functions, their values and slopes at a chosen input</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Input z <strong data-vz></strong></span><input class="scrub" data-z type="range" min="-4" max="4" step="0.1" value="1" /></label>
+    <div><span class="fig-panel__name">Bold curve</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-act="relu" aria-pressed="true">ReLU</button>
+      <button type="button" class="fig-chip" data-act="sigmoid" aria-pressed="false">Sigmoid</button>
+      <button type="button" class="fig-chip" data-act="tanh" aria-pressed="false">Tanh</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt } from "../../lib/tiny-net";
+  import { INK, MUTED, JADE, NEG, GOLD } from "../../lib/net-diagram";
+  type A = "relu" | "sigmoid" | "tanh";
+  const sg = (z: number) => 1 / (1 + Math.exp(-z));
+  const F: Record<A, (z: number) => number> = { relu: (z) => Math.max(0, z), sigmoid: sg, tanh: Math.tanh };
+  const D: Record<A, (z: number) => number> = { relu: (z) => (z > 0 ? 1 : 0), sigmoid: (z) => sg(z) * (1 - sg(z)), tanh: (z) => 1 - Math.tanh(z) ** 2 };
+  const COL: Record<A, string> = { relu: JADE, sigmoid: "#3E6E9E", tanh: "#B5533C" };
+  const NAME: Record<A, string> = { relu: "ReLU", sigmoid: "Sigmoid", tanh: "Tanh" };
+  const r3 = (v: number) => fmt(Math.round(v * 1000) / 1000, 3);
+  document.querySelectorAll<HTMLElement>("[data-actx]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    let z = 1, act: A = "relu";
+    const setZ = (v: number) => { z = v; $<HTMLInputElement>("[data-z]").value = String(v); };
+    const all = () => (["relu", "sigmoid", "tanh"] as A[]).map((a) => `${NAME[a]} ${r3(F[a](z))}, slope ${r3(D[a](z))}`).join("\n");
+    const steps = () => [
+      { say: "At z = 0 the three disagree: ReLU gives 0, sigmoid gives one half, tanh gives 0. Tanh is steepest here.", math: all(), enter: () => setZ(0) },
+      { say: "At z = 1 all three are still climbing. ReLU's slope is exactly 1.", math: all(), enter: () => setZ(1) },
+      { say: "At z = 4 the S curves have gone flat: their slopes are nearly 0. ReLU's slope is still 1. A flat slope lets almost no blame through during training.", math: all(), enter: () => setZ(4) },
+      { say: "At z = −2 ReLU outputs 0 with slope 0: no blame passes. The S curves still have a small slope here.", math: all(), enter: () => setZ(-2) },
+    ];
+    const X = (v: number) => 60 + ((v + 4) / 8) * 420, Y = (v: number) => 280 - ((v + 1.5) / 5.5) * 250;
+    function draw() {
+      let s = "";
+      for (let v = -4; v <= 4; v++) s += `<line x1="${X(v)}" x2="${X(v)}" y1="${Y(-1.5)}" y2="${Y(4)}" stroke="${v === 0 ? "#cfd5d4" : "#f0f2f2"}"/><text x="${X(v)}" y="${Y(-1.5) + 16}" font-size="10.5" text-anchor="middle" fill="${MUTED}">${fmt(v)}</text>`;
+      for (let v = -1; v <= 4; v++) s += `<line x1="${X(-4)}" x2="${X(4)}" y1="${Y(v)}" y2="${Y(v)}" stroke="${v === 0 ? "#cfd5d4" : "#f0f2f2"}"/><text x="${X(-4) - 8}" y="${Y(v) + 4}" font-size="10.5" text-anchor="end" fill="${MUTED}">${fmt(v)}</text>`;
+      (["relu", "sigmoid", "tanh"] as A[]).forEach((a) => {
+        const pts = Array.from({ length: 161 }, (_, i) => { const u = -4 + i * 0.05; return `${X(u).toFixed(1)},${Y(Math.min(4, F[a](u))).toFixed(1)}`; }).join(" ");
+        s += `<polyline points="${pts}" fill="none" stroke="${COL[a]}" stroke-width="${a === act ? 3 : 1.4}" stroke-opacity="${a === act ? 1 : 0.35}"/>`;
+      });
+      const fz = F[act](z), dz = D[act](z);
+      s += `<line x1="${X(z)}" x2="${X(z)}" y1="${Y(-1.5)}" y2="${Y(4)}" stroke="${GOLD}" stroke-dasharray="4 3"/>`;
+      // The tangent: the slope drawn as a short straight line through the point.
+      const h = 0.7;
+      s += `<line x1="${X(z - h)}" y1="${Y(fz - dz * h)}" x2="${X(z + h)}" y2="${Y(fz + dz * h)}" stroke="${GOLD}" stroke-width="2.5"/>`;
+      s += `<circle cx="${X(z)}" cy="${Y(fz)}" r="5.5" fill="${COL[act]}" stroke="#fff" stroke-width="2"/>`;
+      s += `<text x="${X(-4)}" y="18" font-size="11" fill="${MUTED}">The gold line is the slope at z: how much the output moves per small move of z.</text>`;
+      // Table of all three at this z.
+      s += `<text x="520" y="70" font-size="12" font-weight="700" fill="${INK}">At z = ${fmt(z, 2)}</text><text x="630" y="70" font-size="11" fill="${MUTED}">f(z)</text><text x="690" y="70" font-size="11" fill="${MUTED}">slope</text>`;
+      (["relu", "sigmoid", "tanh"] as A[]).forEach((a, i) => {
+        const y = 100 + i * 30, b = a === act ? 700 : 400;
+        s += `<circle cx="526" cy="${y - 4}" r="5" fill="${COL[a]}"/><text x="538" y="${y}" font-size="12.5" font-weight="${b}" fill="${INK}">${NAME[a]}</text>`;
+        s += `<text x="630" y="${y}" font-size="12.5" font-weight="${b}" fill="${INK}">${r3(F[a](z))}</text><text x="690" y="${y}" font-size="12.5" font-weight="${b}" fill="${D[a](z) < 0.05 ? NEG : INK}">${r3(D[a](z))}</text>`;
+      });
+      s += `<text x="520" y="210" font-size="11" fill="${MUTED}">${z === 0 ? "At exactly z = 0, ReLU's slope is taken as 0." : "Slopes below 0.05 are in red:"}</text><text x="520" y="226" font-size="11" fill="${MUTED}">${z === 0 ? "" : "blame barely gets through them."}</text>`;
+      $("[data-draw]").innerHTML = s;
+      $("[data-vz]").textContent = fmt(z, 2);
+    }
+    const redraw = stepper(root, steps, draw, { delay: 2.4 });
+    $<HTMLInputElement>("[data-z]").addEventListener("input", (e) => { z = +(e.target as HTMLInputElement).value; redraw(); });
+    root.querySelectorAll<HTMLButtonElement>("[data-act]").forEach((b) => b.addEventListener("click", () => {
+      act = b.dataset.act as A; root.querySelectorAll("[data-act]").forEach((o) => o.setAttribute("aria-pressed", String(o === b))); redraw();
+    }));
+  });
+</script>

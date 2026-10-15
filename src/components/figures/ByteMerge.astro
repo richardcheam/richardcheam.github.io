@@ -1,0 +1,76 @@
+---
+// Khmer script post, Figure 6: a toy byte-pair-style tokenizer on ខ្មែរ. Start
+// from its 15 UTF-8 bytes. Three hand-written merge rules: (1) each 3-byte
+// triple into its code point, (2) COENG + MO into one piece, (3) the whole
+// word. With English-only rules nothing merges. Right: the byte-fallback
+// cost 3r for r code points per Khmer token.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram bmg" role="region" aria-label={alt} data-bmg>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 330" role="img" aria-labelledby="bmg-title" class="blog-diagram-svg" font-family="Inter, 'Noto Sans Khmer', 'Khmer Sangam MN', sans-serif">
+    <title id="bmg-title">Fifteen byte tokens merging into code points, a cluster and finally one word</title>
+    <g data-tiles></g>
+    <text data-count x="20" y="190" font-size="30" font-weight="700" fill="#594578" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"></text>
+    <text data-rule x="20" y="214" font-size="12" fill="#2b2b30"></text>
+    <line x1="20" x2="760" y1="236" y2="236" stroke="#ececf1" />
+    <text data-r1 x="20" y="264" font-size="12.5" font-weight="700" fill="#2b2b30"></text>
+    <text data-r2 x="20" y="288" font-size="12" fill="#2b2b30"></text>
+    <text data-r3 x="20" y="312" font-size="11.5" fill="#5f5f66"></text>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Tokenizer</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-merge>Apply next merge</button>
+      <button type="button" class="fig-chip" data-reset>Back to bytes</button>
+      <button type="button" class="fig-chip" data-eng aria-pressed="false">English-only rules</button>
+    </div></div>
+    <label><span class="fig-panel__name">Code points per Khmer token r<strong data-vr></strong></span><input class="scrub" data-r type="range" min="1" max="6" step="0.1" value="3.8" /></label>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { setupFigure, tween, wait } from "../../lib/figure-motion";
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-bmg]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const rIn = $<HTMLInputElement>("[data-r]");
+    const mk = (g: Element, tag: string, a: Record<string, string | number>, txt?: string) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, String(a[k])); if (txt !== undefined) e.textContent = txt; g.append(e); return e; };
+    const WORD = "ខ្មែរ", cps = [...WORD], bytes = [...new TextEncoder().encode(WORD)].map((b) => b.toString(16).toUpperCase());
+    // Token groupings after each stage, as lists of byte index ranges.
+    const stages: [number, number][][] = [
+      bytes.map((_, i) => [i, i + 1]),
+      cps.map((_, i) => [3 * i, 3 * i + 3]),
+      [[0, 3], [3, 9], [9, 12], [12, 15]],
+      [[0, 15]],
+    ];
+    const rules = ["", "Rule 1: each 3-byte group becomes one code point", "Rule 2: COENG + MO becomes one piece (the subscript)", "Rule 3: the whole word is one piece"];
+    let stage = 0, eng = false, mix = 1;
+    const label = (a: number, b: number) => (b - a === 1 ? bytes[a] : new TextDecoder().decode(new Uint8Array(bytes.slice(a, b).map((h) => parseInt(h, 16)))));
+    function draw() {
+      const g = $("[data-tiles]"); g.replaceChildren();
+      mk(g, "text", { x: 20, y: 22, "font-size": 11.5, "font-weight": 700, fill: "#2b2b30" }, "ខ្មែរ as tokens");
+      const W = 740 / 15;
+      // Draw the current stage; groups grow from the previous stage as mix goes 0 to 1.
+      stages[stage].forEach(([a, b]) => {
+        const x = 20 + a * W, w = (b - a) * W - 4, txt = label(a, b), inner = txt.replace(/្/g, "◌្");
+        mk(g, "rect", { x, y: 40, width: w, height: 70, rx: 6, fill: b - a === 1 ? "#f2f2f5" : "#594578", "fill-opacity": b - a === 1 ? 1 : 0.25 + 0.6 * mix, stroke: "#594578" });
+        mk(g, "text", { x: x + w / 2, y: b - a === 1 ? 82 : 88, "font-size": b - a === 1 ? 12 : 30, "text-anchor": "middle", fill: b - a === 1 ? "#a33b3b" : "#fff", "font-family": b - a === 1 ? "ui-monospace, SFMono-Regular, Menlo, monospace" : "inherit" }, b - a === 1 ? txt : txt === "្" ? "◌្" : inner);
+      });
+      bytes.forEach((h, i) => mk(g, "text", { x: 20 + i * W + W / 2 - 2, y: 130, "font-size": 9, "text-anchor": "middle", fill: "#b9b9c2", "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace" }, h));
+      $("[data-count]").textContent = `${stages[stage].length} token${stages[stage].length === 1 ? "" : "s"}`;
+      $("[data-rule]").textContent = eng ? "English-only rules: no rule matches a Khmer byte, so every byte stays a token (byte fallback)." : stage ? rules[stage] : "Start: 15 bytes, every Khmer code point is 3 bytes beginning with E1.";
+      const r = +rIn.value;
+      $("[data-r1]").textContent = `Byte fallback costs 3 × r = 3 × ${r.toFixed(1)} = ${(3 * r).toFixed(1)} tokens for every Khmer token.`;
+      $("[data-r2]").textContent = `A 27-token sentence from a Khmer tokenizer becomes about 27 × ${(3 * r).toFixed(1)} ≈ ${Math.round(27 * 3 * r)} byte tokens.`;
+      $("[data-r3]").textContent = "r = 3.8 is measured in my fine-tuning corpus. The three merge rules here are a toy.";
+      $("[data-vr]").textContent = r.toFixed(1); rIn.style.setProperty("--p", `${((r - 1) / 5) * 100}%`);
+    }
+    const next = async () => { if (eng || stage >= 3) return; stage++; await tween(0.6, (e) => { mix = e; draw(); }); mix = 1; draw(); };
+    $("[data-merge]").addEventListener("click", next);
+    $("[data-reset]").addEventListener("click", () => { stage = 0; draw(); });
+    $("[data-eng]").addEventListener("click", (e) => { eng = !eng; (e.currentTarget as Element).setAttribute("aria-pressed", String(eng)); stage = 0; draw(); });
+    rIn.addEventListener("input", draw);
+    stage = 3; draw();
+    setupFigure(root, () => { stage = 0; eng = false; draw(); }, async (alive) => { for (let i = 0; i < 3; i++) { await wait(1); if (!alive()) return; await next(); } });
+  });
+</script>

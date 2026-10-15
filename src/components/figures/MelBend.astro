@@ -1,0 +1,96 @@
+---
+// Figure 8: the mel scale. An even hertz ruler bends into the mel ruler; pairs
+// of tones 100 Hz apart show how the gap shrinks up high; triangle filters,
+// evenly spaced in mel, sum one frame's 201 FFT values into a few bands.
+const { alt } = Astro.props;
+const TICKS = [100, 200, 500, 1000, 2000, 4000, 8000];
+const PAIRS = [[100, 200], [1000, 1100], [8000, 8100]];
+---
+<div class="blog-diagram mb" role="region" aria-label={alt} data-mb data-cfg={JSON.stringify({ TICKS, PAIRS })}>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 470" role="img" aria-labelledby="mb-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="mb-title">A hertz ruler bending into the mel scale, and mel triangle filters</title>
+    <text x="40" y="22" font-size="11" fill="#5f5f66">evenly spaced hertz</text>
+    <line x1="40" x2="740" y1="40" y2="40" stroke="#2b2b30" />
+    <g data-hz></g>
+    <g data-links></g>
+    <line x1="40" x2="740" y1="130" y2="130" stroke="#2b2b30" />
+    <g data-mel></g>
+    <text data-axis2 x="40" y="166" font-size="11" fill="#5f5f66"></text>
+    <g data-pair></g>
+    <text data-r1 x="40" y="196" font-size="12.5" fill="#2b2b30"></text>
+    <text x="40" y="236" font-size="11" fill="#5f5f66">mel filters on a hertz axis (0 to 8 kHz): narrow at the bottom, wide at the top</text>
+    <g data-spec></g>
+    <g data-tri></g>
+    <line x1="40" x2="740" y1="420" y2="420" stroke="#2b2b30" />
+    {[0, 1000, 2000, 4000, 6000, 8000].map((f) => <text x={40 + (f / 8000) * 700} y="436" font-size="9.5" text-anchor="middle" fill="#5f5f66">{f ? `${f / 1000}k` : "0"}</text>)}
+    <text data-r2 x="40" y="460" font-size="12" fill="#2b2b30"></text>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Bend the ruler<strong data-vm></strong></span><input class="scrub" data-morph type="range" min="0" max="1" step="0.01" value="1" /></label>
+    <label><span class="fig-panel__name">Mel bands<strong data-vb></strong></span><input class="scrub" data-bands type="range" min="10" max="80" step="1" value="20" /></label>
+    <div><span class="fig-panel__name">Compare a 100 Hz step</span><div class="fig-chips">
+      {PAIRS.map((p, i) => <button type="button" class="fig-chip" data-p={i} aria-pressed={i === 0 ? "true" : "false"}>{p[0].toLocaleString("en")} → {p[1].toLocaleString("en")} Hz</button>)}
+      <button type="button" class="fig-chip" data-frame aria-pressed="false">Show one "ee" frame</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { setupFigure, tween } from "../../lib/figure-motion";
+  import { fftMag, formantGain, hann, hzToMel, melBank, VOWELS } from "../../lib/audio-math";
+  const NS = "http://www.w3.org/2000/svg", TOP = hzToMel(8000);
+  document.querySelectorAll<HTMLElement>("[data-mb]").forEach((root) => {
+    const c = JSON.parse(root.dataset.cfg!);
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const morph = $<HTMLInputElement>("[data-morph]"), bands = $<HTMLInputElement>("[data-bands]");
+    const mk = (tag: string, at: Record<string, string | number>, txt?: string) => { const e = document.createElementNS(NS, tag); for (const k in at) e.setAttribute(k, String(at[k])); if (txt) e.textContent = txt; return e; };
+    const hx = (f: number) => 40 + (f / 8000) * 700, mx = (f: number) => 40 + (hzToMel(f) / TOP) * 700;
+    let pair = 0, showFrame = false;
+    // One 25 ms "ee" frame at 16 kHz: 400 samples, 201 FFT values (exact bins via a 400-point DFT is slow; 512-point FFT is close enough to draw).
+    const N = 400, w = hann(N), fr = new Float64Array(N);
+    for (let n = 0; n < N; n++) { let v = 0; for (let h = 1; h * 120 < 8000; h++) v += formantGain(h * 120, VOWELS.ee) * Math.sin(2 * Math.PI * h * 120 * n / 16000) / Math.sqrt(h); fr[n] = v * w[n]; }
+    const spec = fftMag(fr, 512), smax = Math.max(...spec);
+    $("[data-hz]").append(...c.TICKS.flatMap((f: number) => [mk("line", { x1: hx(f), x2: hx(f), y1: 34, y2: 46, stroke: "#2b2b30" }), mk("text", { x: hx(f), y: 60, "font-size": 9.5, "text-anchor": "middle", fill: "#5f5f66" }, f >= 1000 ? `${f / 1000}k` : String(f))]));
+    function draw() {
+      const m = +morph.value, B = +bands.value;
+      morph.style.setProperty("--p", `${m * 100}%`); bands.style.setProperty("--p", `${((B - 10) / 70) * 100}%`);
+      const pos = (f: number) => hx(f) + (mx(f) - hx(f)) * m;
+      const links = $("[data-links]"), mel = $("[data-mel]"); links.replaceChildren(); mel.replaceChildren();
+      c.TICKS.forEach((f: number) => {
+        links.append(mk("line", { x1: hx(f), x2: pos(f), y1: 64, y2: 124, stroke: "#594578", "stroke-opacity": 0.35 }));
+        mel.append(mk("line", { x1: pos(f), x2: pos(f), y1: 124, y2: 136, stroke: "#2b2b30" }));
+        mel.append(mk("text", { x: pos(f), y: 150, "font-size": 9.5, "text-anchor": "middle", fill: "#5f5f66" }, f >= 1000 ? `${f / 1000}k` : String(f)));
+      });
+      $("[data-axis2]").textContent = m > 0.5 ? "the same tones on the mel scale: the high end is squeezed" : "";
+      const [a, b] = c.PAIRS[pair], pg = $("[data-pair]"); pg.replaceChildren();
+      [a, b].forEach((f) => { pg.append(mk("circle", { cx: hx(f), cy: 40, r: 4.5, fill: "#a33b3b" })); pg.append(mk("circle", { cx: pos(f), cy: 130, r: 4.5, fill: "#a33b3b" })); });
+      const gap = hzToMel(b) - hzToMel(a);
+      $("[data-r1]").innerHTML = `${a.toLocaleString("en")} Hz = <tspan font-weight="700">${Math.round(hzToMel(a)).toLocaleString("en")}</tspan> mel, ${b.toLocaleString("en")} Hz = <tspan font-weight="700">${Math.round(hzToMel(b)).toLocaleString("en")}</tspan> mel: the same 100 Hz step is <tspan font-weight="700">${Math.round(gap)} mel</tspan> to the ear.`;
+      $("[data-vm]").textContent = m === 0 ? "hertz" : m === 1 ? "mel" : `${Math.round(m * 100)}%`;
+      $("[data-vb]").textContent = `${B}${B === 80 ? " (what speech models use)" : ""}`;
+      // Filterbank and, optionally, one frame summed into each band.
+      const bank = melBank(B, spec.length, 16000), tri = $("[data-tri]"), sp = $("[data-spec]"); tri.replaceChildren(); sp.replaceChildren();
+      const fx = (f: number) => 40 + (f / 8000) * 700, base = 420, Hh = 160;
+      if (showFrame) spec.forEach((v, k) => { const h = (v / smax) * Hh * 0.9, f = (k * 8000) / (spec.length - 1); sp.append(mk("rect", { x: fx(f), y: base - h, width: 1, height: h, fill: "#b9b9c2" })); });
+      const energy = bank.map((bd) => bd.w.reduce((s, wt, k) => s + wt * spec[k], 0) / Math.max(1e-9, bd.w.reduce((s, wt) => s + wt, 0)));
+      const emax = Math.max(...energy);
+      bank.forEach((bd, i) => {
+        const p = `M${fx(bd.lo)} ${base} L${fx(bd.mid)} ${base - Hh} L${fx(bd.hi)} ${base}`;
+        if (showFrame) { const h = (energy[i] / emax) * Hh * 0.9; tri.append(mk("rect", { x: fx(bd.lo + (bd.mid - bd.lo) / 2), y: base - h, width: Math.max(1, fx(bd.mid + (bd.hi - bd.mid) / 2) - fx(bd.lo + (bd.mid - bd.lo) / 2)), height: h, fill: "#594578", "fill-opacity": 0.35 })); }
+        tri.append(mk("path", { d: p, fill: "none", stroke: i % 2 ? "#594578" : "#2f6f7e", "stroke-width": 1.2, "stroke-opacity": 0.85 }));
+      });
+      $("[data-r2]").innerHTML = showFrame
+        ? `One 25 ms frame: <tspan font-weight="700">201</tspan> FFT values (grey) become <tspan font-weight="700">${B}</tspan> band values (purple).`
+        : `<tspan font-weight="700">${B}</tspan> triangles. Each one adds up the FFT values beneath it into a single number.`;
+    }
+    root.querySelectorAll<HTMLButtonElement>("[data-p]").forEach((btn) => btn.addEventListener("click", () => { pair = +btn.dataset.p!; root.querySelectorAll("[data-p]").forEach((o) => o.setAttribute("aria-pressed", String(o === btn))); draw(); }));
+    $<HTMLButtonElement>("[data-frame]").addEventListener("click", (e) => { showFrame = !showFrame; (e.currentTarget as HTMLElement).setAttribute("aria-pressed", String(showFrame)); draw(); });
+    let auto = true;
+    [morph, bands].forEach((el) => el.addEventListener("input", () => { auto = false; draw(); }));
+    setupFigure(root, () => { auto = true; morph.value = "0"; draw(); }, async (alive) => {
+      await tween(2.2, (t) => { if (alive() && auto) { morph.value = String(t); draw(); } });
+    });
+    draw();
+  });
+</script>

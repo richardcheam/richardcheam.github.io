@@ -1,0 +1,85 @@
+---
+title: "When the container stays alive but inference stops"
+title_key: "inference stops"
+date: 2026-10-03
+category: "inference-engineering"
+read_time: "4 min"
+series_order: 7
+series: dual-gh200
+excerpt: "I investigated why workers stopped while their container stayed alive, then separated process ownership, model readiness, and workload admission."
+question: "Who owns inference when workers stop responding but the container remains alive?"
+my_work: "I traced process and readiness boundaries and separated recovery behavior from workload admission."
+result: "The parent-monitor pipe closed while the container stayed alive; later controls addressed ownership and pending-work cleanup."
+evidence_limit: "The original signal sender and first exiting process were not established."
+lesson: "Container liveness, model readiness, and workload ownership need separate checks."
+---
+
+import ServiceLifecycle from "../../components/figures/ServiceLifecycle.astro";
+
+I investigated why an inference service had stopped responding even though its container was still alive. This was a process-lifecycle incident on dual GH200, not a controlled load experiment. The surviving record does not provide a complete model, request-size, concurrency, or duration recipe for the shutdown.
+
+Inference workers stopped responding while their container remained alive. A worker log showed the parent-monitor pipe closing, but the surviving records did not identify the first process to exit or any signal sender. The incident showed why container liveness was an incomplete measure of model service.
+
+<figure class="blog-figure blog-figure--wide">
+  <ServiceLifecycle alt="Observed state: container alive, inference workers unresponsive, parent-monitor pipe closed. The first exiting process and cause remain unknown." />
+  <figcaption><strong>Figure 1. What the surviving record establishes.</strong> Reconstructed set of observations, not a precise timestamped trace. The ordering and cause of the underlying exits remain unresolved. Source: canonical pack, lifecycle incident / SRC-11.</figcaption>
+</figure>
+
+The useful engineering result was a clearer model of ownership. A container, launcher, API process, engine workers, and request gateway can each have a different lifetime and health signal. If no one component owns the full inference workload, a green container can coexist with an unavailable model.
+
+## Draw the process boundary before diagnosing the exit
+
+In the historical case, the container's continued existence ruled out a simple whole-container exit. Parent-pipe end-of-file (EOF) supported a narrower observation: the worker lost its parent connection or the pipe closed. It did not reveal *why*. The runbook compared clocks, process ancestry, and available historical events; it proposed prospective signal and exit tracing because retrospective records were insufficient.
+
+The ownership chain was container or supervisor → launcher and API parent → engine and GPU workers → requests and pending transfers. Each edge needed a start, exit, and recovery owner. This is a conceptual chain, not the private deployment layout.
+
+A detached process can fail without changing the status of the container's main process. Recovery that watches only the outermost level will miss that state. The later supervision and cleanup measures addressed detection and recovery; they do not establish the trigger of the original shutdown.
+
+## Readiness must name what is ready
+
+An open HTTP port establishes that something answers HTTP. It does not prove the intended model loaded, its workers are healthy, or a request through the intended route can complete. A front end accepting a request also does not establish spare capacity in the serving engine.
+
+The separation I use is:
+
+<div class="blog-table-scroll" role="region" aria-label="Inference service readiness checks" tabindex="0">
+
+| Check | Question it answers |
+| --- | --- |
+| Container/process liveness | Is the supervised process present? |
+| Engine readiness | Are the model workers and required resources initialized? |
+| Model-route readiness | Does the intended route reach the intended healthy model? |
+| Workload admission | Can this request fit the current latency and capacity policy? |
+
+</div>
+
+A separate [long-context soak](/blog/throughput-versus-usable-latency/) used a fixed MiMo workload on dual GH200: 131,072 input tokens, a 16,384-token output target, up to 62 outstanding requests, and an eight-hour submission schedule. It showed why admission matters: **2,252 completed successes** coexisted with **550.876-second median first-token wait** among completed requests. That is about 9.2 minutes before a typical completed caller saw any output. Routing another large request to a live backend would not create more KV capacity or shorten an existing queue.
+
+## Recovery needs a single owner and an idle definition
+
+The recovery procedure I would use is:
+
+1. **Classify the stop:** distinguish an unexpected failure from planned maintenance. Put maintenance in an explicit hold or pause state so a manual stop does not race an automatic relaunch.
+2. **Withdraw readiness:** stop admitting new work to the instance that is shutting down.
+3. **Stop the owned process tree:** terminate the intended launcher, API, and worker processes through the workload's recovery owner.
+4. **Wait for a safe final state:** let GPU work and asynchronous transfers settle before resources can be released or reused.
+5. **Start and validate the replacement:** confirm engine readiness and the intended model route before resuming admission under its capacity and latency policy.
+
+These are proposed recovery steps, not a reconstruction of the original shutdown.
+
+The KV-offload investigation provided a related boundary: zero active requests did not always mean zero pending device-to-host work. Cleanup based solely on client count could outlive blocks still referenced by a transfer. The later reliability record describes scoped parent-first termination and pending-work cleanup as responses to these ownership risks.
+
+<div class="note-callout note-callout--pitfall">
+**Why this matters:** monitor the engine and intended model route, not only the container. A live outer process can hide unavailable workers, and a live model can still be too busy to offer acceptable latency.
+</div>
+
+This is the operational end of the GH200 series. Memory placement, correct KV movement, benchmark units, and startup artifacts determine whether a model can serve. Explicit workload ownership determines whether it keeps serving, stops cleanly, and reports readiness honestly. None of those layers replaces admission control when a live server is already overloaded.
+
+<div class="note-related">
+
+## Continue the series
+
+- Previous: [High throughput, minutes of waiting](/blog/throughput-versus-usable-latency/)
+- Start again: [When Linux file cache occupies GPU memory](/blog/grace-hopper-file-cache/)
+
+</div>
+

@@ -1,0 +1,85 @@
+---
+// Foundations, neurons post: one gradient-descent update of the tiny network,
+// weight by weight, then the new forward pass, and the loss over 20 updates.
+// Default η = 0.1: loss 0.03125 → 0.00585, ŷ 0.75 → 1.108. At η = 1 the loss
+// jumps to 3.45 then 4.88 and both hidden neurons die; only the bias c learns.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-upd>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 370" role="img" aria-labelledby="upd-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="upd-title">Every weight moving a small step against its gradient, and the loss after the update</title>
+    <g data-net></g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Learning rate η <strong data-veta></strong></span><input class="scrub" data-eta type="range" min="0" max="5" step="1" value="2" /></label>
+  </div>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 190" role="img" aria-labelledby="upd-curve" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="upd-curve">Loss after each of 20 updates at the chosen learning rate</title>
+    <g data-curve></g>
+  </svg>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { NET0, X0, Y0, forward, backward, update, clone, lossCurve, fmt, par, type Net } from "../../lib/tiny-net";
+  import { netSvg, INK, MUTED, JADE, NEG, GOLD } from "../../lib/net-diagram";
+  const ETAS = [0.01, 0.05, 0.1, 0.2, 0.5, 1];
+  // Update order and how to read and write each number.
+  const KEYS: [string, string, (n: Net) => number, (n: Net, v: number) => void][] = [
+    ["w11", "w₁₁", (n) => n.W[0][0], (n, v) => (n.W[0][0] = v)], ["w12", "w₁₂", (n) => n.W[0][1], (n, v) => (n.W[0][1] = v)], ["b1", "b₁", (n) => n.b[0], (n, v) => (n.b[0] = v)],
+    ["w21", "w₂₁", (n) => n.W[1][0], (n, v) => (n.W[1][0] = v)], ["w22", "w₂₂", (n) => n.W[1][1], (n, v) => (n.W[1][1] = v)], ["b2", "b₂", (n) => n.b[1], (n, v) => (n.b[1] = v)],
+    ["v1", "v₁", (n) => n.v[0], (n, v) => (n.v[0] = v)], ["v2", "v₂", (n) => n.v[1], (n, v) => (n.v[1] = v)], ["c", "c", (n) => n.c, (n, v) => (n.c = v)],
+  ];
+  document.querySelectorAll<HTMLElement>("[data-upd]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    let eta = 0.1;
+    const st = () => {
+      const f = forward(NET0, X0, Y0), g = backward(NET0, f, X0), next = update(NET0, g, eta);
+      const gm = new Map<string, number>([["w11", g.dW[0][0]], ["w12", g.dW[0][1]], ["b1", g.db[0]], ["w21", g.dW[1][0]], ["w22", g.dW[1][1]], ["b2", g.db[1]], ["v1", g.dv[0]], ["v2", g.dv[1]], ["c", g.dc]]);
+      return { f, gm, next, f2: forward(next, X0, Y0) };
+    };
+    const steps = () => {
+      const { f, gm, next, f2 } = st();
+      return [
+        { say: "These are the nine gradients from the backward pass. Each one says which way, and how strongly, to push its number.", math: KEYS.map(([k, s]) => `${s} ${fmt(gm.get(k)!)}`).join("   ") },
+        ...KEYS.map(([k, s, get]) => ({
+          say: gm.get(k)! < 0 ? `${s} has a negative gradient, so stepping against it raises ${s}.` : gm.get(k)! > 0 ? `${s} has a positive gradient, so stepping against it lowers ${s}.` : `${s} has a zero gradient, so it does not move.`,
+          math: `${s} = ${fmt(get(NET0))} − ${fmt(eta)} × ${par(gm.get(k)!)} = ${fmt(get(next))}`,
+        })),
+        { say: "Run the forward pass again with the new numbers.", math: `z₁ = ${fmt(f2.z[0])}, z₂ = ${fmt(f2.z[1])}, h = (${fmt(f2.h[0])}, ${fmt(f2.h[1])}), ŷ = ${fmt(f2.yh, 3)}` },
+        { say: f2.L < f.L ? `The loss fell, ${(f.L / f2.L).toFixed(1)} times smaller after one step.` : "The loss went up: the step was too big and jumped past the target.", math: `L: ${fmt(f.L)} → ${fmt(f2.L)}` },
+      ];
+    };
+    function draw(k: number) {
+      const { f, gm, next, f2 } = st();
+      if (k >= 10) {
+        $("[data-net]").innerHTML = netSvg({ net: next, x: X0, y: Y0, f: f2, show: new Set(["x1", "x2", "z1", "h1", "z2", "h2", "o", "err", "L"]), hl: new Set(k === 10 ? ["z1", "h1", "z2", "h2", "o"] : ["L"]) });
+      } else {
+        const partial = clone(NET0);
+        for (let i = 0; i < k; i++) KEYS[i][3](partial, KEYS[i][2](next));
+        $("[data-net]").innerHTML = netSvg({ net: NET0, x: X0, y: Y0, f, show: new Set(["x1", "x2", "z1", "h1", "z2", "h2", "o", "err", "L"]), hl: new Set(k >= 1 ? [KEYS[k - 1][0]] : []), grads: k >= 0 ? gm : undefined, next: k >= 1 ? partial : undefined });
+      }
+      $("[data-veta]").textContent = fmt(eta);
+      drawCurve();
+    }
+    function drawCurve() {
+      const c = lossCurve(NET0, X0, Y0, eta, 20), top = Math.max(...c) * 1.1, X = (i: number) => 70 + i * 32, Y = (v: number) => 160 - (v / top) * 108;
+      let s = `<line x1="70" x2="710" y1="160" y2="160" stroke="#d5d9d8"/><line x1="70" x2="70" y1="50" y2="160" stroke="#d5d9d8"/>`;
+      s += `<text x="70" y="16" font-size="12" font-weight="700" fill="${INK}">Loss after each update, η = ${fmt(eta)}</text>`;
+      s += `<text x="62" y="${Y(top / 1.1) + 4}" font-size="10.5" text-anchor="end" fill="${MUTED}">${fmt(top / 1.1, 5)}</text><text x="62" y="164" font-size="10.5" text-anchor="end" fill="${MUTED}">0</text>`;
+      s += `<polyline fill="none" stroke="${JADE}" stroke-width="2" points="${c.map((v, i) => `${X(i)},${Y(v)}`).join(" ")}"/>`;
+      c.forEach((v, i) => { s += `<circle cx="${X(i)}" cy="${Y(v)}" r="3" fill="${i === 0 ? INK : JADE}"/>`; if (i % 5 === 0) s += `<text x="${X(i)}" y="178" font-size="10.5" text-anchor="middle" fill="${MUTED}">${i}</text>`; });
+      s += `<text x="${X(1) + 6}" y="${Math.max(Y(c[1]) - 8, 60)}" font-size="11" font-weight="700" fill="${GOLD}">after 1: ${fmt(c[1])}</text>`;
+      // Name what happened, including the odd η = 1 case where the hidden layer dies.
+      let m = clone(NET0);
+      for (let i = 0; i < 20; i++) m = update(m, backward(m, forward(m, X0, Y0), X0), eta);
+      const dead = forward(m, X0, Y0).z.every((z) => z <= 0);
+      const note = dead ? "Both hidden neurons died (z ≤ 0). Only the bias c still learns, and alone it can match one target." : c[1] > c[0] ? "The first step overshoots badly, then the loss settles." : "The loss shrinks every step.";
+      s += `<text x="70" y="33" font-size="11" fill="${dead ? NEG : MUTED}">${note}</text>`;
+      $("[data-curve]").innerHTML = s;
+    }
+    const redraw = stepper(root, steps, draw, { delay: 1.3 });
+    $<HTMLInputElement>("[data-eta]").addEventListener("input", (e) => { eta = ETAS[+(e.target as HTMLInputElement).value]; redraw(); });
+  });
+</script>

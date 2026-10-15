@@ -1,0 +1,120 @@
+---
+// Figure 6: press piano keys, see the summed wave and its spectrum. The FFT's
+// "keys" sit 1/(frame length) Hz apart, so short frames blur close notes.
+const { alt } = Astro.props;
+const WHITE = ["C", "D", "E", "F", "G", "A", "B"];
+const SEMI = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 } as Record<string, number>;
+const keys: { name: string; midi: number; black: boolean; x: number }[] = [];
+let wi = 0;
+for (let oct = 3; oct <= 5; oct++) for (const n of WHITE) {
+  const midi = 12 * (oct + 1) + SEMI[n];
+  keys.push({ name: `${n}${oct}`, midi, black: false, x: 30 + wi * 34 });
+  if (!["E", "B"].includes(n)) keys.push({ name: `${n}♯${oct}`, midi: midi + 1, black: true, x: 30 + wi * 34 + 23 });
+  wi++;
+}
+const DEFAULT = [60, 64, 67];
+---
+<div class="blog-diagram ps" role="region" aria-label={alt} data-ps data-def={JSON.stringify(DEFAULT)}>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 430" role="img" aria-labelledby="ps-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="ps-title">Piano keys, the wave they make together, and the spectrum that finds them again</title>
+    {keys.filter((k) => !k.black).map((k) => (
+      <g data-key={k.midi} style="cursor:pointer">
+        <rect x={k.x} y="10" width="33" height="96" rx="3" fill="#fff" stroke="#2b2b30" />
+        {k.name.startsWith("C") && <text x={k.x + 16.5} y="98" font-size="9" text-anchor="middle" fill="#5f5f66">{k.name}</text>}
+      </g>
+    ))}
+    {keys.filter((k) => k.black).map((k) => (
+      <g data-key={k.midi} style="cursor:pointer"><rect x={k.x} y="10" width="22" height="60" rx="2" fill="#2b2b30" stroke="#2b2b30" /></g>
+    ))}
+    <text x="30" y="132" font-size="11" fill="#5f5f66">what the air carries: one wiggle (30 ms)</text>
+    <g data-parts></g>
+    <path data-sum d="" fill="none" stroke="#2b2b30" stroke-width="2" />
+    <text x="420" y="132" font-size="11" fill="#5f5f66">the spectrum of one frame: which keys, how hard</text>
+    <g data-bars></g>
+    <g data-marks></g>
+    <line x1="420" x2="760" y1="330" y2="330" stroke="#2b2b30" />
+    {[0, 100, 200, 300, 400, 500, 600, 700, 800].map((f) => <text x={420 + (f / 800) * 340} y="346" font-size="9.5" text-anchor="middle" fill="#5f5f66">{f}</text>)}
+    <text x="760" y="362" font-size="10" text-anchor="end" fill="#5f5f66">Hz</text>
+    <text data-r1 x="30" y="392" font-size="12.5" fill="#2b2b30"></text>
+    <text data-r2 x="30" y="414" font-size="12" fill="#5f5f66"></text>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Frame length<strong data-vl></strong></span><input class="scrub" data-len type="range" min="10" max="200" step="5" value="25" /></label>
+    <div><span class="fig-panel__name">Sound</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-mode="chord" aria-pressed="true">Keys you press</button>
+      <button type="button" class="fig-chip" data-mode="voice" aria-pressed="false">A voice buzzing at 120 Hz</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { setupFigure, wait } from "../../lib/figure-motion";
+  import { hann } from "../../lib/audio-math";
+  const NS = "http://www.w3.org/2000/svg", SR = 16000;
+  const hz = (m: number) => 440 * 2 ** ((m - 69) / 12);
+  document.querySelectorAll<HTMLElement>("[data-ps]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const len = $<HTMLInputElement>("[data-len]");
+    let on = new Set<number>(JSON.parse(root.dataset.def!)), mode = "chord";
+    const tones = () => mode === "voice"
+      ? Array.from({ length: 9 }, (_, i) => ({ f: 120 * (i + 1), a: 1 / (i + 1) }))
+      : [...on].sort((a, b) => a - b).map((m) => ({ f: hz(m), a: 1 }));
+    const mk = (tag: string, at: Record<string, string | number>) => { const e = document.createElementNS(NS, tag); for (const k in at) e.setAttribute(k, String(at[k])); return e; };
+    function draw() {
+      const L = +len.value, T = tones();
+      len.style.setProperty("--p", `${((L - 10) / 190) * 100}%`);
+      root.querySelectorAll<SVGGElement>("[data-key]").forEach((g) => {
+        const m = +g.dataset.key!, r = g.querySelector("rect")!, black = r.getAttribute("height") === "60";
+        r.setAttribute("fill", mode === "chord" && on.has(m) ? "#594578" : black ? "#2b2b30" : "#fff");
+      });
+      // Waves: each tone faint, the sum bold.
+      const parts = $("[data-parts]"); parts.replaceChildren();
+      const amp = T.reduce((s, t) => s + t.a, 0) || 1;
+      let sum = "";
+      const lines = T.map(() => "");
+      for (let px = 0; px <= 360; px += 2) {
+        const t = (px / 360) * 0.03;
+        let v = 0;
+        T.forEach((tn, i) => { const s = tn.a * Math.sin(2 * Math.PI * tn.f * t); v += s; lines[i] += `${px ? "L" : "M"}${30 + px} ${(230 - s * 22).toFixed(1)}`; });
+        sum += `${px ? "L" : "M"}${30 + px} ${(230 - (v / amp) * 70).toFixed(1)}`;
+      }
+      if (mode === "chord") lines.forEach((d) => parts.append(mk("path", { d, fill: "none", stroke: "#594578", "stroke-opacity": 0.3 })));
+      $("[data-sum]").setAttribute("d", T.length ? sum : "M30 230 h360");
+      // Spectrum of one Hann-windowed frame, at bins k/L Hz.
+      const N = Math.round(SR * L / 1000), w = hann(N), x = new Float64Array(N);
+      for (let n = 0; n < N; n++) { let v = 0; for (const tn of T) v += tn.a * Math.sin(2 * Math.PI * tn.f * n / SR); x[n] = v * w[n]; }
+      const df = 1000 / L, K = Math.floor(800 / df), mags: number[] = [];
+      for (let k = 0; k <= K; k++) {
+        let r = 0, im = 0; const a = -2 * Math.PI * k * df / SR;
+        for (let n = 0; n < N; n++) { r += x[n] * Math.cos(a * n); im += x[n] * Math.sin(a * n); }
+        mags.push(Math.hypot(r, im));
+      }
+      const top = Math.max(1e-9, ...mags), bars = $("[data-bars]"); bars.replaceChildren();
+      const bw = Math.max(1, (df / 800) * 340 - 1);
+      mags.forEach((m, k) => {
+        const h = (m / top) * 170, cx = 420 + (k * df / 800) * 340;
+        bars.append(mk("rect", { x: cx - bw / 2, y: 330 - h, width: bw, height: h, fill: "#2b2b30" }));
+      });
+      const marks = $("[data-marks]"); marks.replaceChildren();
+      T.filter((t) => t.f <= 800).forEach((t) => marks.append(mk("path", { d: `M${420 + (t.f / 800) * 340} 334 l-4 7 h8 z`, fill: "#594578" })));
+      $("[data-vl]").textContent = `${L} ms`;
+      $("[data-r1]").innerHTML = `A ${L} ms frame has keys every <tspan font-weight="700">${+df.toFixed(1)} Hz</tspan>: <tspan font-weight="700">${Math.floor(8000 / df) + 1}</tspan> keys up to 8 kHz at 16 kHz sampling.`;
+      $("[data-r2]").textContent = mode === "voice"
+        ? "A voice is a buzz plus copies at 2, 3, 4… times its rate: 120, 240, 360… Hz (section 9)."
+        : T.length ? `Pressed: ${T.map((t) => Math.round(t.f)).join(", ")} Hz (purple triangles). Click keys to change the chord.` : "Click some keys.";
+    }
+    root.querySelectorAll<SVGGElement>("[data-key]").forEach((g) => g.addEventListener("click", () => {
+      const m = +g.dataset.key!; on.has(m) ? on.delete(m) : on.add(m);
+      if (mode !== "chord") setMode("chord"); else draw();
+    }));
+    const setMode = (m: string) => { mode = m; root.querySelectorAll("[data-mode]").forEach((b) => b.setAttribute("aria-pressed", String((b as HTMLElement).dataset.mode === m))); draw(); };
+    root.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach((b) => b.addEventListener("click", () => setMode(b.dataset.mode!)));
+    let auto = true;
+    len.addEventListener("input", () => { auto = false; draw(); });
+    setupFigure(root, () => { auto = true; on = new Set([60, 64, 67]); mode = "chord"; len.value = "10"; setMode("chord"); }, async (alive) => {
+      for (const v of [10, 25, 50, 100]) { if (!alive() || !auto) return; len.value = String(v); draw(); await wait(1.1); }
+    });
+    draw();
+  });
+</script>

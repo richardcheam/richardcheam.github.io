@@ -1,0 +1,61 @@
+---
+// Foundations, loss post: three learning rates on the same bowl (w − 3)²
+// from w = 0. Defaults 0.01, 0.4, 1.1: after three steps 0.1764, 2.976 and
+// 8.184 (losses for 1.1: 9, 12.96, 18.6624, 26.8739). Presets 0.5 (lands
+// in one step) and 1.0 (bounces between 0 and 6).
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-race>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 270" role="img" aria-labelledby="lr-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="lr-title">The same bowl descended with three learning rates side by side</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Left η <strong data-v="0"></strong></span><input class="scrub" data-e="0" type="range" min="0.01" max="1.2" step="0.01" value="0.01" /></label>
+    <label><span class="fig-panel__name">Middle η <strong data-v="1"></strong></span><input class="scrub" data-e="1" type="range" min="0.01" max="1.2" step="0.01" value="0.4" /></label>
+    <label><span class="fig-panel__name">Right η <strong data-v="2"></strong></span><input class="scrub" data-e="2" type="range" min="0.01" max="1.2" step="0.01" value="1.1" /></label>
+    <div><span class="fig-panel__name">Right panel presets</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-pre="0.5">0.5: one shot</button>
+      <button type="button" class="fig-chip" data-pre="1">1.0: bounce</button>
+      <button type="button" class="fig-chip" data-pre="1.1">1.1: runaway</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt, par } from "../../lib/tiny-net";
+  import { INK, MUTED, JADE, NEG, GOLD } from "../../lib/net-diagram";
+  import { frame, txt } from "../../lib/plot";
+  const N = 5, L = (w: number) => (w - 3) ** 2;
+  document.querySelectorAll<HTMLElement>("[data-race]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const eta = [0.01, 0.4, 1.1];
+    const path = (e: number) => { const ws = [0]; for (let i = 0; i < N; i++) ws.push(ws[i] - e * 2 * (ws[i] - 3)); return ws; };
+    const verdict = (e: number) => { const f = 1 - 2 * e; return Math.abs(f) > 1 ? "runs away" : Math.abs(f) === 1 ? "bounces forever" : f === 0 ? "lands in one step" : f > 0.9 ? "crawls" : f < 0 ? "hops in" : "closes in"; };
+    const steps = () => Array.from({ length: N }, (_, i) => ({
+      say: i === 0 ? "One Step moves all three balls with the same rule, w − η × 2(w − 3). Only η differs." : `Step ${i + 1}. Each distance to the bottom is multiplied by its own factor 1 − 2η again.`,
+      math: eta.map((e, j) => { const ws = path(e), w = ws[i]; return `η ${fmt(e)}: w = ${fmt(w, 4)} − ${fmt(e)} × ${par(2 * (w - 3), 4)} = ${fmt(ws[i + 1], 4)}, loss ${fmt(L(ws[i + 1]), 4)}`; }).join("\n"),
+    }));
+    function draw(k: number) {
+      let s = "";
+      eta.forEach((e, j) => {
+        const l = 30 + j * 250, F = frame({ l, t: 46, w: 210, h: 150, x0: -3, x1: 9, y0: 0, y1: 36 }), ws = path(e), n = k + 1, w = ws[n];
+        const f = 1 - 2 * e, bad = Math.abs(f) >= 1;
+        s += txt(l, 20, `η = ${fmt(e)}`, `font-size="13" font-weight="700" fill="${INK}"`) + txt(l + 210, 20, `factor ${fmt(f)}: ${verdict(e)}`, `font-size="11" text-anchor="end" font-weight="700" fill="${bad ? NEG : GOLD}"`);
+        s += F.grid([-3, 0, 3, 6, 9], [0, 18, 36], 0);
+        s += F.curve(L, `stroke="${JADE}" stroke-width="2"`);
+        for (let i = 0; i < n; i++) if (ws[i] >= -3 && ws[i] <= 9) s += `<circle cx="${F.X(ws[i])}" cy="${F.clampY(L(ws[i]))}" r="3.5" fill="${MUTED}" fill-opacity="0.55"/>`;
+        s += w >= -3 && w <= 9 && L(w) <= 36 ? `<circle cx="${F.X(w)}" cy="${F.clampY(L(w))}" r="7" fill="${INK}" stroke="#fff" stroke-width="2"/>` : txt(l + 105, 70, `off the chart (w = ${fmt(w, 2)})`, `font-size="11.5" font-weight="700" text-anchor="middle" fill="${NEG}"`);
+        s += txt(l, 232, `after ${n} step${n === 1 ? "" : "s"}: w = ${fmt(w, 4)}`, `font-size="12" font-weight="700" fill="${INK}"`);
+        s += txt(l, 250, `loss ${fmt(L(w), 4)}, distance ${fmt(Math.abs(w - 3), 4)}`, `font-size="11.5" fill="${MUTED}"`);
+      });
+      $("[data-draw]").innerHTML = s;
+      root.querySelectorAll<HTMLElement>("[data-v]").forEach((el) => (el.textContent = fmt(eta[+el.dataset.v!], 2)));
+    }
+    const redraw = stepper(root, steps, draw, { delay: 1.8 });
+    root.querySelectorAll<HTMLInputElement>("[data-e]").forEach((inp) => inp.addEventListener("input", () => { eta[+inp.dataset.e!] = +inp.value; redraw(); }));
+    root.querySelectorAll<HTMLButtonElement>("[data-pre]").forEach((b) => b.addEventListener("click", () => { eta[2] = +b.dataset.pre!; $<HTMLInputElement>('[data-e="2"]').value = b.dataset.pre!; redraw(); }));
+  });
+</script>

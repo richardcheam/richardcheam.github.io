@@ -1,0 +1,130 @@
+---
+// Same audio, same ASR output, different scoring rules. Each switch applies
+// one normalisation step to both texts before the edit distance is taken.
+// The waterfall on the right is the cumulative order used in the text.
+const { alt } = Astro.props;
+const steps = [
+  { key: "abbr", label: "Expand abbreviations" },
+  { key: "num", label: "Verbalise numbers" },
+  { key: "lower", label: "Lowercase" },
+  { key: "punct", label: "Strip punctuation" },
+];
+---
+<div class="blog-diagram nw" role="region" aria-label={alt} data-nw data-steps={JSON.stringify(steps.map((s) => s.key))}>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 300" role="img" aria-labelledby="nw-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="nw-title">Word error rate under different text normalisation</title>
+    <text x="24" y="34" font-size="11" letter-spacing="1" fill="#5f5f66">REFERENCE, AFTER THE SWITCHES</text>
+    <text x="24" y="124" font-size="11" letter-spacing="1" fill="#5f5f66">ASR OUTPUT, AFTER THE SWITCHES</text>
+    <g data-cols></g>
+    <text data-wer x="24" y="262" font-size="34" font-weight="700" fill="#594578" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"></text>
+    <text data-sub x="24" y="284" font-size="10.5" fill="#5f5f66"></text>
+    <g transform="translate(560 40)">
+      <text font-size="11" letter-spacing="1" fill="#5f5f66">CUMULATIVE</text>
+      <g data-fall transform="translate(0 22)"></g>
+    </g>
+  </svg>
+  <div class="fig-panel">
+    <div>
+      <span class="fig-panel__name">Normalisation applied to both texts</span>
+      <div class="fig-chips">
+        {steps.map((s) => <button type="button" class="fig-chip" data-step={s.key} aria-pressed="false">{s.label}</button>)}
+      </div>
+    </div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { animate, dur, setupFigure, wait } from "../../lib/figure-motion";
+  import { editDistance } from "../../lib/eval-math";
+
+  const NS = "http://www.w3.org/2000/svg";
+  const REF = "Dr. Smith paid $5.";
+  const HYP = "doctor smith paid five dollars";
+  const NUM = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"];
+  const INK = { match: "#4F5D3A", sub: "#8a6a1f", del: "#a33b3b", ins: "#594578" } as const;
+  const TAG = { match: "", sub: "S", del: "D", ins: "I" } as const;
+  const LABEL = ["raw", "+ abbreviations", "+ numbers", "+ lowercase", "+ punctuation"];
+
+  function norm(s: string, on: Set<string>) {
+    if (on.has("abbr")) s = s.replace(/\bdr\./gi, (m) => (m[0] === "D" ? "Doctor" : "doctor"));
+    if (on.has("num")) s = s.replace(/\$(\d)/g, (_, d) => `${NUM[+d]} dollars`);
+    if (on.has("lower")) s = s.toLowerCase();
+    if (on.has("punct")) s = s.replace(/[.,!?$]/g, "");
+    return s.split(/\s+/).filter(Boolean);
+  }
+  const wer = (on: Set<string>) => { const r = norm(REF, on); return editDistance(r, norm(HYP, on)).dist / r.length; };
+  const el = (tag: string, attrs: Record<string, string | number>, text?: string) => {
+    const e = document.createElementNS(NS, tag);
+    Object.entries(attrs).forEach(([k, v]) => e.setAttribute(k, String(v)));
+    if (text !== undefined) e.textContent = text;
+    return e;
+  };
+
+  document.querySelectorAll<HTMLElement>("[data-nw]").forEach((root) => {
+    const order: string[] = JSON.parse(root.dataset.steps!);
+    const chips = Array.from(root.querySelectorAll<HTMLButtonElement>("[data-step]"));
+    const cols = root.querySelector<SVGGElement>("[data-cols]")!, fall = root.querySelector<SVGGElement>("[data-fall]")!;
+    const on = new Set<string>();
+
+    // Waterfall: WER after each cumulative step, computed, not typed in.
+    const cum = order.map((_, k) => new Set(order.slice(0, k)));
+    cum.push(new Set(order));
+    const bars = cum.slice(1).length ? cum : cum;
+    const fallRows = [new Set<string>(), ...order.map((_, k) => new Set(order.slice(0, k + 1)))].map((set, k) => {
+      const v = wer(set), g = el("g", { transform: `translate(0 ${k * 40})` });
+      g.append(
+        el("text", { y: 0, "font-size": 10.5, fill: "#2b2b30" }, LABEL[k]),
+        el("rect", { y: 7, width: 160, height: 8, rx: 2, fill: "#ececf1" }),
+        el("rect", { y: 7, width: 160 * Math.min(1, v), height: 8, rx: 2, fill: "#594578", "data-bar": "" }),
+        el("text", { x: 196, y: 15, "text-anchor": "end", "font-size": 10.5, fill: "#2b2b30", "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace" }, `${Math.round(v * 100)}%`),
+      );
+      fall.append(g);
+      return g;
+    });
+    void bars;
+
+    function render() {
+      chips.forEach((c) => c.setAttribute("aria-pressed", String(on.has(c.dataset.step!))));
+      const r = norm(REF, on), h = norm(HYP, on), m = editDistance(r, h);
+      cols.replaceChildren();
+      const w = Math.min(96, 500 / m.path.length);
+      m.path.forEach((s, k) => {
+        const x = 24 + k * w, ink = INK[s.op];
+        cols.append(
+          el("rect", { x, y: 44, width: w - 6, height: 32, rx: 4, fill: s.ref ? "#f6f6f8" : "none", stroke: s.ref ? ink : "#d6d6dd", "stroke-dasharray": s.ref ? "" : "3 3" }),
+          el("text", { x: x + (w - 6) / 2, y: 65, "text-anchor": "middle", "font-size": 12, fill: "#2b2b30" }, s.ref ?? ""),
+          el("rect", { x, y: 134, width: w - 6, height: 32, rx: 4, fill: s.hyp ? "#f6f6f8" : "none", stroke: s.hyp ? ink : "#d6d6dd", "stroke-dasharray": s.hyp ? "" : "3 3" }),
+          el("text", { x: x + (w - 6) / 2, y: 155, "text-anchor": "middle", "font-size": 12, fill: "#2b2b30" }, s.hyp ?? ""),
+          el("line", { x1: x + (w - 6) / 2, y1: 78, x2: x + (w - 6) / 2, y2: 132, stroke: ink, "stroke-width": 1.5, "stroke-dasharray": s.op === "match" ? "" : "3 3" }),
+          el("text", { x: x + (w - 6) / 2 + 6, y: 108, "font-size": 10.5, "font-weight": 700, fill: ink }, TAG[s.op]),
+        );
+      });
+      const v = m.dist / r.length;
+      root.querySelector("[data-wer]")!.textContent = `WER ${Math.round(v * 100)}%`;
+      root.querySelector("[data-sub]")!.textContent = `${m.dist} edits ÷ ${r.length} reference words. The audio did not change.`;
+    }
+
+    chips.forEach((c) => c.addEventListener("click", () => {
+      const k = c.dataset.step!;
+      on.has(k) ? on.delete(k) : on.add(k);
+      render();
+    }));
+
+    setupFigure(
+      root,
+      () => { on.clear(); render(); fallRows.forEach((g) => (g.style.opacity = "0")); },
+      async (alive) => {
+        // Switch the steps on in order, one beat each, and grow the waterfall with them.
+        animate(fallRows[0], { opacity: [0, 1] }, { duration: dur(0.3) });
+        await wait(0.9);
+        for (let k = 0; k < order.length; k++) {
+          if (!alive()) return;
+          on.add(order[k]); render();
+          animate(fallRows[k + 1], { opacity: [0, 1] }, { duration: dur(0.3) });
+          await wait(1.1);
+        }
+      },
+    );
+  });
+</script>

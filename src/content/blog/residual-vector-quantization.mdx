@@ -1,0 +1,459 @@
+---
+title: "Residual vector quantization: turning sound into a few small numbers"
+date: 2026-10-14
+category: "speech-ai"
+read_time: "25 min"
+series_order: 8.7
+series: speech-ai
+featured: false
+excerpt: "Neural audio codecs turn every slice of sound into a handful of whole numbers. This post builds the trick behind that, residual vector quantization, from a box of paint colours up to EnCodec, DAC and Mimi, with every example small enough to check by hand."
+question: "How does a codec turn a frame of speech into a short list of integers, and how is that list trained?"
+my_work: "A concept note. I worked every example by hand in two dimensions and built the figures from the published algorithms."
+result: "Three codebooks of four entries each rebuild a 2-D point exactly with 6 bits, where a single codebook would need 64 entries. The same arithmetic gives Mimi's 1.1 kbps: 12.5 frames a second, 8 codebooks, 11 bits each."
+evidence_limit: "Explains published methods. No experiments; codec numbers come from the SoundStream, EnCodec, DAC and Moshi papers, and toy numbers are simple arithmetic."
+lesson: "Each codebook only has to fix what the previous ones got wrong. That one idea gives small codebooks, a bitrate dial and a natural order of importance among the tokens."
+---
+import PaintPalette from "../../components/figures/PaintPalette.astro";
+import KMeansLive from "../../components/figures/KMeansLive.astro";
+import ResidualZoom from "../../components/figures/ResidualZoom.astro";
+import BitrateDial from "../../components/figures/BitrateDial.astro";
+import DeadCodes from "../../components/figures/DeadCodes.astro";
+import CosineCodes from "../../components/figures/CosineCodes.astro";
+import StraightThrough from "../../components/figures/StraightThrough.astro";
+import QuantizerDropout from "../../components/figures/QuantizerDropout.astro";
+import SplitRvq from "../../components/figures/SplitRvq.astro";
+
+The [audio-basics post](/blog/audio-basics/) ended with a promise: Mimi squeezes one second of speech down to **400** numbers. Even that is not the end. Models like Moshi want something smaller still: whole numbers, picked from a fixed menu, the way a language model picks words from its vocabulary.
+
+The trick that turns a frame of sound into a few whole numbers is called **residual vector quantization**, or RVQ. The [Pocket TTS post](/blog/pocket-tts-calm-explained/#the-codec-token-recipe) and the [Mimi post](/blog/mimi-codec-explained/#the-bottleneck-continuous-and-regularized) each give it one formula and one paragraph. This post slows down and builds it from nothing: what a codebook is, why we take leftovers, how the codebooks learn, the ways they break, and how SoundStream, EnCodec, DAC and Mimi each use it. Every example uses points on a flat page (two numbers each) and codebooks with four entries, so you can check all of it with a pencil.
+
+
+## What a codec has to do
+
+A neural audio codec has three parts.
+
+- An **encoder**, a neural network that reads the waveform and writes one short list of numbers, a **vector**, for every slice of time. Each slice is a **frame**. Mimi writes **12.5** frames a second, each a list of **512** numbers ([Mimi post](/blog/mimi-codec-explained/#the-encoder-a-downsampling-ladder)).
+- A **quantizer**, which replaces each vector with a few whole numbers. This post is about this part.
+- A **decoder**, a network that turns the (rebuilt) vectors back into a waveform.
+
+Why bother with whole numbers? Two reasons. Whole numbers are cheap to send: if you and a friend share the same menu, you only need to say "number 7". And a language model can predict them the same way it predicts the next word. The cost is that a menu has only so many items, so something is always lost. The whole art is losing as little as possible with as few numbers as possible.
+
+
+## A box of paint colours
+
+Think of a paint-by-number kit. The kit has a small box of paints, each with a number on the lid. The picture is covered in little regions, and each region is labelled with the number of the paint that comes closest to the real colour. You never mix a new colour. You just point at the closest one in the box.
+
+That is **vector quantization**, or VQ:
+
+- the box of paints is the **codebook**, a fixed list of example vectors;
+- each paint is a **codebook entry** (also called a **code** or **centroid**);
+- the number on the lid is the entry's **index**, the whole number we actually send;
+- "point at the closest one" is **nearest-neighbour lookup**.
+
+A plain list of numbers like a colour (red, green, blue) or a frame from the encoder is a vector. We will use vectors with just two numbers, so each one is a dot on a page: $(3, 1.5)$ means "3 to the right, 1.5 up".
+
+<figure class="blog-figure blog-figure--wide">
+  <PaintPalette alt="A small sunset picture of 48 cells on the left, and the same picture repainted on the right using only the closest of 2, 4, 8 or 16 paints, each cell labelled with its paint number. Below, the box of paints with the distance from the selected cell to each." />
+  <figcaption><strong>Figure 1. Paint by number.</strong> Every cell sends only the number of its closest paint. Each box of paints comes from k-means on this picture’s colours (see <a href="#sorting-buttons-into-piles">sorting buttons into piles</a>).</figcaption>
+</figure>
+
+
+## Finding the nearest entry
+
+How do we decide which entry is "closest"? We measure the straight-line distance between two dots, the one a ruler would give. For a frame $z$ and a codebook with $K$ entries $c_1, \dots, c_K$, the chosen index is
+
+$$
+k = \arg\min_{j} \lVert z - c_j \rVert^2
+$$
+
+and the quantized frame is $\hat z = c_k$.
+
+What each symbol means:
+
+- $z$ is the vector we want to replace (here a dot with two numbers).
+- $c_j$ is entry number $j$ of the codebook; $j$ runs from 1 to $K$.
+- $K$ is how many entries the codebook has.
+- $z - c_j$ is the arrow from entry $c_j$ to $z$.
+- $\lVert \cdot \rVert^2$ is the **squared length** of an arrow: square each number and add them. For an arrow $(a, b)$ it is $a^2 + b^2$. Squaring skips the square root, which does not change which entry is closest.
+- $\arg\min_j$ means "the $j$ that makes this smallest". It returns the index, not the distance.
+- $k$ is that winning index, the whole number we send.
+- $\hat z$ (said "z-hat") is the rebuilt frame: just the winning entry.
+
+Intuition: try every paint against the region and keep the one that differs least.
+
+Worked example. Take the codebook with $K = 4$ entries
+
+$c_1 = (4, 0)$, $c_2 = (0, 4)$, $c_3 = (-4, 0)$, $c_4 = (0, -4)$
+
+and the frame $z = (3, 1.5)$.
+
+| entry | $z - c_j$ | squared length |
+|---|---|---|
+| $c_1 = (4, 0)$ | $(-1, 1.5)$ | $1 + 2.25 = $ **3.25** |
+| $c_2 = (0, 4)$ | $(3, -2.5)$ | $9 + 6.25 = 15.25$ |
+| $c_3 = (-4, 0)$ | $(7, 1.5)$ | $49 + 2.25 = 51.25$ |
+| $c_4 = (0, -4)$ | $(3, 5.5)$ | $9 + 30.25 = 39.25$ |
+
+The smallest is **3.25**, so $k = 1$ and $\hat z = (4, 0)$. We send one number, "1". The error left over is $z - \hat z = (-1, 1.5)$, with squared length **3.25**.
+
+How much is one index worth? A codebook with $K$ entries needs $\log_2 K$ bits to name an entry. ($\log_2 K$ asks "how many times do I double 1 to reach $K$?") With $K = 4$, that is $\log_2 4 =$ **2 bits**: the four indices are 00, 01, 10, 11. ([Bits are explained in the audio-basics post](/blog/audio-basics/).) Real codecs use $K = 1{,}024$ (**10 bits**) or $K = 2{,}048$ (**11 bits**).
+
+In a real codec $z$ has hundreds of numbers instead of two, but the recipe is the same: square the differences, add them up, keep the smallest.
+
+
+## Why one codebook is not enough
+
+The error of **3.25** above is big. The obvious fix is a bigger box of paints: more entries means some entry lands closer to every frame. But the box grows terribly fast.
+
+SoundStream, Google's 2021 codec, makes the problem concrete. It writes **75** frames a second, and at a bitrate of **6,000 bits per second** (6 kbps, kilobits per second) each frame gets $6000 / 75 =$ **80 bits**. One codebook spending all 80 bits needs $2^{80}$ entries, about a million million million million. No computer can store that, let alone search it each frame. SoundStream's authors call it "obviously unfeasible".
+
+We need a way to spend many bits without building one giant box. That is where leftovers come in.
+
+
+## Quantize what is left over
+
+Think of giving someone directions to a café. First you name a big landmark: "go to the train station". That gets them close, but not there. Then a correction: "from the station, walk two blocks north". Then a smaller one: "it is the third door on the left". Each instruction only has to fix what the previous one left wrong, so each one can come from a short list.
+
+RVQ does exactly this with codebooks. The error left after one codebook is called the **residual** (from "residue", what remains). A second codebook quantizes the residual. A third quantizes what the second left over, and so on:
+
+$$
+r_0 = z, \qquad k_i = \arg\min_j \lVert r_{i-1} - c^{(i)}_j \rVert^2, \qquad r_i = r_{i-1} - c^{(i)}_{k_i}
+$$
+
+$$
+\hat z = \sum_{i=1}^{Q} c^{(i)}_{k_i}
+$$
+
+What each symbol means:
+
+- $Q$ is the number of codebooks, also called **stages**, **levels** or **quantizers**. Stage $i$ runs from 1 to $Q$.
+- $c^{(i)}_j$ is entry $j$ of codebook $i$. Every stage has its own box of paints.
+- $r_{i-1}$ is the residual coming into stage $i$, what is still wrong after $i-1$ stages. The first one, $r_0$, is the whole frame $z$.
+- $k_i$ is the index stage $i$ picks: the nearest entry to the residual, using the same lookup as before.
+- $r_i$ is the new residual: the old one minus the entry we just chose.
+- $\sum_{i=1}^{Q}$ means "add up, for $i = 1, 2, \dots, Q$". So $\hat z$ is the sum of the chosen entries, one from each stage.
+- What we send is the list $k_1, k_2, \dots, k_Q$: one whole number per stage.
+
+Intuition: each stage zooms in on the mistake of the stage before. The first codebook paints in big strokes; later ones paint in finer and finer touch-ups. That is why the entries of later codebooks end up smaller after training.
+
+Worked example. Keep $z = (3, 1.5)$ and stage 1's codebook from the last section. Add two smaller codebooks, each half the size of the one before:
+
+- stage 2: $(1, 1)$, $(-1, 1)$, $(-1, -1)$, $(1, -1)$
+- stage 3: $(0.5, 0)$, $(0, 0.5)$, $(-0.5, 0)$, $(0, -0.5)$
+
+Stage 1 picks $(4, 0)$, as we found. Residual $r_1 = (-1, 1.5)$, squared length **3.25**.
+
+Stage 2 compares $r_1 = (-1, 1.5)$ with its four entries:
+
+| entry | $r_1 - c$ | squared length |
+|---|---|---|
+| $(1, 1)$ | $(-2, 0.5)$ | $4.25$ |
+| $(-1, 1)$ | $(0, 0.5)$ | **0.25** |
+| $(-1, -1)$ | $(0, 2.5)$ | $6.25$ |
+| $(1, -1)$ | $(-2, 2.5)$ | $10.25$ |
+
+It picks entry 2, $(-1, 1)$. Residual $r_2 = (0, 0.5)$, squared length **0.25**.
+
+Stage 3 compares $r_2 = (0, 0.5)$ with its entries; $(0, 0.5)$ itself is in the list, distance **0**. It picks entry 2. Residual $r_3 = (0, 0)$.
+
+Rebuild: $\hat z = (4, 0) + (-1, 1) + (0, 0.5) = (3, 1.5)$. Exactly $z$.
+
+The squared error fell **11.25 → 3.25 → 0.25 → 0** (11.25 is $3^2 + 1.5^2$, the error of sending nothing at all). We sent three indices, 1, 2, 2, at 2 bits each: **6 bits** in all, and we stored only $3 \times 4 = $ **12** entries. One codebook with 6 bits would need $2^6 =$ **64** entries to offer the same number of choices. With 80 bits, the gap becomes $8 \times 1{,}024 = 8{,}192$ stored entries against $2^{80}$. Real frames are almost never rebuilt exactly; this toy was picked so the numbers come out clean.
+
+<figure class="blog-figure blog-figure--wide">
+  <ResidualZoom alt="A grid with the frame z as a red dot and four purple diamond entries of the current codebook. Each stage picks the nearest entry, draws it as a green arrow tip to tail, and zooms the view two times onto the leftover. A table lists index, entry, leftover and squared error per stage." />
+  <figcaption><strong>Figure 3. Directions, then corrections.</strong> Each stage zooms in on what the last one missed. Defaults reproduce the worked example: errors 11.25, 3.25, 0.25, 0 and indices 1, 2, 2. Drag z anywhere.</figcaption>
+</figure>
+
+Two consequences we will use later:
+
+- **The tokens come in order of importance.** Stage 1 carries the biggest part of the frame; each later stage carries a smaller correction. Dropping the last stages costs a little detail, dropping the first costs almost everything. This is what makes [quantizer dropout](#one-model-many-bitrates) work.
+- **Every frame now has a stack of tokens, not one.** A language model over codec tokens has to predict $Q$ numbers per frame. The Pocket TTS post [lists what that costs](/blog/pocket-tts-calm-explained/#the-mosaic-and-the-painting).
+
+
+## Counting bits
+
+Once the codebooks are fixed, the bitrate is pure arithmetic:
+
+$$
+R = f \times Q \times \log_2 K
+$$
+
+What each symbol means:
+
+- $R$ is the bitrate, in bits per second.
+- $f$ is the frame rate: frames the encoder writes per second.
+- $Q$ is the number of codebooks used per frame.
+- $K$ is the number of entries per codebook, so $\log_2 K$ is bits per index.
+
+Intuition: bits per second = frames per second, times indices per frame, times bits per index.
+
+Worked example (toy): $f = 10$ frames a second, $Q = 3$, $K = 4$ gives $10 \times 3 \times 2 =$ **60 bits per second**.
+
+Worked examples (real codecs, all from the papers listed in [Sources](#sources)):
+
+| codec | $f$ | $Q$ | $K$ | $R$ |
+|---|---|---|---|---|
+| SoundStream at 6 kbps | 75 | 8 | 1,024 | $75 \times 8 \times 10 =$ **6,000** |
+| EnCodec at 24 kHz, 6 kbps | 75 | 8 | 1,024 | **6,000** |
+| EnCodec at 24 kHz, 24 kbps | 75 | 32 | 1,024 | **24,000** |
+| DAC at 44.1 kHz | 86 | 9 | 1,024 | $86 \times 9 \times 10 = 7{,}740$, which the paper calls **8 kbps** |
+| Mimi in Moshi | 12.5 | 8 | 2,048 | $12.5 \times 8 \times 11 =$ **1,100** |
+
+For comparison, the raw 24 kHz recording at 16 bits a sample is $24{,}000 \times 16 =$ **384,000** bits per second. Mimi's tokens are about **350 times** smaller.
+
+Mimi wins mostly on $f$: it writes 6 times fewer frames than EnCodec, which matters even more for a language model than for a phone line, because every frame is a step the model must predict.
+
+<figure class="blog-figure blog-figure--wide">
+  <BitrateDial alt="One second of codec tokens drawn as columns of cells, one column per frame and one cell per codebook, with a playhead sweeping across. Sliders set frames per second, codebooks and entries; presets load SoundStream, EnCodec, DAC and Mimi." />
+  <figcaption><strong>Figure 4. Counting bits.</strong> Frames per second, times codebooks, times bits per index. Preset values from the papers listed in <a href="#sources">Sources</a>.</figcaption>
+</figure>
+
+
+## How codebooks learn
+
+So far the codebooks were handed to us. In a real codec they are learned from data, together with the encoder and decoder. The goal: place the entries where the frames actually are.
+
+### Sorting buttons into piles
+
+Pour a jar of buttons on a table and make four piles, one per colour. You put a few piles down, drop each button on the pile it looks most like, then move each pile's label to the average colour of the buttons on it. Repeat, and the labels settle.
+
+That is **k-means clustering**:
+
+1. **Assign.** Each frame goes to its nearest entry (the lookup from [before](#finding-the-nearest-entry)).
+2. **Update.** Each entry moves to the average of the frames assigned to it:
+
+$$
+c_j \leftarrow \frac{1}{n_j} \sum_{x \in S_j} x
+$$
+
+What each symbol means:
+
+- $S_j$ is the set (pile) of frames assigned to entry $j$.
+- $n_j$ is how many frames are in that pile.
+- $\sum_{x \in S_j} x$ adds up all frames in the pile, number by number.
+- $\leftarrow$ means "replace with".
+
+Intuition: each paint moves to the middle of the regions that chose it.
+
+Worked example. Entry $c_1$ won three frames: $(2, 0)$, $(4, 2)$ and $(3, 1)$. The sum is $(9, 3)$, $n_1 = 3$, so $c_1$ moves to $(3, 1)$. Repeat assign and update until nothing moves.
+
+SoundStream uses k-means only to **start**: it runs k-means on the first training batch and uses the centres as the initial codebook, so the entries begin near real frames instead of at random spots.
+
+<figure class="blog-figure blog-figure--wide">
+  <KMeansLive alt="Sixty points in four clusters, coloured by the nearest of K diamond-shaped entries, with each entry’s territory shaded. Each step assigns points, then moves each entry to the middle of its pile. Readouts show the total squared error, entries in use and perplexity." />
+  <figcaption><strong>Figure 2. Sorting buttons into piles.</strong> Assign, average, repeat. Switch the update to EMA to see entries take smaller steps, or start them in the corner to make dead codes.</figcaption>
+</figure>
+
+### A running average instead of a full redo
+
+During training, frames arrive in small batches and the encoder keeps changing, so redoing k-means every step is wasteful. Instead each entry keeps a running tally and drifts a little each step. This is the **exponential moving average**, or EMA, update (SoundStream and EnCodec both use it, following VQ-VAE-2, the vector-quantized variational autoencoder, version 2):
+
+$$
+N_j \leftarrow \gamma N_j + (1 - \gamma)\, n_j, \qquad
+m_j \leftarrow \gamma m_j + (1 - \gamma) \sum_{x \in S_j} x, \qquad
+c_j = \frac{m_j}{N_j}
+$$
+
+What each symbol means:
+
+- $n_j$ and $S_j$ are this batch's count and pile for entry $j$, as above.
+- $N_j$ is a smoothed count: roughly "how many frames entry $j$ usually wins per batch".
+- $m_j$ is a smoothed sum of the frames entry $j$ wins.
+- $\gamma$ (gamma) is the **decay**, between 0 and 1. It says how much of the old tally to keep. EnCodec uses **0.99**: keep 99% of the old, take 1% from this batch.
+- $c_j = m_j / N_j$ is a smoothed average: the entry sits at the long-run middle of its pile.
+
+Intuition: instead of jumping to this batch's middle, the entry takes a small step toward it, so one odd batch cannot throw it around.
+
+Worked example (with $\gamma = 0.5$ so the numbers stay small). Entry $c_1$ has $N_1 = 2$ and $m_1 = (4, 0)$, so it sits at $(2, 0)$. This batch it wins the three frames above: $n_1 = 3$, sum $(9, 3)$.
+
+- $N_1 \leftarrow 0.5 \times 2 + 0.5 \times 3 = 2.5$
+- $m_1 \leftarrow 0.5 \times (4, 0) + 0.5 \times (9, 3) = (6.5, 1.5)$
+- $c_1 = (6.5, 1.5) / 2.5 = (2.6, 0.6)$
+
+Plain k-means would jump to $(3, 1)$; EMA moves part of the way, from $(2, 0)$ to $(2.6, 0.6)$.
+
+Note that the EMA update does not use gradients at all. The encoder still needs gradients, which raises a problem we meet [below](#the-straight-through-trick).
+
+
+## Paints nobody uses
+
+Here is how codebooks break. Suppose one paint in the box is a colour no region is close to. It never wins a lookup, so its pile is always empty, so the update never moves it, so it never wins. It is stuck forever. Such an entry is a **dead code**. When many entries die, the codebook has effectively shrunk: a 1,024-entry codebook that only uses 100 entries delivers about $\log_2 100 \approx 6.6$ bits instead of 10. This is **codebook collapse**.
+
+A useful health number is the **codebook usage** (how many entries win at least once over many frames), or its smoother cousin, **perplexity**:
+
+$$
+\text{PPL} = 2^{H}, \qquad H = -\sum_{j=1}^{K} p_j \log_2 p_j
+$$
+
+What each symbol means:
+
+- $p_j$ is the fraction of frames that picked entry $j$ (all the $p_j$ add up to 1).
+- $H$ is the **entropy**, the average number of bits the indices really carry. Entries with $p_j = 0$ contribute nothing.
+- $\text{PPL}$ (perplexity) is "how many equally used entries this is worth".
+
+Intuition: perplexity counts the entries that are pulling their weight.
+
+Worked example. $K = 4$. If all four are used equally, each $p_j = 0.25$, $\log_2 0.25 = -2$, so $H = 4 \times 0.25 \times 2 = 2$ bits and $\text{PPL} = 4$. If two entries are dead and the other two split the frames, $p = (0.5, 0.5, 0, 0)$, $H = 2 \times 0.5 \times 1 = 1$ bit and $\text{PPL} = 2$. Half the box is wasted.
+
+Three fixes, each used by a codec in this post.
+
+### Fix one: random restarts
+
+If a paint is never used, throw it out and refill the pot with a colour copied from the picture. SoundStream tracks the EMA of each entry's assignment count (decay **0.99**) and, when it falls below **2**, replaces the entry with a frame sampled at random from the current batch. EnCodec does the same: unused entries are replaced with a candidate from the current batch. A copied frame is, by construction, near real data, so it starts winning lookups at once.
+
+### Fix two: look up in a small space
+
+In hundreds of dimensions, most of the space is empty, and an entry placed at random is far from everything. DAC (the Descript Audio Codec, 2023) **factorizes** the codes: before the lookup it projects each vector down to just **8** numbers with a small learned map, does the nearest-neighbour search there, and projects the winner back up. In 8 dimensions the frames fill the space much more densely, so entries are close to something and stay alive. The bits are unchanged: the index still names one of 1,024 entries.
+
+### Fix three: compare directions, not lengths
+
+DAC also **l2-normalizes** both the frame and every entry before the lookup: it rescales each to length 1 ("l2" is the ruler length from before). Then every point sits on a circle (in 2-D) or a sphere, and the nearest entry is simply the one pointing in the most similar direction. In the DAC paper's words, this "converts euclidean distance to cosine similarity".
+
+$$
+\lVert u - v \rVert^2 = 2 - 2\, u \cdot v \quad \text{when } \lVert u \rVert = \lVert v \rVert = 1
+$$
+
+What each symbol means:
+
+- $u$ and $v$ are two vectors of length 1 (a normalized frame and a normalized entry).
+- $u \cdot v$ is the **dot product**: multiply matching numbers and add. For length-1 vectors it equals the cosine of the angle between them: 1 for the same direction, 0 for a right angle, -1 for opposite.
+
+Intuition: on a circle, being close and pointing the same way are the same thing. A lone entry can no longer hide far away "out in the corner", because there are no corners: every entry is on the same circle as the data.
+
+Worked example. Frame $z = (3, 4)$ has length $\sqrt{9 + 16} = 5$, so normalized $u = (0.6, 0.8)$. Entry $(0, 10)$ normalizes to $v = (0, 1)$. Then $u \cdot v = 0.8$ and $\lVert u - v \rVert^2 = 0.6^2 + 0.2^2 = 0.40$, which matches $2 - 2 \times 0.8 = 0.40$. Before normalizing, $(0, 10)$ was far from $(3, 4)$ (squared distance 45); after, it is a near neighbour.
+
+<figure class="blog-figure blog-figure--wide">
+  <DeadCodes alt="A batch of points from two clusters and eight diamond entries, five of which start far away. Bars show each entry’s smoothed win count against a dashed restart threshold. With restarts on, an entry whose bar falls below the line jumps onto a random point of the batch." />
+  <figcaption><strong>Figure 5. Paints nobody uses.</strong> EMA updates on batches of 32 points. An entry that never wins never moves, unless we refill it from the data. The threshold of 2 is SoundStream’s.</figcaption>
+</figure>
+
+<figure class="blog-figure blog-figure--wide">
+  <CosineCodes alt="Points in four groups and four diamond entries, one far out at (0, 10). Switching to lookup by direction slides every point and entry along its ray onto a circle; bars show how many points each entry wins, and the far entry goes from zero to a whole arc." />
+  <figcaption><strong>Figure 6. Compare directions, not lengths.</strong> On the circle there are no far corners for an entry to hide in. The readout checks the worked example: 45 before, 0.40 after.</figcaption>
+</figure>
+
+
+## The straight-through trick
+
+The encoder, decoder and (in DAC) the codebooks are trained by **gradient descent**: run the codec, measure how wrong the rebuilt sound is with a **loss** (one number, bigger is worse), and nudge every weight a little in the direction that shrinks the loss. The direction is the **gradient**, and it is passed backward from the loss through each step, a process called **backpropagation**.
+
+The lookup breaks that chain. Picking the nearest entry is a jump: move $z$ a tiny bit and the choice usually does not change at all, so the output does not move, and the gradient through the lookup is zero almost everywhere. The encoder would never learn.
+
+The fix is the **straight-through estimator**: on the way forward use the quantized $\hat z$; on the way backward pretend the quantizer was not there and hand the decoder's gradient straight to $z$. In code it is one line:
+
+$$
+z_q = z + \operatorname{sg}(\hat z - z)
+$$
+
+What each symbol means:
+
+- $z$ is the encoder's output; $\hat z$ is its quantized version.
+- $\operatorname{sg}(\cdot)$ is **stop-gradient**: its value passes forward unchanged, but no gradient flows back through it. Libraries call it `detach()` or `stop_gradient`.
+- $z_q$ is what the decoder actually receives.
+
+Intuition: forward, $z + (\hat z - z) = \hat z$, so the decoder sees the quantized frame. Backward, the stop-gradient part counts as a constant, so $z_q$ behaves like $z$ and the gradient flows to the encoder as if quantization were the identity. EnCodec describes it exactly this way: gradients are computed "as if the quantization step was the identity function during the backward phase".
+
+Worked example. $z = (3, 1.5)$, $\hat z = (4, 0)$. Forward: $z_q = (3, 1.5) + (1, -1.5) = (4, 0)$. Suppose the decoder's loss says "the first number should go down by 0.2": gradient $(0.2, 0)$ at $z_q$. Straight-through copies it to $z$ unchanged, $(0.2, 0)$, and the encoder learns to push its first number down. The gradient is a guess (it ignores that a big enough move would switch entries), but it points the right way often enough to train.
+
+<figure class="blog-figure blog-figure--wide">
+  <StraightThrough alt="A row of boxes: encoder, quantize, decoder, loss. A purple dot runs forward through them; a red gradient arrow runs back. With straight-through off it stops at the quantize box; with it on it jumps over along a bypass. An inset shows where z moves after one step." />
+  <figcaption><strong>Figure 7. The straight-through trick.</strong> Forward uses the rounded value; backward pretends the rounding was not there. Toy numbers from the worked example; press “Run one step”.</figcaption>
+</figure>
+
+
+## Keeping the encoder close
+
+Straight-through gives the encoder a direction, but nothing stops it from wandering away from the codebook, which makes the rounding error large and the borrowed gradient a poor guess. Two extra loss terms, from the VQ-VAE paper, pull the two sides together:
+
+$$
+L_{\text{vq}} = \lVert \operatorname{sg}(z) - \hat z \rVert^2 + \beta\, \lVert z - \operatorname{sg}(\hat z) \rVert^2
+$$
+
+What each symbol means:
+
+- The first term, the **codebook loss**, moves the chosen entry toward the frame. $\operatorname{sg}(z)$ freezes the frame, so only the entry moves. (With EMA updates this term is dropped: EMA already moves the entries.)
+- The second term, the **commitment loss**, moves the frame toward its chosen entry. $\operatorname{sg}(\hat z)$ freezes the entry, so only the encoder moves.
+- $\beta$ (beta) sets how hard the encoder is pulled. DAC weights the commitment loss **0.25** and the codebook loss **1.0**.
+
+Intuition: the paint moves toward the region and the region is asked to commit to a paint, so they meet in the middle instead of chasing each other.
+
+Worked example. $z = (3, 1.5)$, $\hat z = (4, 0)$, squared distance **3.25** from [earlier](#finding-the-nearest-entry). Codebook loss $= 3.25$; commitment loss $= 0.25 \times 3.25 = 0.8125$; total $L_{\text{vq}} = 4.0625$. Its gradient on $z$ from the commitment term is $2 \beta (z - \hat z) = 0.5 \times (-1, 1.5) = (-0.5, 0.75)$; a gradient-descent step goes the opposite way, $(0.5, -0.75)$ times the step size, which points from $z$ toward $(4, 0)$.
+
+In RVQ each stage gets its own copy of these terms, applied to its own residual.
+
+
+## One model, many bitrates
+
+A phone on a bad connection wants fewer bits; a music studio wants more. Training a separate codec for every bitrate is expensive. SoundStream's answer is **quantizer dropout**: for each training example, pick a number $n_q$ at random, uniformly between 1 and $Q$, and use only the first $n_q$ codebooks. ("Dropout" is the usual name for randomly switching parts of a network off during training.)
+
+Because the decoder sometimes gets only stage 1, it must make good sound from stage 1 alone; because it sometimes gets all stages, it must use the fine corrections too. At test time you pick $n_q$ to choose a bitrate, with no retraining. SoundStream trains one model at 18 kbps and runs it from **3** to **18 kbps**; at 9 and 12 kbps the scalable model even scored marginally better than models trained for that bitrate only, which the authors read as dropout acting as a regularizer.
+
+The others follow suit: EnCodec picks a number of codebooks that is a multiple of 4 to cover **1.5, 3, 6, 12 and 24 kbps** at 24 kHz; DAC applies quantizer dropout with probability **0.5** (half the examples keep all codebooks), which the paper found kept quality at full bitrate better.
+
+Worked example, using the toy from [the residual section](#quantize-what-is-left-over): with $n_q = 1$ the rebuild is $(4, 0)$, squared error **3.25** at 2 bits; $n_q = 2$ gives $(3, 1)$, error **0.25** at 4 bits; $n_q = 3$ gives $(3, 1.5)$, error **0** at 6 bits. Each extra stage buys a smaller fix, which is why cutting from the end degrades gracefully.
+
+<figure class="blog-figure blog-figure--wide">
+  <QuantizerDropout alt="Rows of eight stage boxes, one row per training example, lit up to the number of stages that example rolled. A histogram shows how often each stage was trained against its exact share. Below, the toy frame rebuilt from its first one, two or three stages." />
+  <figcaption><strong>Figure 8. One model, many bitrates.</strong> Stage 1 is trained on every example and later stages less often, so every prefix learns to sound good. Rules from SoundStream (uniform) and DAC (p = 0.5).</figcaption>
+</figure>
+
+
+## How real codecs use it
+
+**SoundStream** (Google, 2021). 24 kHz audio, **75** frames a second, codebooks of **1,024** entries, **8** quantizers at 6 kbps. EMA codebook updates, k-means start on the first batch, dead-code restarts below a count of 2, and the quantizer dropout above. At a fixed 6 kbps the paper compares 8 codebooks of 1,024, 16 of 32, and 80 of 2; quality (ViSQOL, a computer estimate of listening quality) falls only slightly, **4.01, 3.98, 3.92**, which shows how much of the job deep RVQ can do with tiny codebooks.
+
+**EnCodec** (Meta, 2022). Same frame rate at 24 kHz, **75** frames a second (150 at 48 kHz). Codebooks of **1,024** entries, up to **32** at 24 kHz. EMA updates with decay **0.99**, unused entries replaced from the batch, straight-through gradients and a commitment loss. VALL-E builds its speech generator on EnCodec at 8 codebooks ([Pocket TTS post](/blog/pocket-tts-calm-explained/#the-codec-token-recipe)).
+
+**DAC** (Descript, 2023). 44.1 kHz audio, **86** frames a second, **9** codebooks of 1,024 entries for about **8 kbps**. Instead of EMA it learns the codebooks by gradient with the codebook and commitment losses, and fights collapse with the 8-dimensional factorized lookup and l2 normalization.
+
+**Mimi** (Kyutai, 2024, the codec inside Moshi). 24 kHz audio, **12.5** frames a second, **8** codebooks of **2,048** entries, **1.1 kbps**. Two twists:
+
+- **A semantic first codebook.** During training, the output of the first quantizer is pushed to match features from WavLM, a self-supervised speech model whose features track what is being said (its **semantic** content), using a cosine distance. So token 1 tends to carry "what was said" and tokens 2 to 8 carry "how it sounded" (its **acoustic** detail).
+- **A split RVQ.** Distilling meaning into stage 1 of a plain RVQ hurt sound quality, so Mimi runs a plain VQ for the semantic token and, in parallel, a **7**-stage RVQ for the acoustic tokens, and adds their outputs. The acoustic stack starts from the whole frame rather than from the semantic stage's leftover.
+- **Quantize only half the time.** During training Mimi applies quantization on only **50%** of sequences, letting the decoder sometimes see the unquantized frame; the paper reports this improved objective quality at low bitrate.
+
+The [Mimi post](/blog/mimi-codec-explained/#what-the-original-mimi-does-here) follows the frame through the rest of the network, and explains why the Pocket TTS variant drops the quantizer for a continuous latent.
+
+<figure class="blog-figure blog-figure--wide">
+  <SplitRvq alt="A frame feeding two paths: a single semantic VQ pulled towards WavLM features, and a chain of seven acoustic RVQ stages, summed at the end. A switch compares this split design with a plain RVQ where the acoustic stages only see the semantic stage’s leftover. Below, one second of Mimi tokens as an 8-row grid." />
+  <figcaption><strong>Figure 9. Mimi’s split quantizer.</strong> One token for what was said, seven for how it sounded (Moshi paper, Sec 3.3.2). The slider drops acoustic stages and updates the bitrate.</figcaption>
+</figure>
+
+
+## Try it yourself
+
+All in the figures above; nothing to install. Every figure uses a fixed random seed, so you will see the same numbers I did.
+
+1. **Figure 2, k-means.** Keep **4** entries and **60** points and press "Step slowly" a few times: each step recolours the points, then slides the diamonds to the middle of their piles, and usage stays **4 of 4**. Now choose "Corner" and press "Run 20 steps": one entry never wins a point and never moves, so usage stays at **3 of 4**.
+2. **Figure 3, residuals.** Press "Reset to (3, 1.5)" and "Next stage" three times. The table must read **11.25, 3.25, 0.25, 0** with indices **1, 2, 2**. Then drag the red dot to about (2, 2) and step again: the error no longer reaches zero, because these tiny codebooks cannot spell every point.
+3. **Figure 4, bitrate.** Pick the Mimi preset, then raise the codebooks from **8** to **32**: the rate goes from **1,100** to **4,400** bits per second. Then pick SoundStream 6 kbps and read **6,000**.
+4. **Figure 5, dead codes.** With restarts off, press Run: only **3 of 8** entries ever win points, and perplexity sits near **2.3**. Switch restarts on and press Run: after **7** restarts all **8 of 8** win, and perplexity climbs to about **7**.
+5. **Figure 8, dropout.** Roll 1,000 examples under each rule and compare the bars with the red lines: stage 1 is always trained, stage 8 only one time in eight under the uniform rule, and more than half the time under DAC's rule.
+
+## What to take away
+
+- A codebook is a box of example vectors; quantizing means sending the index of the nearest one.
+- RVQ quantizes leftovers: each stage fixes what the earlier stages missed, so a few small codebooks buy many bits.
+- Bitrate is frames per second times codebooks times bits per index.
+- Codebooks learn by k-means-style averaging (EMA) or by gradient with codebook and commitment losses; straight-through lets gradients skip the lookup.
+- Dead codes are the main failure; restarts, low-dimensional lookup and normalized codes keep entries alive.
+- Quantizer dropout gives one model a bitrate dial, and Mimi's semantic first token gives the stack a meaning-first order.
+
+## Related
+
+- [What a computer hears](/blog/audio-basics/), the post before this one.
+- [Pocket TTS and CALM](/blog/pocket-tts-calm-explained/), on what codec tokens cost a generator and the continuous alternative.
+- [Mimi, layer by layer](/blog/mimi-codec-explained/).
+- [SoundStream review](/paper-reviews/soundstream/), where RVQ and quantizer dropout were trained end to end
+- [VALL-E review](/paper-reviews/vall-e/), a language model over these tokens
+
+
+## Sources
+
+- Zeghidour et al., *SoundStream: An End-to-End Neural Audio Codec*, 2021. arXiv:2107.03312. (75 Hz at 24 kHz, 80 bits per frame at 6 kbps, N = 1024 with 8 quantizers, EMA updates, k-means init, dead-code replacement at EMA count below 2 with decay 0.99, quantizer dropout with $n_q$ uniform in [1, Nq], 3 to 18 kbps, Table II ViSQOL 4.01/3.98/3.92.)
+- Défossez et al., *High Fidelity Neural Audio Compression* (EnCodec), 2022. arXiv:2210.13438. (75 steps per second at 24 kHz, 1,024 entries, up to 32 codebooks, 1.5 to 24 kbps, EMA decay 0.99, unused-entry replacement, straight-through estimator, commitment loss.)
+- Kumar et al., *High-Fidelity Audio Compression with Improved RVQGAN* (DAC), 2023. arXiv:2306.06546. (44.1 kHz, 86 Hz, 9 codebooks of 10 bits, 8 kbps, 8-d factorized codes, l2 normalization, quantizer dropout p = 0.5, commitment 0.25, codebook 1.0.)
+- Défossez et al., *Moshi: a speech-text foundation model for real-time dialogue*, 2024. arXiv:2410.00037. (Mimi: 12.5 Hz, Q = 8, 2,048 entries, 1.1 kbps, WavLM distillation with cosine distance into the first quantizer, split RVQ, quantization on 50% of sequences.)
+- van den Oord et al., *Neural Discrete Representation Learning* (VQ-VAE), 2017. arXiv:1711.00937. (Codebook and commitment losses, straight-through.)
+- Razavi et al., *Generating Diverse High-Fidelity Images with VQ-VAE-2*, 2019. arXiv:1906.00446. (EMA codebook updates, as cited by SoundStream.)

@@ -1,0 +1,466 @@
+---
+title: "Moshi: A Model That Listens While It Talks"
+published: true
+date: 2026-10-14
+question: "How do you build one model that hears you and speaks back at the same time, with no turns?"
+excerpt: "Moshi reads your audio and writes its own every 80 ms, writes a silent transcript of itself one step ahead of its voice, and answers within a theoretical 160 ms. Inner Monologue nearly triples its spoken question-answering accuracy."
+type: paper
+topic: [speech, architecture, audio-codecs]
+tags: [Speech, Full duplex, Moshi, Mimi, Kyutai, RQ-Transformer]
+org: "Kyutai"
+authors: "Alexandre Défossez, Laurent Mazaré, Manu Orsini, Amélie Royer, Patrick Pérez, Hervé Jégou, Edouard Grave, Neil Zeghidour"
+source_url: https://arxiv.org/abs/2410.00037
+source_label: "Read the paper (arXiv)"
+source_date: 2024-09-17
+links:
+  - label: "Code"
+    url: https://github.com/kyutai-labs/moshi
+  - label: "Demo"
+    url: https://moshi.chat/
+math: true
+tldr:
+  - "**Authors' claim:** Moshi is the first real-time full-duplex spoken large language model, with a theoretical latency of 160 ms and 200 ms in practice (Abstract, p. 1)."
+  - "**The trick:** two transformers. A big one steps through time once per 80 ms frame; a small one fills the 17 tokens inside that frame (Sec 3.4.1, p. 13; Sec 3.4.4, p. 17)."
+  - "**Evidence:** writing a time-aligned text token before the audio tokens (Inner Monologue) takes spoken TriviaQA from 7.3% to 22.8% and Web Questions from 9.2% to 26.6%; the text-only backbone Helium scores 56.4% and 32.3% (Table 8, p. 29)."
+  - "**My reading:** one sliding number, the delay between the text and the audio, turns the same model into a dialogue system, a streaming recogniser or a streaming speech synthesiser. The cost is knowledge: Moshi keeps well under half of Helium's TriviaQA score."
+---
+import TurnRace from "../../components/figures/TurnRace.astro";
+import TwoClocks from "../../components/figures/TwoClocks.astro";
+import TokenTower from "../../components/figures/TokenTower.astro";
+import DelayStairs from "../../components/figures/DelayStairs.astro";
+import PadWriter from "../../components/figures/PadWriter.astro";
+import DelayDial from "../../components/figures/DelayDial.astro";
+import LossScale from "../../components/figures/LossScale.astro";
+import TurnTakingBars from "../../components/figures/TurnTakingBars.astro";
+import JointOrApart from "../../components/figures/JointOrApart.astro";
+
+## The question and why it matters
+
+Think of two friends on the phone. One says "so I was thinking..." and the other says "mm-hm" in the middle, or laughs, or cuts in with "wait, which one?". Nobody holds up a sign saying "my turn is over". People overlap: overlapping speech is **10 to 20%** of spoken time in conversation (Sec 1, p. 2, citing Çetin and Shriberg 2006), and the average gap before someone replies is about **230 ms**, measured across 10 languages (Sec 1, p. 2, citing Stivers et al. 2009).
+
+Most voice assistants do not work like that. They are a *cascade*: a relay race of separate programs. First a voice activity detector (VAD: a small program that decides whether someone is speaking) waits for you to stop. Then automatic speech recognition (ASR: turning speech into written words) writes down what you said. A text large language model (LLM: a model that predicts the next word of text) writes an answer, and text-to-speech (TTS: turning written words into audio) reads it out (Abstract, p. 1; Sec 1, p. 2). I walked through that relay in [cascaded vs full duplex](/blog/cascade-vs-full-duplex/).
+
+The paper names three problems with the relay (Abstract, p. 1; Sec 1, p. 2):
+
+1. **Waiting adds up.** Each runner waits for the previous one, so the total is "several seconds" (Sec 1, p. 2).
+2. **Text throws things away.** The LLM only sees words, so emotion, accent, a laugh or a door slamming are gone.
+3. **Turns are assumed.** The relay needs a clean "you talk, then I talk". Interruptions and "mm-hm" (the paper calls these *backchannels*: little noises that say "I'm listening" without taking the floor) do not fit.
+
+Moshi's answer is to throw away the relay. One model hears your audio and writes its own audio at the same time, every 80 ms, forever. It always produces sound: speech when it talks, near silence when it listens (Sec 1, pp. 2 to 3). That is what *full duplex* means: both directions open at once, like a phone call and unlike a walkie-talkie.
+
+<figure class="blog-figure blog-figure--wide">
+  <TurnRace alt="Two timelines over six seconds. Top, a cascade waits for silence, then runs speech recognition, a language model and speech synthesis in turn before speaking. Bottom, Moshi runs on an 80 ms tick and starts speaking 160 ms after you stop. A toggle adds an interruption; a slider sets how long the cascade waits for silence." />
+  <figcaption><strong>Figure 1. Relay against clock.</strong> The cascade stage times and its silence wait are illustrative. Moshi's 160 ms is its theoretical latency (Abstract, p. 1). People reply after about 230 ms on average and overlap 10 to 20% of the time (Sec 1, p. 2).</figcaption>
+</figure>
+
+I read this paper because MoshiRAG (my [follow-up review](/paper-reviews/moshirag/)) assumes it in four sentences. This review is the long version.
+
+## The pieces, before the details
+
+Moshi has three parts (Sec 3.1, p. 6; Fig 1, p. 7). Picture a radio station:
+
+- **Helium** is the newsroom: a 7-billion-parameter text model that knows facts and grammar ([Helium, the text brain](#helium-the-text-brain)).
+- **Mimi** is the microphone and speaker: it turns sound into small numbered tokens and back ([Mimi, in one paragraph](#mimi-in-one-paragraph)).
+- **The RQ-Transformer** is the presenter who reads the news aloud while also listening to callers: it predicts the tokens ([Two transformers, one for time and one for depth](#two-transformers-one-for-time-and-one-for-depth)).
+
+On top of those sit three ideas: the [acoustic delay](#the-acoustic-delay), [two streams for two speakers](#two-streams-for-two-speakers), and the [Inner Monologue](#inner-monologue-text-before-sound).
+
+## Helium, the text brain
+
+Helium is a decoder-only transformer (a model that reads left to right and guesses the next token) with **7B** parameters, pretrained on **2.1T** tokens (2.1 trillion pieces of words) of public English text (Sec 1, p. 3).
+
+The recipe is the standard modern one (Sec 3.2.1, p. 7; Table 1, p. 8):
+
+- RMS normalization (root-mean-square normalization: rescale each vector so its typical size is 1) before attention, feed-forward and output layers.
+- RoPE (rotary positional embeddings: the model knows word order by rotating vectors by an angle that depends on position).
+- Context of **4,096** tokens; **32** layers, **32** heads, model width **4,096**, MLP width **11,264** (Table 1, p. 8).
+- Gated linear units with SiLU in the feed-forward blocks.
+- A SentencePiece tokenizer of **32,000** pieces, numbers split into single digits (Sec 3.2.1, p. 7).
+- **500k** steps, batch **4.2M** tokens, learning rate starting at $3 \cdot 10^{-4}$ with cosine decay (Sec 4.4, p. 20; Table 1, p. 8).
+
+The text is **12.5%** curated sources (Wikipedia, StackExchange, scientific articles and so on) and **87.5%** filtered CommonCrawl web pages from ten crawls (Sec 4.1, p. 17). Filtering is deduplication by line hashes, an English-language check with threshold **0.85**, and a quality classifier with 9 categories (Sec 3.2.2, p. 9).
+
+How good is it? On the paper's table it is level with similar-compute 7B models: MMLU (a multiple-choice exam across 57 school and university subjects) **54.3** vs Llama 2's **45.3**; ARC-easy **79.6** vs **75.2**; NaturalQuestions **23.3** vs **25.7** (Table 2, p. 22). Mistral and Gemma, trained with "up to 3x more compute", are still ahead on MMLU at **62.5** and **64.3** (Sec 5.1, p. 22; Table 2, p. 22).
+
+Why care: every fact Moshi knows comes from here. Keep the MMLU number **54.3** in mind; we come back to it in [what the evidence shows](#what-the-evidence-shows).
+
+## Mimi, in one paragraph
+
+I explained Mimi in full in [Mimi, the codec](/blog/mimi-codec-explained/); here is the short version. Mimi is a neural audio codec: an encoder squeezes 24,000 samples per second of sound into **12.5** frames per second, and a decoder turns them back into sound (Sec 3.3.1, p. 10). Each frame is written as **8** numbers, each chosen from a codebook (a list of learned sound patterns) of **2,048** entries (Sec 3.3.1, p. 11). The first number is the *semantic* token: during training it was pushed to agree with WavLM, a self-supervised speech model, so it carries "which sounds are being said". The other seven are *acoustic* tokens: voice, room, timbre (Sec 3.3.2, p. 12). Everything is causal (it never peeks at the future), so one 80 ms frame in gives one frame out (Sec 3.3.1, p. 11).
+
+Two numbers to check by hand:
+
+$$
+\text{frame rate} = \frac{f_s}{4 \cdot 5 \cdot 6 \cdot 8 \cdot 2}
+$$
+
+- $f_s$ is the sample rate: how many sound measurements per second, here **24,000** (Sec 3.3.1, p. 10).
+- $4, 5, 6, 8$ are the strides of the four convolution blocks, and $2$ is the stride of the final convolution: each one keeps one value out of that many (Sec 3.3.1, p. 10).
+
+Intuition: each stride is a "keep one in $n$" step, so the strides multiply. Example: $4 \cdot 5 = 20$, $\cdot 6 = 120$, $\cdot 8 = 960$, $\cdot 2 = 1920$, and $24000 / 1920 = 12.5$ frames per second, so one frame is $1/12.5 = 0.08$ s, **80 ms**.
+
+$$
+\text{bitrate} = Q \cdot \log_2 N_A \cdot f_r
+$$
+
+- $Q$ is the number of codebooks per frame, **8** (Sec 3.3.1, p. 11).
+- $N_A$ is the size of each codebook, **2,048**; $\log_2 N_A$ is how many yes/no answers (bits) it takes to name one entry.
+- $f_r$ is the frame rate, **12.5** Hz.
+
+Intuition: count how many bits you send per frame, then multiply by frames per second. Example: $\log_2 2048 = 11$ because $2^{11} = 2048$; $8 \cdot 11 = 88$ bits per frame; $88 \cdot 12.5 = 1100$ bits per second, the paper's **1.1 kbps** (Sec 3.3.1, p. 11).
+
+## Two transformers, one for time and one for depth
+
+### The problem: too many tokens
+
+Text is cheap: English speech is about **3 to 4** text tokens per second (Sec 3.4.1, p. 13). Mimi audio is not. If you laid all 8 tokens of every frame in one long line, you would need $8 \cdot 12.5 = 100$ tokens per second; five minutes is $300 \cdot 100 = 30{,}000$ steps (Sec 3.4.1, p. 13). A 7B model doing 100 forward passes a second is too slow to stream.
+
+### The fix: a tall building with floors
+
+Picture the conversation as a street of buildings, one building per 80 ms. Each building has floors: the tokens of that frame. The **Temporal Transformer** is a big walker that steps from building to building along the street. The **Depth Transformer** is a small lift that goes up the floors inside one building (Sec 3.4.1, p. 13; Fig 3, p. 13).
+
+The big walker is initialised from Helium and keeps its size: **32** layers, width **4,096** (Table 1, p. 8). The lift is small: **6** layers, width **1,024**, **16** heads (Table 1, p. 8; Sec 3.4.1, p. 14).
+
+The paper writes it as two equations (Eq 1 and Eq 2, p. 13):
+
+$$
+z_s = \mathrm{Tr}_{\text{Temp}}(V_0, \dots, V_{s-1}) \in \mathbb{R}^d
+$$
+
+$$
+l_{s,k} = \mathrm{Tr}_{\text{Depth}}(z_s, V_{s,1}, \dots, V_{s,k-1}) \in \mathbb{R}^{N_k}
+$$
+
+- $s$ is the step number along time: building number $s$, one per 80 ms.
+- $k$ is the floor number inside a step, from 1 to $K$ (Sec 3.4.1, p. 13).
+- $V_s = (V_{s,1}, \dots, V_{s,K})$ is the whole column of tokens at step $s$; $V_0$ is a fixed all-zero start (Sec 3.4.1, p. 13).
+- $\mathrm{Tr}_{\text{Temp}}$ is the Temporal Transformer; it reads all past columns and returns $z_s$, one vector of $d$ numbers that summarises "everything so far".
+- $\mathbb{R}^d$ means "a list of $d$ real numbers".
+- $\mathrm{Tr}_{\text{Depth}}$ is the Depth Transformer; it reads $z_s$ plus the floors already filled at this step.
+- $l_{s,k}$ is a list of $N_k$ scores (*logits*), one per possible token on floor $k$; $N_k$ is that floor's vocabulary size (32,000 for text, 2,048 for audio; Table 1, p. 8).
+- For the first floor there is nothing below, so the paper uses a plain linear layer: $l_{s,1} = \mathrm{Lin}(z_s)$ (Sec 3.4.1, p. 14).
+
+Training makes softmax of these scores match the true probabilities (Eq 3, p. 14):
+
+$$
+\mathrm{softmax}(l_{s,k}) \approx P[V_{s,k} \mid V_0, \dots, V_{s-1}, V_{s,1}, \dots, V_{s,k-1}]
+$$
+
+- $\mathrm{softmax}$ turns scores into probabilities that add up to 1 (bigger score, bigger share).
+- $P[A \mid B]$ reads "the probability of $A$ given that we already know $B$".
+
+Intuition: the walker makes one big decision per building ("where is this conversation going?"), and the lift makes small decisions per floor, each one able to see the floors below it. Multiply the floor-by-floor probabilities and you get the probability of the whole column, which is the chain rule of probability.
+
+Tiny example: suppose a column has three floors. The model says the text token "Hi" has probability $0.5$; given "Hi", the semantic token 412 has probability $0.4$; given both, acoustic token 77 has probability $0.5$. The probability of the whole column is $0.5 \cdot 0.4 \cdot 0.5 = 0.1$.
+
+What this buys: the walker takes $S$ steps instead of $K \cdot S$, and the lift takes at most $K$ small steps each time (Sec 3.4.1, p. 14). With Moshi's $K = 17$ (see [two streams](#two-streams-for-two-speakers)), five minutes is $300 \cdot 12.5 = 3750$ walker steps instead of $3750 \cdot 17 = 63{,}750$. The fine-tuned context of **3,000** steps is $3000 / 12.5 = 240$ s, the paper's "4 min" (Table 1, p. 8).
+
+The walker's input at each step is a sum (Sec 3.4.1, p. 14): each of the $K$ tokens of the previous column is looked up in its own embedding table (a table that turns a token number into a vector), and the $K$ vectors are added. Tiny example with width 2: text token gives $(1, 0)$, semantic token gives $(0, 2)$, one acoustic token gives $(0.5, 0.5)$; the walker reads $(1.5, 2.5)$. This is the sum MoshiRAG later adds a fourth term to.
+
+Unlike earlier RQ-Transformers, each floor gets its own weights in the lift's linear layers ("depthwise parametrization"), because different floors need different transformations (Sec 3.4.1, p. 14).
+
+<figure class="blog-figure blog-figure--wide">
+  <TwoClocks alt="Top, 24 columns of 17 cells fill one column per big-model pass, a small arrow climbing each column. Bottom, a flattened line of the same tokens fills only one cell per big-model pass. A slider sets the conversation length and readouts give the pass counts." />
+  <figcaption><strong>Figure 2. Two clocks.</strong> After the same 24 big passes the RQ-Transformer has covered 24 columns; the flattened model, under 1.5. Counts: 12.5 columns a second, 17 tokens each (Sec 3.4.1, p. 13).</figcaption>
+</figure>
+
+<figure class="blog-figure blog-figure--wide">
+  <TokenTower alt="A tower of 17 floors for one 80 ms step: Moshi's text, Moshi's semantic and seven acoustic tokens, then the user's semantic and seven acoustic tokens. Colours show which floors Moshi samples and which come from the microphone; a mode switch shows training and the version without Inner Monologue." />
+  <figcaption><strong>Figure 3. One step, 17 tokens.</strong> Layout from Eq 6 (p. 17) and Fig 4 (p. 15). Click a floor for its role.</figcaption>
+</figure>
+
+## The acoustic delay
+
+### What it is
+
+If the lift had to pick the semantic token and all seven acoustic tokens of the same 80 ms at once, it would be guessing "what is said" and "how it sounds" in the same breath. The paper found it more stable to shift the acoustic tokens one or two steps later than the semantic token (Sec 3.4.2, p. 14). Then the big walker has already seen "what was said" when the acoustic tokens are chosen.
+
+Eq 4 (p. 14), for a delay $\tau$:
+
+$$
+V_{s,1} = A_{s,1}, \qquad V_{s,q} = A_{s-\tau,q} \ \text{if } s \ge \tau + 1,\ q > 1, \qquad V_{s,q} = 0 \ \text{if } s < \tau + 1,\ q > 1
+$$
+
+- $A_{t,q}$ is Mimi's token number $q$ at frame $t$; $q = 1$ is semantic, $q = 2$ to $8$ are acoustic (Sec 3.4.2, p. 14).
+- $V_{s,q}$ is what the model actually sees at step $s$, floor $q$.
+- $\tau$ (tau) is the delay, in steps of 80 ms.
+- $0$ is a placeholder for "nothing yet" at the start.
+
+Intuition: the semantic row stays where it is; the acoustic rows slide right by $\tau$ squares. It is like a band where the singer sings the word and the guitarist plays the matching chord one beat later, after hearing it.
+
+Example with $\tau = 1$: at step 1 the model sees $A_{1,1}$ and seven zeros. At step 2 it sees $A_{2,1}$ (semantic of frame 2) together with $A_{1,2}, \dots, A_{1,8}$ (acoustic of frame 1). So the sound of frame 1 is complete only at step 2.
+
+### What it costs and buys
+
+Every step of delay is another 80 ms before a frame's sound is complete. The paper's ablation (Table 6, p. 25) measured speech quality with transcript NLL (negative log-likelihood: how surprised a small text model is by the transcript of the generated speech; lower is better) and transcript length (weak models fall silent; longer is better; Sec 5.3, p. 26):
+
+| Delay pattern | Latency | Transcript NLL | Length |
+|:--|--:|--:|--:|
+| [0,0,0,0,0,0,0,0] | 80 ms | 4.36 | 486 |
+| [0,1,1,1,1,1,1,1] | 160 ms | 4.12 | 529 |
+| [0,2,2,2,2,2,2,2] | 240 ms | 4.09 | 519 |
+
+(Table 6, p. 25; latencies from Sec 5.3, p. 26.) One step of delay buys most of the gain.
+
+The RQ-Transformer matters most when the delay is short. With the old MusicGen-style pattern [0,1,2,...,7] (each level one step after the previous), separate prediction heads do almost as well (perplexity **42.2** vs **40.3**), but that pattern costs **640 ms**. With [0,2,2,...,2], separate heads collapse to **135.4** and the RQ-Transformer gets **36.8** (Table 5, p. 25; Sec 5.3, p. 26). Perplexity is "how many tokens the model is torn between, on average"; lower is better, and it is only comparable within one delay pattern (Table 5 caption, p. 25).
+
+Final setting: delay **2** in pretraining, **1** in all later stages (Table 1, p. 8; Sec 5.3, p. 27).
+
+<figure class="blog-figure blog-figure--wide">
+  <DelayStairs alt="A grid of 8 codebook rows by 12 steps. Choosing a delay pattern slides the acoustic rows right; frame 1's tokens are red, and a readout gives the step at which frame 1 is complete and the latency, with the paper's ablation numbers." />
+  <figcaption><strong>Figure 4. Acoustic delay.</strong> Latency = (1 + largest delay) × 80 ms, my reading, matching every value in Sec 5.3 (p. 26). Ablation numbers from Tables 5 and 6 (p. 25).</figcaption>
+</figure>
+
+## Two streams for two speakers
+
+Most earlier speech-text models put both speakers in one line, which requires clean turns (Sec 2, p. 5). Moshi gives each speaker their own stack of floors in the same column: Moshi's 8 Mimi tokens and the user's 8 Mimi tokens, each with the acoustic delay (Sec 3.4.3, p. 15). Like a two-track tape recorder: one track for each person, both always running.
+
+At inference Moshi samples its own floors and simply writes in the user's real tokens from the microphone; the model's guesses for the user are ignored (Sec 3.4.4, p. 17). There is no "turn" anywhere in the data. When the user talks and Moshi does not, Moshi's audio floors decode to "natural silence" and its text floor fills with padding (Sec 3.4.4, p. 17).
+
+Because the model also learned to predict the user, it can play both sides and generate whole fake conversations, which is how the paper evaluates turn-taking offline (Sec 3.4.4, p. 17; Sec 5.6, p. 31). See [turn-taking](#turn-taking).
+
+## Inner Monologue: text before sound
+
+### The idea
+
+Before Moshi says a word, it writes the word down to itself. Floor 1 of every column is a text token of Moshi's own speech, placed in time with the audio, so it acts as a "prefix" to the semantic token (Sec 3.4.4, pp. 15 to 16). It is like reading a script one beat ahead of speaking it. Only Moshi's own speech gets a text floor; the user does not, because that would need a live ASR and bring the cascade back (Sec 3.4.4, p. 16).
+
+### Lining words up with frames
+
+Text is much sparser than frames, so most steps have no new word. The paper uses Whisper's word timestamps and two special tokens (Sec 3.4.4, p. 16):
+
+- PAD: "nothing new here".
+- EPAD: "the padding ends now; a word starts at the next step". Splitting "stop padding" from "which word" into two decisions helped (Sec 3.4.4, p. 16).
+
+The rule, Eq 5 (p. 16): start with every slot set to PAD; then for each word $i$:
+
+$$
+W_{t_i - 1} \leftarrow \text{EPAD}, \qquad W_{t_i + j} \leftarrow w_{i,j} \ \ \forall j \le n_i
+$$
+
+- $W_t$ is the text slot at step $t$.
+- $t_i$ is the step where word $i$ starts: its start time in seconds times 12.5. (The paper's text says "divided by the framerate", which only works if "framerate" means 80 ms; I use start time x 12.5 Hz.)
+- $n_i$ is how many SentencePiece tokens word $i$ needs; $w_{i,j}$ is its $j$-th token.
+- $\leftarrow$ means "write this into that slot".
+- Edge rules: if $t_i = 1$, EPAD goes in slot 1 and the word shifts right; an EPAD never overwrites a token of the previous word (Sec 3.4.4, p. 16).
+
+Intuition: a row of empty boxes, one per 80 ms. Drop each word into the box where it starts, and put a "get ready" card in the box just before it.
+
+Tiny example over 12 steps (I index the first token of a word at $t_i$, i.e. $j$ counting from 0;): "Hi" starts at 0.40 s, so $t = 0.40 \cdot 12.5 = 5$; "there" starts at 0.72 s, so $t = 9$. Both are one token. Result:
+
+| step | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 |
+|:--|:--|:--|:--|:--|:--|:--|:--|:--|:--|:--|:--|:--|
+| $W_t$ | PAD | PAD | PAD | EPAD | Hi | PAD | PAD | EPAD | there | PAD | PAD | PAD |
+
+PAD fills 8 of 12 slots, $8/12 \approx 67\%$, close to the paper's "about **65%**" for English conversation (Sec 3.4.4, p. 16).
+
+A side effect: the text floor is a steering wheel. Forcing an EPAD makes Moshi start talking at once (Sec 3.4.4, p. 17); the spoken-QA evaluation does exactly that after each question (Sec 5.5, p. 29).
+
+<figure class="blog-figure blog-figure--wide">
+  <PadWriter alt="Draggable word boxes on a time line above a row of sixteen 80 ms text slots. Each word lands in its slot, an orange EPAD fills the slot before it, and grey PAD fills the rest; a readout gives the PAD share." />
+  <figcaption><strong>Figure 5. Eq 5 by hand.</strong> Word times and the two-token split for long words are a toy tokenizer, not SentencePiece. Compare the PAD share with the paper's ~65% (Sec 3.4.4, p. 16).</figcaption>
+</figure>
+
+### One dial: dialogue, ASR or TTS
+
+Now slide the whole text row in time relative to the audio rows (Sec 3.4.4, p. 16; App. C, p. 56):
+
+- **Text late (audio ahead):** the model hears the audio first and then writes the words. Feed real audio, ignore the model's audio guesses, sample only text: you get streaming ASR with word timing to 80 ms (Sec 5.7, p. 32).
+- **Text early (text ahead):** the words come first and the audio follows them. Feed the text in, sample the audio: you get streaming TTS. The model is allowed to choose PAD and EPAD itself, and whenever it tries to emit a real word, the next word of your script is inserted instead (App. C, p. 56).
+- **Text at 0:** Moshi in dialogue mode (Table 1, p. 8).
+
+The paper uses **2 s** in both directions, which is $2 \cdot 12.5 = 25$ steps (Sec 5.7, p. 31). Results on LibriSpeech test-clean, with no LibriSpeech data in training (Sec 5.7, pp. 31 to 32):
+
+- TTS: **4.7%** WER (word error rate: words wrong per 100 words, after an ASR transcribes the output), vs Vall-E **5.9%** and NaturalSpeech 3 **1.81%**, both of which see the whole sentence first.
+- ASR: **5.7%** WER, vs a streaming FastConformer **3.6%** with similar look-ahead.
+
+The authors call this "limited experimentation", not a state-of-the-art claim (Sec 5.7, p. 32). During pretraining they randomise the text delay between $-0.6$ and $+0.6$ s (Sec 4.4, p. 20).
+
+<figure class="blog-figure blog-figure--wide">
+  <DelayDial alt="A text row and an audio row over six seconds. A dial slides the text from 2 s early to 2 s late. Cells are solid when fed in and hatched when the model samples them, and the label switches between streaming TTS, dialogue and streaming ASR." />
+  <figcaption><strong>Figure 6. One dial, three systems.</strong> 2 s = 25 steps (Sec 5.7, p. 31). Word error rates from Sec 5.7 (p. 32); the sentence and its timing are illustrative.</figcaption>
+</figure>
+
+## Training stages and data
+
+Moshi is trained in four stages; the big walker starts from Helium and the lift from random weights (Table 1 caption, p. 8; Sec 4.4, p. 20). A school analogy: read every book in the library, then practise listening to recordings of two people, then real phone calls, then rehearse being the assistant.
+
+| Stage | Data | Steps | Batch | Acoustic delay | Text delay |
+|:--|:--|--:|--:|--:|--:|
+| Pretraining | 7M hours of audio, one stream, Whisper transcripts | 1M | 16 h | 2 | ±0.6 s |
+| Post-training | same audio, split into two streams by diarization | 100k | 8 h | 1 | 0 |
+| Fisher fine-tuning | 2,000 h of two-channel phone calls | 10k | 40 min | 1 | 0 |
+| Instruct fine-tuning | 20k+ h of synthetic dialogues | 30k | 2.7 h | 1 | 0 |
+
+(Table 1, p. 8; Sec 4.2, p. 18; Sec 4.3, p. 18; Sec 4.4, pp. 20 to 21.)
+
+Details worth knowing:
+
+- **Pretraining** (Sec 4.4, p. 20): each item is a 5-minute sequence; text tokens are masked 30% of the time; half of the batches are pure text from Helium's data, with a separate optimizer state, so Helium does not forget (this matters: see [what the evidence shows](#what-the-evidence-shows)); PAD's weight in the loss is halved.
+- **Post-training** (Sec 4.4, p. 20): PyAnnote diarization (working out who spoke when) picks one speaker as "main"; their audio goes on Moshi's stream and everything else on the user stream. 10% of batches are text-only. Weak point: these fake streams never overlap and the inactive side is perfectly silent (Sec 4.4, pp. 20 to 21).
+- **Fisher** (Sec 4.2, p. 18; Sec 4.4, p. 21): real two-person calls, one channel per person, upsampled from 8 kHz to 24 kHz with AudioSR.
+- **Instruct** (Sec 4.3, pp. 18 to 20): text instruct sets like Open Hermes did not sound spoken (URLs, bullet lists), so Helium wrote spoken-style scripts ("Use some backchanneling. Use short turns.", p. 19), and Kyutai's own multi-stream TTS voiced them. Moshi's voice is one voice actor across 70+ styles; the user voice is random (Sec 4.3, p. 18). The scripts also include mis-heard questions, false premises ("Is the Eiffel Tower in Beijing?"), simple maths and refusals (Sec 4.3, pp. 19 to 20).
+- **Augmentation on the user stream** during instruct (Sec 4.4, p. 21): random gain from -24 dB to +15 dB half the time; noise 30% of the time; and fake echo of Moshi's own voice at a scale in [0, 0.2] with a delay in [100 ms, 500 ms], so Moshi learns not to answer itself.
+
+### The loss
+
+All of this trains one objective (Eq 7, p. 21):
+
+$$
+L(V, l) = \frac{1}{S} \sum_{s=1}^{S} \left( \mathrm{CE}(l_{s,1}, V_{s,1}) + \frac{1}{\sum_{k=2}^{K} \alpha_k} \sum_{k=2}^{K} \alpha_k \, \mathrm{CE}(l_{s,k}, V_{s,k}) \right)
+$$
+
+- $L$ is the number training tries to make small.
+- $S$ is the number of steps; $\frac{1}{S}\sum_{s=1}^{S}$ is "average over steps".
+- $\mathrm{CE}(l, v)$ is cross-entropy: how surprised the model was by the true token $v$, given its scores $l$. If it gave the true token probability $p$, CE is $-\ln p$.
+- $k = 1$ is the text floor; $k = 2$ to $K$ are the audio floors.
+- $\alpha_k$ is the weight of floor $k$: **100** for semantic tokens, **1** for acoustic ones (Sec 4.4, p. 21).
+- Dividing by $\sum \alpha_k$ turns the audio part into a weighted average.
+
+Intuition: the text floor counts as much as all the audio floors put together, and inside the audio, the "what is said" token counts a hundred times more than each "how it sounds" token (Sec 4.4, p. 21).
+
+Tiny example, one stream (so floors 2 to 9: one semantic, seven acoustic): text CE $= 2.0$, semantic CE $= 1.0$, each acoustic CE $= 3.0$. Weights sum to $100 + 7 \cdot 1 = 107$. Audio part: $(100 \cdot 1.0 + 7 \cdot 3.0)/107 = 121/107 \approx 1.131$. Step loss: $2.0 + 1.131 = 3.131$. Notice the audio part sits close to the semantic CE: acoustic mistakes barely move it.
+
+Why 100? Raising the semantic weight from 1 to 100 lowered transcript NLL from **4.09** to **3.75** (no depthwise weights) and **3.65** (with) (Table 6, p. 25).
+
+<figure class="blog-figure blog-figure--wide">
+  <LossScale alt="Blocks sized by weight: one wide semantic block of weight 100 and seven thin acoustic blocks of weight 1. A number line shows the semantic and acoustic cross-entropies and a red pointer at their weighted average. Sliders change each value." />
+  <figcaption><strong>Figure 7. Eq 7 on a scale.</strong> Defaults reproduce the worked example: 2.0 + 121/107 = 3.131. Weights from Sec 4.4 (p. 21).</figcaption>
+</figure>
+
+## The latency budget
+
+Where does **160 ms** come from (Abstract, p. 1)? Two frames:
+
+$$
+\text{latency} = (1 + \tau) \cdot 80 \ \text{ms}
+$$
+
+- $80$ ms is one Mimi frame: Moshi needs one full frame of your audio before it can react, and its own first frame is 80 ms of sound (Sec 3.3.1, p. 11).
+- $\tau$ is the acoustic delay in steps, **1** after pretraining (Table 1, p. 8).
+
+Intuition: one frame to hear, plus one frame of waiting for the acoustic tokens to catch up.
+
+Example: $(1 + 1) \cdot 80 = 160$ ms (Sec 5.3, p. 27). With $\tau = 0$ it would be 80 ms; with $\tau = 2$, 240 ms (Sec 5.3, p. 26). This formula is my reading of the paper's statements; it matches all three values it gives, plus 640 ms for the [0,...,7] pattern (Sec 5.3, p. 26).
+
+The **200 ms** "in practice" appears in the abstract (p. 1) and nowhere else I could find in the paper; the paper does not say on what hardware. 160 ms is under the 230 ms human average (Sec 1, p. 2).
+
+Running cost per step: one big forward pass plus 17 small ones; Inner Monologue adds one token per step, 17 instead of 16 (Sec 5.5, p. 30). For smaller GPUs, weights can be quantised: Moshi in bf16 is about **16.74 GB** after instruct; with 4-bit weights and blocks of 32 it is **5.18 GB** and MMLU drops from **49.7** to **42.2**; at 3 bits it falls to **29.9** (Table 11, p. 33). Audio artifacts stay rare at 4 bits with block 32 (**95.7%** clean vs **95.8%** unquantised) but jump at 2 bits (Table 12, p. 35).
+
+## What the evidence shows
+
+### Text knowledge, and how much survives
+
+MMLU drops from **54.3** (Helium) to **49.8** after single-stream pretraining and **49.7** after instruct (Table 7, p. 27; Sec 5.5, p. 30). Spirit-LM, the nearest comparable speech-text model, scores **36.9** (Table 7, p. 27).
+
+### Spoken question answering
+
+Questions are spoken into the user stream, followed by a forced EPAD (Sec 5.5, p. 29). Accuracy, 0-shot (Table 8, p. 29):
+
+| Model | Web Q. | LlaMA Q. | Audio TriviaQA |
+|:--|--:|--:|--:|
+| Moshi without Inner Monologue | 9.2 | 21.0 | 7.3 |
+| SpeechGPT (7B) | 6.5 | 21.6 | 14.8 |
+| Spectron (1B) | 6.1 | 22.9 | n/a |
+| Moshi | **26.6** | **62.3** | **22.8** |
+| Moshi without text batches in pretraining | 23.2 | 61.3 | 18.3 |
+| Helium (text questions) | 32.3 | 75.0 | 56.4 |
+
+Inner Monologue "almost tripl[es]" accuracy (Sec 5.5, p. 30). The text-only batches during pretraining are worth **4.5** TriviaQA points (22.8 vs 18.3). The gap to Helium on TriviaQA is large; the authors blame long, written-style questions that oral fine-tuning never showed it (Sec 5.5, p. 30).
+
+### Speech quality inside the model
+
+Inner Monologue is also the biggest single gain in the generation ablation: transcript NLL from **3.65** to **2.77** and transcript length from **602** to **1,920** characters (Table 6, p. 25).
+
+### Turn-taking
+
+The paper lets Moshi play both sides from 1,000 ten-second Fisher prompts and measures, following dGSLM (Sec 5.6, p. 31): IPU (inter-pausal unit: a stretch of speech with at least 0.2 s of silence either side), pause (silence within one speaker), gap (silence between speakers) and overlap (both talking).
+
+| Model | Temp | PPL | IPU | Pause | Gap | Overlap |
+|:--|--:|--:|--:|--:|--:|--:|
+| dGSLM (best non-cascaded) | 1.0 | 195.9 | 41.4 s | 13.8 s | 10.7 s | 6.1 s |
+| Cascaded | 1.0 | 45.9 | 54.8 s | 0.0 s | 5.3 s | 0.0 s |
+| Moshi | 0.8 | 41.9 | 35.1 s | 13.2 s | 12.5 s | 1.2 s |
+| Moshi | 0.9 | 56.7 | 44.7 s | 9.1 s | 7.5 s | 2.2 s |
+| Moshi | 1.0 | 79.3 | 50.8 s | 7.0 s | 4.5 s | 4.1 s |
+| Ground truth (1,000 prompts) | n/a | 59.6 | 51.1 s | 6.4 s | 4.2 s | 3.3 s |
+
+(Table 9, p. 30.) PPL is DialoGPT perplexity of the transcript; lower means "more like the text DialoGPT was trained on", which is why models can beat the ground truth (Sec 5.6, p. 31). Temperature (how adventurous the sampling is) is a trade: at 1.0 the timing is closest to real people, at 0.8 the words are smoothest.
+
+<figure class="blog-figure blog-figure--wide">
+  <TurnTakingBars alt="Four pairs of bars, IPU, pause, gap and overlap in seconds, for a chosen system against real conversations. Buttons switch between dGSLM, the cascade and Moshi at three temperatures; a readout gives the total distance from the real values." />
+  <figcaption><strong>Figure 8. Table 9, as bars.</strong> All values from Table 9 (p. 30). The distance is my summary, not the paper's.</figcaption>
+</figure>
+
+### Mimi in context
+
+Mimi with adversarial-only training scores MUSHRA (listeners rate similarity to the original from 0 to 100) **81.0**, vs SpeechTokenizer at 1.5 kbps **45.1** and SemantiCodec **64.8** (Table 4, p. 24). The full story is in the [Mimi post](/blog/mimi-codec-explained/).
+
+## Safety and limitations
+
+The paper asks four questions (Sec 6, p. 36):
+
+- **Toxicity.** On the ALERT benchmark, measured on Moshi's text, overall safety score **83.05**, "in the middle" of text models: GPT-4 **99.18**, Llama 2 **99.98**, Mistral **75.45**, Alpaca **62.13** (Sec 6.1, p. 36). Audio-only harms (tone, sarcasm) are not measured (Sec 6.1, p. 36).
+- **Regurgitation** (repeating training audio, including voices or music). Prompted with 3 s of the most frequent training segment, the pretrained model without deduplication repeats it **100%** of the time at temperature 0 and **98.4%** at 0.8; deduplicating the training data brings it to **0** (Table 13, p. 37). Fine-tuned models produce 0 out of 1,000 (Sec 6.2, p. 37), and the authors warn fine-tuning "could potentially be over-ridden" (p. 37).
+- **Voice consistency.** Over 100 hours of generated conversation, Moshi's voice is closer to its own reference than to the user's in **98.7%** of segments (10,249 vs 133), with no drift between 20 s and 45 s (Sec 6.3, p. 38; Table 14, p. 38).
+- **Watermarking.** AudioSeal detects its own mark at **0.9999** without attacks (Table 15, p. 39), but the authors report that re-encoding through a codec erases signal-based marks, and treat their text-token watermark attempt as a negative result (Sec 6.4, pp. 39 to 41).
+
+Limitations the paper states or shows: knowledge loss vs Helium (Table 8, p. 29); English only (Sec 3.2.1, p. 7; Sec 4.1, p. 17); post-training streams that never overlap (Sec 4.4, p. 21); TTS/ASR results "not intended to compete" (Sec 5.7, p. 32); lexical judgement (sWUGGY) drops from **72.6** to **63.0** after instruct, likely from noisy user-side augmentation (Table 7, p. 27; Sec 5.4, p. 28); objective audio metrics disagree with listeners (Sec 5.2, p. 25).
+
+## Toy experiments
+
+I cannot train or run full Moshi here (my compute is a laptop). These toys run in the browser, isolate one mechanism each, and are not reproductions.
+
+**Toy 1, joint or apart (why the RQ-Transformer matters under a short delay).** Each step has two tokens, a "semantic" $a$ and an "acoustic" $b$, each from $\{0, 1, 2, 3\}$. Ground truth: $a$ is uniform; $b = a$ with probability $0.9$, otherwise uniform over the other three values. Two decoders:
+
+- *Apart*: two independent heads, each predicting its own token's marginal distribution (what separate classification heads do, Table 5, p. 25). Since both marginals are uniform, $P(b = a) = 4 \cdot 0.25 \cdot 0.25 = 0.25$.
+- *Joint*: sample $a$, then sample $b$ given $a$ (what the Depth Transformer does). $P(b = a) = 0.9$.
+- *Apart with delay 1*: $b$ at step $s$ copies $a$ from step $s - 1$, which the temporal model has already seen, so an independent head conditioned on the past gets $0.9$ too.
+
+Settings: 10,000 sampled steps per decoder, seed 0, report the match rate. Expected: about 0.25, 0.90, 0.90. Point: delay lets weak per-floor heads work (the [0,1,...,7] row of Table 5) and a joint lift is needed once the delay is short (the [0,2,...,2] row).
+
+<figure class="blog-figure blog-figure--wide">
+  <JointOrApart alt="Three rows of 40 coloured token pairs with running match rates: independent heads, a joint decoder, and independent heads with a one-step delay. A slider sets how often b copies a." />
+  <figcaption><strong>Figure 9. Toy 1.</strong> Seeded (seed 0), 10,000 steps. Exact rates: 0.25, p and p.</figcaption>
+</figure>
+
+**Toy 2, the padding writer.** Run Eq 5 on three phrases with fixed word times, all words one toy token:
+
+- "hi there" at 0.40 s, 0.72 s, over 12 steps: PAD share **8/12** (worked above).
+- "I am Moshi" at 0.08, 0.24, 0.40 s, over 12 steps: $t = 1, 3, 5$; $t_1 = 1$ triggers the edge rule (EPAD at slot 1, words shift right by one). Figure 5 applies the rule this way. Report the resulting row and PAD share.
+- A one-minute toy monologue at 2.5 words per second: report the PAD share and compare with ~65% (Sec 3.4.4, p. 16).
+
+Runs in [Figure 5](#lining-words-up-with-frames).
+
+**Toy 3, the delay dial as a clock.** For text-audio delays of $-2, -1, 0, +1, +2$ s, compute how many steps (delay x 12.5) before the first sampled token can depend on the first forced token: 25, 12.5 (round to 13), 0, 13, 25. Runs in [Figure 6](#one-dial-dialogue-asr-or-tts).
+
+**Toy 4, latency table.** For every delay pattern in Tables 5 and 6, compute (1 + max delay) x 80 ms. Expected: 80, 160, 240, 640 ms. Runs in [Figure 4](#what-it-costs-and-buys).
+
+## My interpretation
+
+Moshi's real move is to stop treating a conversation as a list of turns and treat it as a clock. Everything happens on the 80 ms tick: hearing, thinking in text, speaking. Turn-taking is not programmed; it is whatever the model learned to do with two tracks of tokens.
+
+The RQ-Transformer is what makes the clock affordable. The 7B walker moves only 12.5 times a second, and the 17 tokens of each tick are left to a 6-layer lift. It is the same "big model for the slow axis, small model for the fast axis" split that keeps appearing in speech, and the ablation shows it is only essential once latency is forced down (Table 5, p. 25).
+
+Inner Monologue is the most interesting idea, and it is not "a cascade inside the model". The text is per frame, aligned, and written just before the sound, so it never makes the model wait for a whole sentence. What it really does is give the 7B text brain something it recognises on every step: a word or a PAD. The almost threefold QA gain (Table 8, p. 29) says the text brain was there all along and needed a text-shaped handle.
+
+The delay dial is the most elegant result: one number turns a dialogue model into ASR or TTS, with no change of loss, architecture or data (Sec 3.4.4, p. 17). It also tells me something for my Khmer TTS work: aligned text with PAD/EPAD is a cheap way to get word-level timing, if a Whisper-quality aligner exists for the language.
+
+The price is knowledge. TriviaQA falls from 56.4 to 22.8 (Table 8, p. 29), and that is exactly the gap MoshiRAG later attacks by looking facts up rather than storing them.
+
+## Open questions
+
+- **Where does practical latency go?** The paper states 200 ms once (Abstract, p. 1) without a breakdown by component or hardware.
+- **User-side text.** Moshi writes text only for itself (Sec 3.4.4, p. 16). Would a cheap, aligned text stream for the user help understanding, or does it reintroduce the cascade's losses?
+- **Why does lexical judgement drop after instruct?** The authors hypothesise augmentation (Sec 5.4, p. 28) but do not test it.
+- **Real overlap data.** Post-training uses diarized streams with no overlap; only Fisher (2,000 h) has real overlap (Sec 4.4, pp. 20 to 21). How much better would turn-taking be with more?
+- **Other languages.** Helium, the tokenizer and the instruct data are English (Sec 3.2.1, p. 7). What breaks first in a low-resource language like Khmer: the aligner, the text model, or the codec?
+- **Audio-native safety.** Toxicity is measured on text only (Sec 6.1, p. 36). How would you measure harm carried by tone?
+- **Follow-up.** For factuality, read [MoshiRAG](/paper-reviews/moshirag/), which adds a retrieval term to the walker's input sum.
+
+## Related
+
+- [Cascaded vs full duplex](/blog/cascade-vs-full-duplex/), especially [where 160 ms comes from](/blog/cascade-vs-full-duplex/#where-160-ms-comes-from)
+- [Mimi, the codec](/blog/mimi-codec-explained/)
+- [Audio basics](/blog/audio-basics/) for frames and sample rates
+- [MoshiRAG review](/paper-reviews/moshirag/)

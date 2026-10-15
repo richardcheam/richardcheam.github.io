@@ -1,0 +1,60 @@
+---
+// Foundations, GANs post: two-peak data at ±2. An affine forger started
+// narrow on the right collapses to a spike (spread 0.0002 by step 200, 100%
+// of samples positive for all 4000 steps). Started wide, it covers both
+// sides but smears across the gap (spread about 2.6). seed 7, src/lib/gan.ts.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-collapse2>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 260" role="img" aria-labelledby="mc2-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="mc2-title">Two-peak real data and a forger that either collapses onto one peak or smears across both</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Forger starts</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-s="n" aria-pressed="true">Narrow, on the right</button>
+      <button type="button" class="fig-chip" data-s="w" aria-pressed="false">Wide, centred</button>
+    </div></div>
+    <div><span class="fig-panel__name">Training</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-play>Play</button>
+      <button type="button" class="fig-chip" data-reset>Start over</button>
+    </div></div>
+  </div>
+</div>
+
+<script>
+  import { fmt } from "../../lib/tiny-net";
+  import { INK, MUTED, GOLD, NEG, JADE } from "../../lib/net-diagram";
+  import { frame, txt } from "../../lib/plot";
+  import { makeGan, bumpDetective, realTwo, D, EVAL_Z, gauss } from "../../lib/gan";
+  import { mulberry } from "../../lib/tiny-net";
+  const MAX = 4000;
+  const REAL = (() => { const r = mulberry(31); return Array.from({ length: 2000 }, () => realTwo(r)); })();
+  document.querySelectorAll<HTMLElement>("[data-collapse2]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    let narrow = true, g = makeGan({ real: realTwo, det: bumpDetective(), a: 0.3, b: 1, lrD: 0.5, lrG: 0.05 }), playing = false, raf = 0, everNeg = false;
+    const reset = () => { g = makeGan({ real: realTwo, det: bumpDetective(), a: narrow ? 0.3 : 1, b: narrow ? 1 : 0, lrD: 0.5, lrG: 0.05 }); everNeg = false; draw(); };
+    function draw() {
+      const st = g.stats(), lo = -5, hi = 5, n = 100, h = (xs: number[]) => { const c = Array(n).fill(0); xs.forEach((x) => { const i = Math.floor(((x - lo) / (hi - lo)) * n); if (i >= 0 && i < n) c[i]++; }); return c; };
+      const hr = h(REAL), hg = h(st.xs), top = Math.max(...hr), F = frame({ l: 40, t: 30, w: 480, h: 180, x0: lo, x1: hi, y0: 0, y1: 1 });
+      if (st.pos < 1 && narrow) everNeg = true;
+      let s = F.grid([-4, -2, 0, 2, 4], [0, 1], 0);
+      hr.forEach((c, i) => (s += `<rect x="${F.X(lo + (i * (hi - lo)) / n)}" y="${F.Y(c / top)}" width="${480 / n - 0.4}" height="${F.Y(0) - F.Y(c / top)}" fill="${JADE}" fill-opacity="0.45"/>`));
+      hg.forEach((c, i) => { const v = Math.min(1, c / top); s += `<rect x="${F.X(lo + (i * (hi - lo)) / n)}" y="${F.Y(v)}" width="${480 / n - 0.4}" height="${F.Y(0) - F.Y(v)}" fill="${NEG}" fill-opacity="0.6"/>`; });
+      s += F.curve((x) => D(g.det, x), `stroke="${GOLD}" stroke-width="2.2"`, 300);
+      s += txt(40, 18, "green: two-peak real data; red: forger samples (clipped); gold: the detective", `font-size="11.5" font-weight="700" fill="${INK}"`);
+      const rows: [string, string][] = [["step", String(g.step)], ["spread |a|", fmt(Math.abs(g.a), 4)], ["centre b", fmt(g.b, 3)], ["samples positive", `${fmt(100 * st.pos, 1)}%`]];
+      rows.forEach(([k, v], i) => (s += txt(560, 60 + i * 28, k, `font-size="12" fill="${MUTED}"`) + txt(690, 60 + i * 28, v, `font-size="13" font-weight="700" fill="${INK}"`)));
+      s += txt(560, 196, narrow ? "the peak at −2 is never visited" : "one bell curve cannot make two peaks", `font-size="11" fill="${MUTED}"`);
+      $("[data-draw]").innerHTML = s;
+      $("[data-play]").textContent = playing ? "Pause" : g.step >= MAX ? "Finished" : "Play";
+    }
+    const loop = () => { for (let i = 0; i < 12 && g.step < MAX; i++) g.iterate(); draw(); if (playing && g.step < MAX) raf = requestAnimationFrame(loop); else { playing = false; draw(); } };
+    const play = (on: boolean) => { playing = on && g.step < MAX; cancelAnimationFrame(raf); if (playing) raf = requestAnimationFrame(loop); draw(); };
+    $("[data-play]").addEventListener("click", () => play(!playing));
+    $("[data-reset]").addEventListener("click", () => { play(false); reset(); });
+    root.querySelectorAll<HTMLButtonElement>("[data-s]").forEach((b) => b.addEventListener("click", () => { narrow = b.dataset.s === "n"; root.querySelectorAll("[data-s]").forEach((o) => o.setAttribute("aria-pressed", String(o === b))); play(false); reset(); }));
+    void gauss; void EVAL_Z;
+    reset();
+  });
+</script>

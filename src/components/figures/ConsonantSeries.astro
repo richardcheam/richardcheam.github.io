@@ -1,0 +1,54 @@
+---
+// Khmer script post, Figure 2: the same stored vowel sign on a first-series
+// consonant (KA, U+1780) and a second-series consonant (KO, U+1782). Readings
+// are given in IPA as a rough guide (standard Phnom Penh values).
+const { alt } = Astro.props;
+const vowels = [
+  { cp: "17B6", sign: "ា", name: "AA", a: "kaː", o: "kiə" },
+  { cp: "17BE", sign: "ើ", name: "OE", a: "kaə", o: "kəː" },
+  { cp: "17C0", sign: "ៀ", name: "IE", a: "kiə", o: "kiə" },
+];
+---
+<div class="blog-diagram cser" role="region" aria-label={alt} data-cser data-v={JSON.stringify(vowels)}>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 320" role="img" aria-labelledby="cser-title" class="blog-diagram-svg" font-family="Inter, 'Noto Sans Khmer', 'Khmer Sangam MN', sans-serif">
+    <title id="cser-title">One vowel sign read two ways depending on the consonant series</title>
+    <g data-cards></g>
+    <text data-r1 x="20" y="290" font-size="12.5" font-weight="700" fill="#2b2b30"></text>
+    <text data-r2 x="20" y="312" font-size="11.5" fill="#5f5f66"></text>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Vowel sign</span><div class="fig-chips">
+      {vowels.map((v, i) => <button type="button" class="fig-chip" data-i={i} aria-pressed={i === 0 ? "true" : "false"}>{v.sign} {v.name}</button>)}
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { setupFigure, tween } from "../../lib/figure-motion";
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-cser]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const V: { cp: string; sign: string; name: string; a: string; o: string }[] = JSON.parse(root.dataset.v!);
+    const mk = (g: Element, tag: string, a: Record<string, string | number>, txt?: string) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, String(a[k])); if (txt !== undefined) e.textContent = txt; g.append(e); return e; };
+    let vi = 0;
+    function draw(e = 1) {
+      const v = V[vi], g = $("[data-cards]"); g.replaceChildren();
+      [["ក", "1780", "KA", "first series (a-series)", v.a, "#594578"], ["គ", "1782", "KO", "second series (o-series)", v.o, "#4F5D3A"]].forEach(([c, cp, n, ser, read, col], i) => {
+        const x = 40 + i * 380;
+        mk(g, "rect", { x, y: 20, width: 320, height: 240, rx: 10, fill: "#f7f7f9", stroke: col });
+        mk(g, "text", { x: x + 16, y: 44, "font-size": 11.5, "font-weight": 700, fill: col }, `${n}, ${ser}`);
+        mk(g, "text", { x: x + 160, y: 140, "font-size": 80, "text-anchor": "middle", fill: "#2b2b30", opacity: e < 1 ? 0.25 : 1 }, e < 1 ? c : c + v.sign);
+        if (e < 1) mk(g, "text", { x: x + 160 + (1 - e) * 120, y: 140, "font-size": 80, "text-anchor": "middle", fill: "#a33b3b" }, "◌" + v.sign);
+        mk(g, "text", { x: x + 160, y: 190, "font-size": 12, "text-anchor": "middle", fill: "#2b2b30", "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace" }, `U+${cp}  U+${v.cp}`);
+        mk(g, "text", { x: x + 160, y: 232, "font-size": 20, "font-weight": 700, "text-anchor": "middle", fill: col, opacity: e }, `/${read}/`);
+      });
+      $("[data-r1]").textContent = v.a === v.o ? `${v.name} (U+${v.cp}) happens to read the same on both: /${v.a}/. Not every sign changes.` : `The stored sign is the same, U+${v.cp}; the reading changes from /${v.a}/ to /${v.o}/.`;
+      $("[data-r2]").textContent = "Readings in IPA, approximate. The clue to the sound is the consonant before the sign, not the sign itself.";
+      root.querySelectorAll("[data-i]").forEach((b) => b.setAttribute("aria-pressed", String(+b.getAttribute("data-i")! === vi)));
+    }
+    root.querySelectorAll<HTMLButtonElement>("[data-i]").forEach((b) => b.addEventListener("click", async () => { vi = +b.dataset.i!; await tween(0.8, (e) => draw(e)); draw(1); }));
+    draw();
+    setupFigure(root, () => draw(0), async (alive) => { await tween(1.2, (e) => { if (alive()) draw(e); }); draw(1); });
+  });
+</script>

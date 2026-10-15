@@ -1,0 +1,100 @@
+---
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" tabindex="0" role="region" aria-label={alt} data-cov>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 52 780 278" role="img" aria-labelledby="covariance-entries-title covariance-entries-desc" class="blog-diagram-svg" font-family="Inter, sans-serif">
+<title id="covariance-entries-title">Reading the covariance matrix cell by cell</title><desc id="covariance-entries-desc">Two five by five grids. In the first only the diagonal is dark: every feature varies and none move together. In the second several off-diagonal cells are shaded, meaning groups of features carry duplicated information.</desc>
+<text x="200" y="72" fill="#5f5f66" font-size="14" text-anchor="middle">feature k</text>
+<text x="104" y="174" fill="#5f5f66" font-size="14" text-anchor="end">feature j</text>
+<rect data-cell="L" data-r="0" data-c="0" x="110" y="80" width="36" height="36" fill="#4F5D3A" />
+<rect data-cell="L" data-r="0" data-c="1" x="146" y="80" width="36" height="36" fill="#e8ebe2" />
+<rect data-cell="L" data-r="0" data-c="2" x="182" y="80" width="36" height="36" fill="#e8ebe2" />
+<rect data-cell="L" data-r="0" data-c="3" x="218" y="80" width="36" height="36" fill="#e8ebe2" />
+<rect data-cell="L" data-r="0" data-c="4" x="254" y="80" width="36" height="36" fill="#e8ebe2" />
+<rect data-cell="L" data-r="1" data-c="0" x="110" y="116" width="36" height="36" fill="#e8ebe2" />
+<rect data-cell="L" data-r="1" data-c="1" x="146" y="116" width="36" height="36" fill="#4F5D3A" />
+<rect data-cell="L" data-r="1" data-c="2" x="182" y="116" width="36" height="36" fill="#e8ebe2" />
+<rect data-cell="L" data-r="1" data-c="3" x="218" y="116" width="36" height="36" fill="#e8ebe2" />
+<rect data-cell="L" data-r="1" data-c="4" x="254" y="116" width="36" height="36" fill="#e8ebe2" />
+<rect data-cell="L" data-r="2" data-c="0" x="110" y="152" width="36" height="36" fill="#e8ebe2" />
+<rect data-cell="L" data-r="2" data-c="1" x="146" y="152" width="36" height="36" fill="#e8ebe2" />
+<rect data-cell="L" data-r="2" data-c="2" x="182" y="152" width="36" height="36" fill="#4F5D3A" />
+<rect data-cell="L" data-r="2" data-c="3" x="218" y="152" width="36" height="36" fill="#e8ebe2" />
+<rect data-cell="L" data-r="2" data-c="4" x="254" y="152" width="36" height="36" fill="#e8ebe2" />
+<rect data-cell="L" data-r="3" data-c="0" x="110" y="188" width="36" height="36" fill="#e8ebe2" />
+<rect data-cell="L" data-r="3" data-c="1" x="146" y="188" width="36" height="36" fill="#e8ebe2" />
+<rect data-cell="L" data-r="3" data-c="2" x="182" y="188" width="36" height="36" fill="#e8ebe2" />
+<rect data-cell="L" data-r="3" data-c="3" x="218" y="188" width="36" height="36" fill="#4F5D3A" />
+<rect data-cell="L" data-r="3" data-c="4" x="254" y="188" width="36" height="36" fill="#e8ebe2" />
+<rect data-cell="L" data-r="4" data-c="0" x="110" y="224" width="36" height="36" fill="#e8ebe2" />
+<rect data-cell="L" data-r="4" data-c="1" x="146" y="224" width="36" height="36" fill="#e8ebe2" />
+<rect data-cell="L" data-r="4" data-c="2" x="182" y="224" width="36" height="36" fill="#e8ebe2" />
+<rect data-cell="L" data-r="4" data-c="3" x="218" y="224" width="36" height="36" fill="#e8ebe2" />
+<rect data-cell="L" data-r="4" data-c="4" x="254" y="224" width="36" height="36" fill="#4F5D3A" />
+<rect x="110" y="80" width="180" height="180" fill="none" stroke="#5f5f66" />
+<rect data-cell="R" data-r="0" data-c="0" x="450" y="80" width="36" height="36" fill="#4F5D3A" />
+<rect data-cell="R" data-r="0" data-c="1" x="486" y="80" width="36" height="36" fill="#C98E72" />
+<rect data-cell="R" data-r="0" data-c="2" x="522" y="80" width="36" height="36" fill="#C98E72" />
+<rect data-cell="R" data-r="0" data-c="3" x="558" y="80" width="36" height="36" fill="#f3e8e2" />
+<rect data-cell="R" data-r="0" data-c="4" x="594" y="80" width="36" height="36" fill="#f3e8e2" />
+<rect data-cell="R" data-r="1" data-c="0" x="450" y="116" width="36" height="36" fill="#C98E72" />
+<rect data-cell="R" data-r="1" data-c="1" x="486" y="116" width="36" height="36" fill="#4F5D3A" />
+<rect data-cell="R" data-r="1" data-c="2" x="522" y="116" width="36" height="36" fill="#C98E72" />
+<rect data-cell="R" data-r="1" data-c="3" x="558" y="116" width="36" height="36" fill="#f3e8e2" />
+<rect data-cell="R" data-r="1" data-c="4" x="594" y="116" width="36" height="36" fill="#f3e8e2" />
+<rect data-cell="R" data-r="2" data-c="0" x="450" y="152" width="36" height="36" fill="#C98E72" />
+<rect data-cell="R" data-r="2" data-c="1" x="486" y="152" width="36" height="36" fill="#C98E72" />
+<rect data-cell="R" data-r="2" data-c="2" x="522" y="152" width="36" height="36" fill="#4F5D3A" />
+<rect data-cell="R" data-r="2" data-c="3" x="558" y="152" width="36" height="36" fill="#f3e8e2" />
+<rect data-cell="R" data-r="2" data-c="4" x="594" y="152" width="36" height="36" fill="#f3e8e2" />
+<rect data-cell="R" data-r="3" data-c="0" x="450" y="188" width="36" height="36" fill="#f3e8e2" />
+<rect data-cell="R" data-r="3" data-c="1" x="486" y="188" width="36" height="36" fill="#f3e8e2" />
+<rect data-cell="R" data-r="3" data-c="2" x="522" y="188" width="36" height="36" fill="#f3e8e2" />
+<rect data-cell="R" data-r="3" data-c="3" x="558" y="188" width="36" height="36" fill="#4F5D3A" />
+<rect data-cell="R" data-r="3" data-c="4" x="594" y="188" width="36" height="36" fill="#C98E72" />
+<rect data-cell="R" data-r="4" data-c="0" x="450" y="224" width="36" height="36" fill="#f3e8e2" />
+<rect data-cell="R" data-r="4" data-c="1" x="486" y="224" width="36" height="36" fill="#f3e8e2" />
+<rect data-cell="R" data-r="4" data-c="2" x="522" y="224" width="36" height="36" fill="#f3e8e2" />
+<rect data-cell="R" data-r="4" data-c="3" x="558" y="224" width="36" height="36" fill="#C98E72" />
+<rect data-cell="R" data-r="4" data-c="4" x="594" y="224" width="36" height="36" fill="#4F5D3A" />
+<rect x="450" y="80" width="180" height="180" fill="none" stroke="#5f5f66" />
+<text x="110" y="288" fill="#111111" font-size="17">Decorrelated</text>
+<text x="110" y="310" fill="#5f5f66" font-size="14">off-diagonals near zero</text>
+<text x="450" y="288" fill="#111111" font-size="17">Redundant</text>
+<text x="450" y="310" fill="#5f5f66" font-size="14">features duplicating each other</text>
+</svg>
+<button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+<p class="blog-figure-reading">Diagonal is a feature’s variance; off-diagonal is variation two features share</p>
+
+<script>
+  import { animate, dur, setupFigure, wait } from "../../lib/figure-motion";
+
+  // Covariance is filled in as it is computed: the diagonal first (each
+  // feature's own variance), then each off-diagonal pair (j, k) and (k, j)
+  // together, because C is symmetric. Left stays quiet off the diagonal;
+  // right lights up wherever features duplicate each other.
+  document.querySelectorAll<HTMLElement>("[data-cov]").forEach((root) => {
+    const cells = Array.from(root.querySelectorAll<SVGRectElement>("[data-cell]"));
+    const at = (side: string, r: number, c: number) => cells.find((e) => e.dataset.cell === side && +e.dataset.r! === r && +e.dataset.c! === c)!;
+    const show = (els: SVGRectElement[], s = 0.3) => Promise.all(els.map((e) => animate(e, { opacity: [0.12, 1] }, { duration: dur(s) })));
+    setupFigure(
+      root,
+      () => cells.forEach((e) => (e.style.opacity = "0.12")),
+      async (alive) => {
+        for (let i = 0; i < 5; i++) {
+          await show([at("L", i, i), at("R", i, i)], 0.25);
+          if (!alive()) return;
+        }
+        await wait(0.2);
+        for (let j = 0; j < 5; j++) {
+          for (let k = j + 1; k < 5; k++) {
+            if (!alive()) return;
+            show([at("L", j, k), at("L", k, j), at("R", j, k), at("R", k, j)], 0.22);
+            await wait(0.09);
+          }
+        }
+      },
+    );
+  });
+</script>

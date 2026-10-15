@@ -1,0 +1,22 @@
+---
+title: "Khmer TTS"
+area: "Speech AI"
+date: "October 2026"
+order: 1
+status: "In progress"
+headline: "Teaching a compact English text-to-speech model to read Khmer, on a small budget, with a native speaker as the final judge."
+question: "Can a compact English text-to-speech model learn to read Khmer reliably, clone a voice from a short prompt, and still run on a laptop CPU?"
+approach: "Fine-tune Kyutai's Pocket TTS on licensed Khmer speech with a new tokenizer and a text front-end for numbers and mixed scripts, judged by automatic metrics and a native listener."
+stack: "Python · PyTorch · Pocket TTS · Mimi"
+---
+
+## What I am building
+
+- **Data:** licence-checked Khmer read speech, cleaned conservatively, with forced alignment to cut voice prompts at natural pauses.
+- **Text front-end:** a number reader for dates, times, money and percentages, with every rule checked against real recordings, and handling for mixed Khmer and Latin text.
+- **Training:** fine-tuning Kyutai's [Pocket TTS](/blog/pocket-tts-calm-explained/) with a new Khmer tokenizer, each experiment planned in advance and compared on the same held-out speakers.
+- **Evaluation:** automatic intelligibility and voice-similarity scores, plus blinded listening by a native speaker, because automatic judges miss pronunciation errors a listener hears. The [evaluation post](/blog/speech-evaluation-metrics/) explains why.
+
+## Status
+
+A working system exists. The data preparation and training are written up in [Same model, new language: fine-tuning Pocket TTS to speak Khmer](/blog/khmer-tts-fine-tuning/). Inference, the text front-end and pronunciation fixes will follow.

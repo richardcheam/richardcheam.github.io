@@ -1,0 +1,144 @@
+---
+// A self-prompted training example. The aligner finds phrase timings; the cut
+// goes at a pause, the prompt is at most 5 s, and the cut keeps 1 s from both
+// ends. The waveform and timings are synthetic; the rules are the project's.
+const { alt } = Astro.props;
+const X0 = 40, W = 700, T = 12;
+---
+<div class="blog-diagram pc" role="region" aria-label={alt} data-pc data-cfg={JSON.stringify({ X0, W, T })}>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 360" role="img" aria-labelledby="pc-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="pc-title">A recording cut at a pause into a voice prompt and a target</title>
+    <defs>
+      <pattern id="pc-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="#a33b3b" stroke-opacity="0.35" stroke-width="2" /></pattern>
+    </defs>
+    <rect data-prompt x={X0} y="70" height="120" fill="#594578" fill-opacity="0.09" />
+    <rect data-target y="70" height="120" fill="#4F5D3A" fill-opacity="0.07" />
+    <rect data-m1 x={X0} y="70" width={W / T} height="120" fill="url(#pc-hatch)" />
+    <rect data-m2 x={X0 + W - W / T} y="70" width={W / T} height="120" fill="url(#pc-hatch)" />
+    <path data-wave fill="#2b2b30" fill-opacity="0.75" />
+    <g data-phrases></g>
+    <g data-cut>
+      <line y1="56" y2="200" stroke-width="2.5" />
+      <text data-cutlab y="50" font-size="11" font-weight="700" text-anchor="middle"></text>
+    </g>
+    <text data-plab y="186" font-size="10.5" font-weight="600" fill="#594578">voice prompt</text>
+    <text data-tlab y="186" font-size="10.5" font-weight="600" fill="#4F5D3A">target: what the model must say</text>
+    <g font-size="9.5" fill="#5f5f66" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">
+      {Array.from({ length: T + 1 }, (_, s) => <text x={X0 + (s * W) / T} y="216" text-anchor="middle">{s}s</text>)}
+    </g>
+    <text data-reason x="40" y="244" font-size="11.5" font-weight="600"></text>
+
+    <text x="40" y="282" font-size="11" letter-spacing="1" fill="#5f5f66">WHAT THE MODEL SEES, IN MIMI FRAMES (12.5 PER SECOND)</text>
+    <g transform="translate(40 294)">
+      <rect width="120" height="26" rx="3" fill="#ececf1" /><text x="60" y="17" font-size="10.5" text-anchor="middle" fill="#2b2b30">Khmer text tokens</text>
+      <rect data-fp x="126" height="26" rx="3" fill="#594578" fill-opacity="0.55" />
+      <text data-fpl y="17" font-size="10.5" text-anchor="middle" fill="#fff"></text>
+      <rect data-ft height="26" rx="3" fill="#4F5D3A" fill-opacity="0.55" />
+      <text data-ftl y="17" font-size="10.5" text-anchor="middle" fill="#fff"></text>
+      <text y="46" font-size="10" fill="#5f5f66">The prompt says who is speaking, the text says what to say, and the model learns to produce the target.</text>
+    </g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Move the cut to another pause<strong data-val></strong></span><input class="scrub" data-cutin type="range" min="0" max="4" step="1" value="1" style="--n: 4; --p: 25%" /></label>
+    <div><span class="fig-panel__name">Recording</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-rec="multi" aria-pressed="true">Six phrases</button>
+      <button type="button" class="fig-chip" data-rec="single" aria-pressed="false">One long phrase</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { setupFigure, tween, wait } from "../../lib/figure-motion";
+  import { rng } from "../../lib/eval-math";
+
+  const NS = "http://www.w3.org/2000/svg";
+  const RECS = {
+    multi: [[0.25, 1.9], [2.2, 3.6], [3.9, 5.6], [5.9, 8.0], [8.3, 10.4], [10.7, 11.7]],
+    single: [[0.3, 11.6]],
+  } as Record<string, number[][]>;
+
+  document.querySelectorAll<HTMLElement>("[data-pc]").forEach((root) => {
+    const c = JSON.parse(root.dataset.cfg!);
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const sx = (t: number) => c.X0 + (t / c.T) * c.W;
+    const cutIn = $<HTMLInputElement>("[data-cutin]");
+    let rec = "multi";
+    const phrases = () => RECS[rec];
+    const pauses = () => phrases().slice(1).map((p, i) => (phrases()[i][1] + p[0]) / 2);
+
+    function wave() {
+      const r = rng(4), pts: string[] = [], low: string[] = [];
+      for (let k = 0; k <= 700; k++) {
+        const t = (k / 700) * c.T, on = phrases().some(([a, b]) => t > a && t < b);
+        const amp = on ? 8 + 34 * Math.abs(Math.sin(t * 5.3) * Math.sin(t * 1.7 + 1)) * (0.6 + 0.4 * r()) : 1.2;
+        pts.push(`${sx(t).toFixed(1)} ${(130 - amp).toFixed(1)}`); low.unshift(`${sx(t).toFixed(1)} ${(130 + amp).toFixed(1)}`);
+      }
+      $("[data-wave]").setAttribute("d", `M${pts.join(" L")} L${low.join(" L")} Z`);
+    }
+    function drawPhrases(shown = 99) {
+      const g = $("[data-phrases]"); g.replaceChildren();
+      phrases().slice(0, shown).forEach(([a, b], i) => {
+        const rct = document.createElementNS(NS, "rect");
+        Object.entries({ x: sx(a), y: 74, width: sx(b) - sx(a), height: 12, rx: 2, fill: i % 2 ? "#8a6a1f" : "#2b2b30", "fill-opacity": 0.5 }).forEach(([k, v]) => rct.setAttribute(k, String(v)));
+        g.append(rct);
+      });
+    }
+    function cut(t: number | null) {
+      const cg = $("[data-cut]"), lab = $("[data-cutlab]"), reason = $("[data-reason]");
+      if (t === null) {
+        cg.style.display = "none";
+        $("[data-prompt]").setAttribute("width", "0"); $("[data-target]").setAttribute("width", "0");
+        ["[data-plab]", "[data-tlab]"].forEach((s) => ($(s) as SVGElement).style.display = "none");
+        reason.setAttribute("fill", "#a33b3b");
+        reason.textContent = "No pause to cut at: excluded. 125.6 h of the corpus looks like this.";
+        setFrames(null); return;
+      }
+      cg.style.display = ""; ["[data-plab]", "[data-tlab]"].forEach((s) => ($(s) as SVGElement).style.display = "");
+      const x = sx(t), bad = t > 5 ? "Prompt longer than 5 s: not allowed." : t < 1 || t > c.T - 1 ? "Less than 1 s from an end: not allowed." : "";
+      const col = bad ? "#a33b3b" : "#594578";
+      cg.querySelector("line")!.setAttribute("x1", String(x)); cg.querySelector("line")!.setAttribute("x2", String(x)); cg.querySelector("line")!.setAttribute("stroke", col);
+      lab.setAttribute("x", String(x)); lab.setAttribute("fill", col); lab.textContent = `cut at ${t.toFixed(2)} s`;
+      $("[data-prompt]").setAttribute("width", String(x - c.X0));
+      $("[data-target]").setAttribute("x", String(x)); $("[data-target]").setAttribute("width", String(c.X0 + c.W - x));
+      $("[data-plab]").setAttribute("x", String(c.X0 + 6)); $("[data-tlab]").setAttribute("x", String(x + 6));
+      reason.setAttribute("fill", bad ? "#a33b3b" : "#4F5D3A");
+      reason.textContent = bad || `Valid: cut in a pause, prompt ${t.toFixed(2)} s (≤ 5 s), at least 1 s from both ends.`;
+      setFrames(t);
+    }
+    function setFrames(t: number | null) {
+      const fp = $("[data-fp]"), ft = $("[data-ft]"), avail = 560;
+      if (t === null) { fp.setAttribute("width", "0"); ft.setAttribute("width", "0"); $("[data-fpl]").textContent = ""; $("[data-ftl]").textContent = ""; return; }
+      const np = Math.round(t * 12.5), nt = Math.round((c.T - t) * 12.5), wp = (avail * np) / (np + nt);
+      fp.setAttribute("width", String(wp - 4));
+      ft.setAttribute("x", String(126 + wp)); ft.setAttribute("width", String(avail - wp));
+      $("[data-fpl]").setAttribute("x", String(126 + wp / 2)); $("[data-fpl]").textContent = `prompt ≈ ${np} frames`;
+      $("[data-ftl]").setAttribute("x", String(126 + wp + (avail - wp) / 2)); $("[data-ftl]").textContent = `target ≈ ${nt} frames`;
+    }
+    const current = () => (rec === "single" ? null : pauses()[+cutIn.value]);
+    const full = () => {
+      wave(); drawPhrases(); cut(current());
+      cutIn.disabled = rec === "single";
+      $("[data-val]").textContent = rec === "single" ? "none" : `pause ${+cutIn.value + 1} of 5`;
+      cutIn.style.setProperty("--p", `${(+cutIn.value / 4) * 100}%`);
+    };
+    cutIn.addEventListener("input", full);
+    root.querySelectorAll<HTMLButtonElement>("[data-rec]").forEach((b) => b.addEventListener("click", () => {
+      rec = b.dataset.rec!;
+      root.querySelectorAll("[data-rec]").forEach((o) => o.setAttribute("aria-pressed", String(o === b)));
+      full();
+    }));
+
+    setupFigure(root, () => { rec = "multi"; cutIn.value = "1"; wave(); drawPhrases(0); cut(0.3); $("[data-cut]").setAttribute("style", "display:none"); $("[data-reason]").textContent = ""; setFrames(null); }, async (alive) => {
+      // The aligner lays phrases down one by one, then the cut slides to the last pause before 5 s.
+      for (let i = 1; i <= phrases().length; i++) {
+        if (!alive()) return;
+        drawPhrases(i);
+        await wait(0.25);
+      }
+      const target = pauses()[1];
+      await tween(1.1, (t) => alive() && cut(0.5 + (target - 0.5) * t));
+      full();
+    });
+  });
+</script>

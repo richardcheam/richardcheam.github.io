@@ -1,0 +1,72 @@
+---
+// Moshi review, Figure 7: the per-step loss of Eq 7 (p. 21). Text
+// cross-entropy plus a weighted average of the audio cross-entropies, with
+// weight alpha = 100 on semantic floors and 1 on acoustic floors (Sec 4.4).
+const { alt } = Astro.props;
+---
+<div class="blog-diagram ls" role="region" aria-label={alt} data-ls>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 330" role="img" aria-labelledby="ls-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="ls-title">How Moshi's loss weighs the text token, the semantic token and the acoustic tokens</title>
+    <text x="20" y="22" font-size="11.5" font-weight="700" fill="#2b2b30">Weights inside the audio average (block width = weight α)</text>
+    <g data-blocks></g>
+    <text x="20" y="150" font-size="11.5" font-weight="700" fill="#2b2b30">Audio part: a weighted average of the floors' cross-entropies</text>
+    <line x1="40" x2="740" y1="196" y2="196" stroke="#2b2b30" />
+    <g data-ticks></g>
+    <g data-marks></g>
+    <text data-r1 x="20" y="258" font-size="12.5" fill="#2b2b30"></text>
+    <text data-r2 x="20" y="280" font-size="12.5" fill="#2b2b30"></text>
+    <text data-r3 x="20" y="306" font-size="13" font-weight="700" fill="#2b2b30"></text>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Text CE<strong data-v0></strong></span><input class="scrub" data-k="0" type="range" min="0" max="6" step="0.1" value="2" /></label>
+    <label><span class="fig-panel__name">Semantic CE<strong data-v1></strong></span><input class="scrub" data-k="1" type="range" min="0" max="6" step="0.1" value="1" /></label>
+    <label><span class="fig-panel__name">Acoustic CE (each)<strong data-v2></strong></span><input class="scrub" data-k="2" type="range" min="0" max="6" step="0.1" value="3" /></label>
+    <label><span class="fig-panel__name">Semantic weight α<strong data-v3></strong></span><input class="scrub" data-k="3" type="range" min="1" max="200" step="1" value="100" /></label>
+    <div><span class="fig-panel__name">Streams</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-st="1" aria-pressed="true">Moshi only (K = 9)</button>
+      <button type="button" class="fig-chip" data-st="2" aria-pressed="false">Moshi and user (K = 17)</button>
+    </div></div>
+  </div>
+</div>
+
+<script>
+  import { setupFigure, tween } from "../../lib/figure-motion";
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-ls]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const ins = [...root.querySelectorAll<HTMLInputElement>("[data-k]")];
+    let streams = 1;
+    const mk = (g: Element, tag: string, a: Record<string, string | number>, txt?: string) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, String(a[k])); if (txt) e.textContent = txt; g.append(e); return e; };
+    const X = (v: number) => 40 + (v / 6) * 700;
+    for (let v = 0; v <= 6; v++) mk($("[data-ticks]"), "text", { x: X(v), y: 212, "font-size": 10.5, "text-anchor": "middle", fill: "#2b2b30" }, String(v));
+    function draw(mix = 1) {
+      const [text, sem, ac, alpha] = ins.map((i) => +i.value);
+      const nSem = streams, nAc = 7 * streams, sumA = alpha * nSem + nAc;
+      const audio = (alpha * nSem * sem + nAc * ac) / sumA, total = text + audio;
+      // Blocks: one per audio floor, width proportional to its weight.
+      const gb = $("[data-blocks]"); gb.replaceChildren();
+      const scale = 700 / sumA; let x = 40;
+      for (let s = 0; s < streams; s++) {
+        const w = alpha * scale * mix + (1 - mix) * scale;
+        mk(gb, "rect", { x, y: 40 + s * 44, width: Math.max(1, w - 1), height: 36, fill: "#4F5D3A" });
+        if (w > 60) mk(gb, "text", { x: x + 8, y: 62 + s * 44, "font-size": 11, fill: "#fff", "font-weight": 600 }, `${s ? "user" : "Moshi"} semantic, α = ${alpha}`);
+        x += w;
+        for (let k = 0; k < 7; k++) { mk(gb, "rect", { x, y: 40 + s * 44, width: Math.max(1, scale - 1), height: 36, fill: "#b9b9c2" }); x += scale; }
+      }
+      mk(gb, "text", { x: 740, y: streams === 1 ? 96 : 140, "font-size": 10.5, "text-anchor": "end", fill: "#5f5f66" }, `grey slivers: ${nAc} acoustic floors, α = 1 each`);
+      const gm = $("[data-marks]"); gm.replaceChildren();
+      const pin = (v: number, col: string, lab: string, y: number) => { mk(gm, "line", { x1: X(v), x2: X(v), y1: 180, y2: 196, stroke: col, "stroke-width": 2 }); mk(gm, "text", { x: X(v), y, "font-size": 10.5, "text-anchor": "middle", fill: col }, lab); };
+      pin(sem, "#4F5D3A", "semantic", 174); pin(ac, "#8a8a94", "acoustic", 174);
+      mk(gm, "path", { d: `M${X(audio)} 198 l-7 12 h14 z`, fill: "#a33b3b" });
+      mk(gm, "text", { x: X(audio), y: 228, "font-size": 11, "font-weight": 700, "text-anchor": "middle", fill: "#a33b3b" }, `audio part ${audio.toFixed(3)}`);
+      $("[data-r1]").textContent = `Sum of weights: ${alpha} × ${nSem} + 1 × ${nAc} = ${sumA}.`;
+      $("[data-r2]").textContent = `Audio part: (${alpha} × ${nSem} × ${sem.toFixed(1)} + ${nAc} × ${ac.toFixed(1)}) / ${sumA} = ${audio.toFixed(3)}`;
+      $("[data-r3]").textContent = `Step loss = text ${text.toFixed(1)} + audio ${audio.toFixed(3)} = ${total.toFixed(3)}`;
+      ins.forEach((i, k) => { i.style.setProperty("--p", `${((+i.value - +i.min) / (+i.max - +i.min)) * 100}%`); $(`[data-v${k}]`).textContent = k === 3 ? i.value : (+i.value).toFixed(1); });
+    }
+    ins.forEach((i) => i.addEventListener("input", () => draw()));
+    root.querySelectorAll<HTMLButtonElement>("[data-st]").forEach((b) => b.addEventListener("click", () => { streams = +b.dataset.st!; root.querySelectorAll("[data-st]").forEach((o) => o.setAttribute("aria-pressed", String(o === b))); draw(); }));
+    draw();
+    setupFigure(root, () => draw(0), async (alive) => { await tween(1.6, (e) => { if (alive()) draw(e); }); });
+  });
+</script>

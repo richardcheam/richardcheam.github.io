@@ -1,0 +1,29 @@
+---
+title: "Enigmatica"
+area: "Interactive Systems"
+date: "April 2026"
+order: 3
+headline: "Manga cipher puzzles, rebuilt as a playable web game on top of reusable Python cipher code."
+question: "Can the cipher puzzles hidden in a manga become a game without rewriting the cipher logic for every chapter?"
+approach: "Reusable Python cipher mechanics separated from chapter scripts, exported to JSON and rendered as a static web game rebuilt automatically on every content change."
+stack: "Python · static web export · GitHub Pages"
+links:
+  - { label: "Play Chapter 1", url: "https://richardcheam.github.io/enigmatica/" }
+  - { label: "Source code", url: "https://github.com/richardcheam/enigmatica" }
+cover: { src: "/assets/projects/enigmatica/cover.png", alt: "Enigmatica cover artwork" }
+numbers:
+  - { value: "Chapter 1", label: "Live and playable in the browser" }
+  - { value: "3 puzzles", label: "Index extraction, grid extraction and a guided Hill-cipher step" }
+---
+
+## What I did
+
+I separated the reusable mechanics, the ciphers and extraction methods, from the chapter-specific puzzle scripts. Each chapter owns its own puzzle sequence, notes and assets, and builds on the same core modules.
+
+Python exports each chapter's data to JSON, and a static site renders it as a landing page and a one-puzzle-at-a-time play page with hints and progress tracking. GitHub Pages rebuilds the public site whenever chapter content changes.
+
+## What I found
+
+- **One source of truth works.** The same chapter data drives command-line demos, local documentation and the public web game.
+- **Splitting the landing page from the play page** makes it read like a finished product rather than a prototype.
+- **Adding a chapter is now content work**, not engineering work: new chapters go through the same export and deploy path.

@@ -1,0 +1,84 @@
+---
+// SoundStream review, Figure 3: the multi-scale spectral loss (Eq 4 and 5,
+// p. 6) on a toy clip: 0.25 s at 24 kHz, a 440 Hz tone plus a click at 50 ms.
+// The "decoded" copy has a pitch error and a timing error. For each window
+// s = 64 ... 2048 (hop s/4, 64 mel bins) we compute the L1 term and the
+// log term weighted by alpha_s = sqrt(s/2).
+const { alt } = Astro.props;
+---
+<div class="blog-diagram mz" role="region" aria-label={alt} data-mz>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 420" role="img" aria-labelledby="mz-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="mz-title">How much each of six window sizes notices a pitch error and a timing error</title>
+    <text x="20" y="22" font-size="11.5" font-weight="700" fill="#2b2b30">Where the mistake shows: |real − decoded| mel spectrogram</text>
+    <text x="20" y="44" font-size="10.5" fill="#5f5f66">window 64 samples (2.7 ms)</text>
+    <text x="400" y="44" font-size="10.5" fill="#5f5f66">window 2048 samples (85 ms)</text>
+    <image data-img0 x="20" y="52" width="360" height="110" preserveAspectRatio="none" style="image-rendering: pixelated" />
+    <image data-img1 x="400" y="52" width="360" height="110" preserveAspectRatio="none" style="image-rendering: pixelated" />
+    <rect x="20" y="52" width="360" height="110" fill="none" stroke="#ececf1" />
+    <rect x="400" y="52" width="360" height="110" fill="none" stroke="#ececf1" />
+    <text x="20" y="176" font-size="10" fill="#5f5f66">time →, low pitch at the bottom</text>
+    <text x="20" y="206" font-size="11.5" font-weight="700" fill="#2b2b30">Loss at each window size (bars scaled to the largest in each row)</text>
+    <g data-bars></g>
+    <text data-r1 x="20" y="388" font-size="12.5" font-weight="700" fill="#2b2b30"></text>
+    <text data-r2 x="20" y="408" font-size="11.5" fill="#5f5f66"></text>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Pitch error<strong data-vp></strong></span><input class="scrub" data-p type="range" min="0" max="20" step="1" value="10" /></label>
+    <label><span class="fig-panel__name">Click timing error<strong data-vt></strong></span><input class="scrub" data-t type="range" min="0" max="5" step="0.25" value="0" /></label>
+  </div>
+</div>
+
+<script>
+  import { stft, melBank, ramp } from "../../lib/audio-math";
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-mz]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const pIn = $<HTMLInputElement>("[data-p]"), tIn = $<HTMLInputElement>("[data-t]");
+    const SR = 24000, LEN = 6000, SCALES = [64, 128, 256, 512, 1024, 2048];
+    const banks = Object.fromEntries(SCALES.map((s) => [s, melBank(64, s / 2 + 1, SR)]));
+    const mk = (g: Element, tag: string, a: Record<string, string | number>, txt?: string) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, String(a[k])); if (txt !== undefined) e.textContent = txt; g.append(e); return e; };
+    const clip = (f: number, clickMs: number) => Float64Array.from({ length: LEN }, (_, i) => {
+      const t = i / SR, c = Math.round((clickMs / 1000) * SR);
+      return 0.5 * Math.sin(2 * Math.PI * f * t) + (i >= c && i < c + 24 ? 0.9 * (1 - (i - c) / 24) : 0);
+    });
+    const mel = (x: Float64Array, s: number) => stft(x, s, s / 4).map((col) => banks[s].map((b) => b.w.reduce((a, w, k) => a + w * col[k], 0)));
+    function image(diff: number[][], max: number) {
+      const cv = document.createElement("canvas"); cv.width = diff.length; cv.height = 64;
+      const ctx = cv.getContext("2d")!, im = ctx.createImageData(cv.width, 64);
+      diff.forEach((col, x) => col.forEach((v, b) => { const [r, g, bl] = ramp(Math.min(1, v / max)); const o = ((63 - b) * cv.width + x) * 4; im.data[o] = r; im.data[o + 1] = g; im.data[o + 2] = bl; im.data[o + 3] = 255; }));
+      ctx.putImageData(im, 0, 0); return cv.toDataURL();
+    }
+    function draw() {
+      const df = +pIn.value, dt = +tIn.value, real = clip(440, 50), fake = clip(440 + df, 50 + dt);
+      const rows = SCALES.map((s) => {
+        const A = mel(real, s), B = mel(fake, s);
+        let l1 = 0, lg = 0, tot = 0;
+        const diff = A.map((col, t) => col.map((v, b) => Math.abs(v - B[t][b])));
+        A.forEach((col, t) => { let sq = 0; col.forEach((v, b) => { l1 += Math.abs(v - B[t][b]); tot += v; sq += (Math.log(v + 1e-5) - Math.log(B[t][b] + 1e-5)) ** 2; }); lg += Math.sqrt(sq); });
+        return { s, l1, rel: l1 / Math.max(1e-9, tot), lg: Math.sqrt(s / 2) * lg, diff };
+      });
+      [0, 5].forEach((i, k) => { const d = rows[i].diff, mx = Math.max(1e-9, ...d.flat()); $(`[data-img${k}]`).setAttribute("href", image(d, mx)); });
+      const gb = $("[data-bars]"); gb.replaceChildren();
+      const m1 = Math.max(1e-9, ...rows.map((r) => r.rel)), m2 = Math.max(1e-9, ...rows.map((r) => r.lg));
+      mk(gb, "text", { x: 20, y: 240, "font-size": 10.5, fill: "#2b2b30" }, "L1 term, as a share");
+      mk(gb, "text", { x: 20, y: 300, "font-size": 10.5, fill: "#2b2b30" }, "√(s/2) × log term");
+      rows.forEach((r, i) => {
+        const x = 150 + i * 102;
+        mk(gb, "rect", { x, y: 222, width: Math.max(1, (r.rel / m1) * 92), height: 26, fill: "#594578", "fill-opacity": 0.85 });
+        mk(gb, "text", { x, y: 262, "font-size": 9.5, fill: "#5f5f66" }, `${Math.round(r.rel * 100)}% of the picture`);
+        mk(gb, "rect", { x, y: 282, width: Math.max(1, (r.lg / m2) * 92), height: 26, fill: "#4F5D3A", "fill-opacity": 0.85 });
+        mk(gb, "text", { x, y: 322, "font-size": 9.5, fill: "#5f5f66" }, r.lg.toFixed(0));
+        mk(gb, "text", { x, y: 344, "font-size": 10.5, "font-weight": 700, fill: "#2b2b30" }, `s = ${r.s}`);
+        mk(gb, "text", { x, y: 358, "font-size": 9.5, fill: "#5f5f66" }, `α = ${Math.sqrt(r.s / 2).toFixed(1)}`);
+      });
+      $("[data-r1]").textContent = df === 0 && dt === 0 ? "No error: every window agrees, all losses are zero." : `Pitch off by ${df} Hz, click late by ${dt} ms.`;
+      $("[data-r2]").textContent = "Short windows see exactly when things happen; long windows see exactly which pitch. Six windows leave fewer places for a mistake to hide.";
+      $("[data-vp]").textContent = `${df} Hz`; $("[data-vt]").textContent = `${dt} ms`;
+      [pIn, tIn].forEach((i) => i.style.setProperty("--p", `${((+i.value - +i.min) / (+i.max - +i.min)) * 100}%`));
+    }
+    let t = 0;
+    const later = () => { clearTimeout(t); t = window.setTimeout(draw, 30); };
+    pIn.addEventListener("input", later); tIn.addEventListener("input", later);
+    draw();
+  });
+</script>

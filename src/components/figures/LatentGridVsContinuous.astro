@@ -1,0 +1,63 @@
+---
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" tabindex="0" role="region" aria-label={alt} data-lgc>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 260" role="img" aria-labelledby="lgc-title lgc-desc" class="blog-diagram-svg" font-family="Inter, sans-serif">
+<title id="lgc-title">Quantized codes against a regularized continuous latent</title><desc id="lgc-desc">Left: encoder outputs scattered in the plane, each with a short arrow to the nearest of a five by five grid of codebook entries. Right: the same outputs kept where they are, inside concentric circles of a standard Gaussian, each drawn as a small cloud showing the sampled noise around its mean.</desc>
+<text x="20" y="22" font-size="12" fill="#5f5f66" letter-spacing="1">QUANTIZER · SNAP TO NEAREST CODE</text>
+<text x="420" y="22" font-size="12" fill="#5f5f66" letter-spacing="1">VAE · KEEP THE VALUE, SHAPE THE CLOUD</text>
+<g fill="#d5d5dc"><circle cx="60" cy="60" r="4"/><circle cx="125" cy="60" r="4"/><circle cx="190" cy="60" r="4"/><circle cx="255" cy="60" r="4"/><circle cx="320" cy="60" r="4"/><circle cx="60" cy="105" r="4"/><circle cx="125" cy="105" r="4"/><circle cx="190" cy="105" r="4"/><circle cx="255" cy="105" r="4"/><circle cx="320" cy="105" r="4"/><circle cx="60" cy="150" r="4"/><circle cx="125" cy="150" r="4"/><circle cx="190" cy="150" r="4"/><circle cx="255" cy="150" r="4"/><circle cx="320" cy="150" r="4"/><circle cx="60" cy="195" r="4"/><circle cx="125" cy="195" r="4"/><circle cx="190" cy="195" r="4"/><circle cx="255" cy="195" r="4"/><circle cx="320" cy="195" r="4"/><circle cx="60" cy="240" r="4"/><circle cx="125" cy="240" r="4"/><circle cx="190" cy="240" r="4"/><circle cx="255" cy="240" r="4"/><circle cx="320" cy="240" r="4"/></g>
+<g data-err stroke="#594578" stroke-width="1.2"><line x1="150" y1="88" x2="129" y2="102"/><line x1="160" y1="128" x2="186" y2="146"/><line x1="222" y1="125" x2="251" y2="108"/><line x1="207" y1="178" x2="192" y2="191"/><line x1="98" y1="168" x2="121" y2="153"/><line x1="282" y1="170" x2="258" y2="153"/></g>
+<g data-enc fill="#594578"><circle cx="150" cy="88" r="3.5"/><circle cx="160" cy="128" r="3.5"/><circle cx="222" cy="125" r="3.5"/><circle cx="207" cy="178" r="3.5"/><circle cx="98" cy="168" r="3.5"/><circle cx="282" cy="170" r="3.5"/></g>
+<g data-rings fill="none" stroke="#4F5D3A" stroke-opacity="0.35"><circle cx="600" cy="150" r="30"/><circle cx="600" cy="150" r="60"/><circle cx="600" cy="150" r="90"/></g>
+<g data-clouds fill="#4F5D3A" fill-opacity="0.15" stroke="#4F5D3A" stroke-width="0.6"><ellipse cx="560" cy="118" rx="12" ry="9"/><ellipse cx="570" cy="158" rx="10" ry="12"/><ellipse cx="632" cy="155" rx="13" ry="9"/><ellipse cx="617" cy="208" rx="9" ry="11"/><ellipse cx="508" cy="198" rx="12" ry="10"/><ellipse cx="692" cy="200" rx="10" ry="9"/></g>
+<g fill="#4F5D3A"><circle cx="560" cy="118" r="3.5"/><circle cx="570" cy="158" r="3.5"/><circle cx="632" cy="155" r="3.5"/><circle cx="617" cy="208" r="3.5"/><circle cx="508" cy="198" r="3.5"/><circle cx="692" cy="200" r="3.5"/></g>
+<text x="680" y="70" font-size="12" fill="#4F5D3A">prior 𝒩(0, I)</text>
+<g data-snapped fill="#594578"></g>
+</svg>
+<button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+<p class="blog-figure-reading">Left, the arrow is the rounding error the decoder never sees. Right, the dot is the mean μ, the shaded cloud is the sampled noise σ·ε, and the KL term keeps all of it near the prior's rings.</p>
+
+<script>
+  import { animate, dur, hideStroke, setupFigure, wait } from "../../lib/figure-motion";
+
+  // Left: each encoder output is rounded to its nearest code; the drawn line is
+  // the error the decoder never sees. Right: the values stay put and their noise
+  // clouds breathe inside the prior's rings.
+  document.querySelectorAll<HTMLElement>("[data-lgc]").forEach((root) => {
+    const errs = Array.from(root.querySelectorAll<SVGLineElement>("[data-err] line"));
+    const snapped = root.querySelector<SVGGElement>("[data-snapped]")!;
+    const rings = Array.from(root.querySelectorAll<SVGCircleElement>("[data-rings] circle"));
+    const clouds = Array.from(root.querySelectorAll<SVGEllipseElement>("[data-clouds] ellipse"));
+    setupFigure(
+      root,
+      () => {
+        errs.forEach(hideStroke);
+        snapped.replaceChildren();
+        rings.forEach((r) => (r.style.opacity = "0"));
+        clouds.forEach((c) => { c.style.transformBox = "fill-box"; c.style.transformOrigin = "50% 50%"; c.style.transform = "scale(0)"; });
+      },
+      async (alive) => {
+        errs.forEach((line, i) => {
+          const x1 = +line.getAttribute("x1")!, y1 = +line.getAttribute("y1")!;
+          const x2 = +line.getAttribute("x2")!, y2 = +line.getAttribute("y2")!;
+          const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+          dot.setAttribute("r", "3.5"); dot.setAttribute("cx", "0"); dot.setAttribute("cy", "0");
+          snapped.append(dot);
+          const delay = dur(i * 0.18);
+          animate(line, { strokeDashoffset: [1, 0] }, { duration: dur(0.5), delay });
+          animate(dot, { transform: [`translate(${x1}px, ${y1}px)`, `translate(${x2}px, ${y2}px)`] }, { duration: dur(0.5), delay, ease: [0.65, 0, 0.35, 1] });
+        });
+        rings.forEach((r, i) => animate(r, { opacity: [0, 1] }, { duration: dur(0.6), delay: dur(i * 0.2) }));
+        clouds.forEach((c, i) => animate(c, { transform: ["scale(0)", "scale(1)"] }, { duration: dur(0.5), delay: dur(0.4 + i * 0.12), ease: [0.22, 1, 0.36, 1] }));
+        await wait(1.6);
+        // Two breaths: sampling draws a fresh ε each time.
+        for (let k = 0; k < 2; k++) {
+          if (!alive()) return;
+          await Promise.all(clouds.map((c, i) => animate(c, { transform: ["scale(1)", `scale(${1.25 - (i % 3) * 0.05})`, "scale(1)"] }, { duration: dur(1.2), ease: "linear" })));
+        }
+      },
+    );
+  });
+</script>

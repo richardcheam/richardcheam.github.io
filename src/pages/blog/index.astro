@@ -1,0 +1,84 @@
+---
+import { emblemSvg } from "../../lib/emblem";
+import Base from "../../layouts/Base.astro";
+import { categories } from "../../data/categories";
+import { series } from "../../data/series";
+import { titleHtml } from "../../lib/title";
+import { categoryLabel, isoDay, postUrl, publishedPosts, shortDate, stripHtml } from "../../lib/content";
+
+// Newest first; posts published together keep their reading order.
+const posts = (await publishedPosts()).sort((a, b) => b.data.date.getTime() - a.data.date.getTime() || a.data.series_order - b.data.series_order);
+const topics = series.map((t) => ({ ...t, n: posts.filter((p) => p.data.series === t.key).length })).filter((t) => t.n > 0);
+// Reading path for newcomers: the featured series in its intended order.
+const path = posts.filter((p) => p.data.series === series[0].key).sort((a, b) => a.data.series_order - b.data.series_order);
+const position = (p: (typeof posts)[number]) => {
+  const inSeries = posts.filter((q) => q.data.series === p.data.series).sort((a, b) => a.data.series_order - b.data.series_order);
+  return { at: inSeries.indexOf(p) + 1, of: inSeries.length };
+};
+---
+<Base title="Blog" heading>
+  <p class="blog-archive-intro">Explainers and field notes on speech AI, LLM inference and representation learning: how the systems work, and what the evidence does and does not show.</p>
+
+  {path.length > 1 && (
+    <nav class="blog-path" aria-label={`Start here: ${series[0].topic}`}>
+      <p class="blog-path__label">New to {series[0].topic}? Read in this order</p>
+      <ol>
+        {path.map((p) => <li><a href={postUrl(p)}>{p.data.title}</a></li>)}
+      </ol>
+    </nav>
+  )}
+
+  <section class="blog-index" aria-labelledby="blog-index-title">
+    <header class="blog-archive-head">
+      <h2 id="blog-index-title">All posts <span>· {posts.length}</span></h2>
+
+    </header>
+
+    <nav class="blog-filters" id="blog-filters" aria-label="Topics">
+      <span class="blog-filters__label">Topics</span>
+      <a href="/blog/#blog-filters" data-facet-link data-facet-exclusive data-facet="series" data-facet-value="">All</a>
+      {topics.map((t) => <a href={`/blog/?series=${t.key}#blog-filters`} data-facet-link data-facet-exclusive data-facet="series" data-facet-value={t.key}>{t.topic} ({t.n})</a>)}
+    </nav>
+
+    <nav class="blog-filters" aria-label="Categories">
+      <span class="blog-filters__label">Categories</span>
+      <a href="/blog/#blog-filters" data-facet-link data-facet-exclusive data-facet="category" data-facet-value="">All</a>
+      {categories.map((cat) => {
+        const n = posts.filter((p) => p.data.category === cat.key).length;
+        return n > 0 && <a href={`/blog/?category=${encodeURIComponent(cat.key)}#blog-filters`} data-facet-link data-facet-exclusive data-facet="category" data-facet-value={cat.key}>{cat.label} ({n})</a>;
+      })}
+    </nav>
+
+    <p class="blog-filter-count" data-filter-count data-filter-noun="posts" aria-live="polite">Showing {posts.length} of {posts.length} posts</p>
+
+    {posts.length > 0 ? (
+      <>
+        <ol class="blog-post-list" aria-label="All blog posts">
+          {posts.map((post) => {
+            const label = categoryLabel(post.data.category);
+            const pos = position(post);
+            return (
+              <li class="blog-post-row" data-filter-card data-filter-facets={`category:${post.data.category}${post.data.series ? ` series:${post.data.series}` : ""}`} data-filter-text={`${post.data.title.toLowerCase()} ${label.toLowerCase()} ${post.data.category} ${stripHtml(post.data.excerpt).toLowerCase()}`}>
+                <div class="blog-post-main">
+                  {post.data.series && <p class="blog-reading-order">Post {pos.at} of {pos.of}</p>}
+                  <div class="blog-post-titleline">
+                    <h3><a href={postUrl(post)} set:html={titleHtml(post.data.title, post.data.title_key)} /></h3>
+                    {post.data.featured && <span class="blog-featured-label">Featured</span>}
+                  </div>
+                  <p class="blog-post-description">{post.data.excerpt}</p>
+                </div>
+                <div class="blog-post-side">
+                  <p class="blog-post-meta"><time datetime={isoDay(post.data.date)}>{shortDate(post.data.date)}</time><span>{post.data.read_time} read</span><span class="blog-post-topic">{label}</span></p>
+                  <span class="blog-post-emblem" set:html={emblemSvg(post.body ?? "", post.data.series, post.data.sky)} />
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+        <p class="filter-empty" data-filter-empty hidden>No posts match this filter.</p>
+      </>
+    ) : (
+      <p>No blog posts yet.</p>
+    )}
+  </section>
+</Base>

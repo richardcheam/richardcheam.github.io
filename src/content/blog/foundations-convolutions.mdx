@@ -1,0 +1,434 @@
+---
+title: "Convolutions: sliding filters over images and audio"
+date: 2026-10-15
+category: "deep-learning"
+read_time: "32 min"
+series_order: 7
+series: foundations
+featured: false
+excerpt: "A fully connected layer gives every pixel and every audio sample its own private weights, which is hopelessly wasteful. A convolution slides one small filter along the input instead. This post computes every output by hand: in one dimension, in two, across channels, with padding, stride and dilation, and backwards through the gradient."
+question: "How can three weights do the work of millions, and why does that suit images and sound so well?"
+my_work: "A concept note. I worked every example by hand, checked every number with a short NumPy script, and specified the figures from the standard formulas."
+result: "A three-tap kernel on a six-sample signal gives four outputs with three weights, where a fully connected layer from one second of 24 kHz audio to the same length would need 576 million. Three stacked kernels of size 3 see 7 samples; with stride 2 they see 15."
+evidence_limit: "This explains textbook methods on toy signals and a 5 by 5 toy image. No training runs; all numbers are simple arithmetic checked by script."
+lesson: "A convolution is one small set of weights reused at every position. That reuse is the whole idea: it saves parameters, and it makes the layer find a pattern wherever the pattern happens to be."
+---
+
+import Conv1DStepper from "../../components/figures/Conv1DStepper.astro";
+import KernelGallery from "../../components/figures/KernelGallery.astro";
+import ConvShapeExplorer from "../../components/figures/ConvShapeExplorer.astro";
+import Conv2DStepper from "../../components/figures/Conv2DStepper.astro";
+import MultiChannelStepper from "../../components/figures/MultiChannelStepper.astro";
+import ShiftEquivariance from "../../components/figures/ShiftEquivariance.astro";
+import ReceptiveFieldTower from "../../components/figures/ReceptiveFieldTower.astro";
+import KernelGradientStepper from "../../components/figures/KernelGradientStepper.astro";
+import CnnArchitecture from "../../components/figures/CnnArchitecture.astro";
+
+In [the first Foundations post](/blog/foundations-neurons-backprop/) every neuron was connected to every input. That works for a handful of numbers. It falls apart the moment the input is a photo or a second of sound, because those inputs have thousands of numbers and a very particular structure: what matters is usually *local* (an edge, a click, a vowel onset), and the same kind of thing can appear *anywhere*.
+
+A **convolution** is the layer built for exactly that structure. It takes one small set of weights, called a **kernel** or **filter**, and slides it along the input, computing the same weighted sum at every position. This post works through it slowly, by hand, from a six-sample signal up to the multi-channel layers inside the speech codec [Mimi](/blog/mimi-codec-explained/).
+
+
+
+## The whole model at a glance
+
+Here is a whole convolutional neural network (CNN), the kind of network built from the layers in this post, classifying a tiny image. A 6 × 6 picture goes through two 3 × 3 filters, a ReLU (the "negative becomes zero" activation from [post 1](/blog/foundations-neurons-backprop/)), max pooling, a flatten step and a dense layer, and comes out as two probabilities: "vertical line" or "horizontal line". The filters are set by hand so every number is readable; a trained network learns its own. Each layer gets its own section below.
+
+<figure class="blog-figure blog-figure--wide">
+  <CnnArchitecture alt="A 6 by 6 input image, two 3 by 3 filters, two 4 by 4 feature maps, the same maps after ReLU, two 2 by 2 pooled maps, a column of eight flattened numbers, two dense outputs and two probability bars. Stepping lights each stage with its shape and arithmetic; buttons switch the input image." />
+  <figcaption><strong>Figure 1. A CNN from input to output.</strong> Shapes go 6 × 6 × 1 → 4 × 4 × 2 → 2 × 2 × 2 → 8 → 2. Try "Same bar, moved": the answer does not change, because the filters slide and pooling keeps only the strongest response. The plus sign has both lines and gets 50/50.</figcaption>
+</figure>
+
+## Why a fully connected layer is wasteful
+
+A **fully connected layer** (also called a dense or linear layer) gives every output its own weight for every input. The number of weights is
+
+$$
+\text{weights} = n_{\text{in}} \times n_{\text{out}}
+$$
+
+- $n_{\text{in}}$ is how many numbers come in.
+- $n_{\text{out}}$ is how many numbers go out.
+
+Everyday picture: a school where every teacher must write a personal letter to every student. Double the students and the letters double too, for every teacher.
+
+**An image.** A small greyscale photo of 100 by 100 pixels is **10,000** inputs. A first layer with 1,000 outputs needs $10{,}000 \times 1{,}000 =$ **10,000,000** weights.
+
+**A sound.** One second of audio at 24 kHz (kilohertz, thousand samples per second; see [audio basics](/blog/audio-basics/)) is **24,000** numbers. A layer that maps it to another 24,000 numbers needs $24{,}000 \times 24{,}000 =$ **576,000,000** weights. For one layer, for one second.
+
+Worse than the size is the waste. A weight that has learned "a sudden jump between neighbouring samples means a click" at position 100 is no help at position 5,000. The layer has to learn the same idea again, separately, at every position.
+
+A convolution with a kernel of 3 weights uses those **3** weights (plus one bias) everywhere. What changes if the input doubles in length? Nothing about the weight count: still 3.
+
+
+## A one-dimensional convolution, by hand
+
+In one sentence: lay the kernel over the first few inputs, multiply the pairs that line up, add them, then slide the kernel one step and repeat.
+
+$$
+y[n] = \sum_{j=0}^{k-1} w[j]\, x[n + j]
+$$
+
+- $x$ is the input signal; $x[n]$ is its value at position $n$, counting from 0.
+- $w$ is the kernel, $k$ numbers long; $w[j]$ is its weight at position $j$.
+- $y[n]$ is output number $n$.
+- $\sum_{j=0}^{k-1}$ means "add up for $j = 0, 1, \dots, k-1$".
+
+A bias $b$ is usually added to every output as well, exactly as in post 1. We leave it at 0 here to keep the arithmetic short.
+
+Everyday picture: reading a line of text through a cardboard window three letters wide. You slide the window one letter at a time and write down what you see each time.
+
+Worked example. Input $x = (1, 2, 0, 3, 1, 2)$, kernel $w = (1, 0, -1)$, so $k = 3$.
+
+- $y[0] = 1 \times 1 + 0 \times 2 + (-1) \times 0 = 1 + 0 + 0 =$ **1**
+- $y[1] = 1 \times 2 + 0 \times 0 + (-1) \times 3 = 2 + 0 - 3 =$ **−1**
+- $y[2] = 1 \times 0 + 0 \times 3 + (-1) \times 1 = 0 + 0 - 1 =$ **−1**
+- $y[3] = 1 \times 3 + 0 \times 1 + (-1) \times 2 = 3 + 0 - 2 =$ **1**
+
+Six inputs, a window of three, so there are **4** places the window fits: $6 - 3 + 1 = 4$. If $x[3]$ changed from 3 to 5, only the outputs whose windows cover position 3 would change: $y[1]$ becomes $-3$ and $y[3]$ becomes $3$. Every output only "sees" its own small window.
+
+<figure class="blog-figure blog-figure--wide">
+  <Conv1DStepper alt="A row of six input cells 1, 2, 0, 3, 1, 2 with a three-cell kernel 1, 0, minus 1 sliding beneath it. Each step highlights the three covered inputs, shows the three products and their sum, and fills one of four output cells: 1, minus 1, minus 1, 1." />
+  <figcaption><strong>Figure 2. One kernel, sliding.</strong> Press Step to move the kernel one position. The three numbers being multiplied light up, and the arithmetic is written out under the row. Click any input or weight to change it; every output updates. The toggle shows the flipped, textbook convolution.</figcaption>
+</figure>
+
+### A note on the name: it is really cross-correlation
+
+In mathematics and signal processing, a **convolution** flips the kernel before sliding it: $y[n] = \sum_j w[j]\, x[n - j]$. What deep learning libraries compute, the formula above without the flip, is called **cross-correlation**. Everybody still calls it convolution.
+
+With our numbers, the true flipped convolution gives $(-1, 1, 1, -1)$: the same values with the sign swapped, because flipping $(1, 0, -1)$ gives $(-1, 0, 1)$. Does it matter for learning? No. The kernel is learned, so a network that needs the flipped kernel simply learns it. It only matters when you copy a kernel from a signal-processing textbook into a network, or the other way round.
+
+
+## Kernels are pattern detectors
+
+The weights decide what the kernel responds to. Take a toy signal that is flat, jumps up, stays up, then drops:
+
+$$
+x = (0, 0, 0, 3, 3, 3, 0, 0)
+$$
+
+**Edge detector** $w = (-1, 0, 1)$. Each output is "right neighbour minus left neighbour", $y[n] = x[n+2] - x[n]$:
+
+- $y[0] = 0 - 0 = 0$, $y[1] = 3 - 0 = 3$, $y[2] = 3 - 0 = 3$, $y[3] = 3 - 3 = 0$, $y[4] = 0 - 3 = -3$, $y[5] = 0 - 3 = -3$.
+
+Output: $(0, 3, 3, 0, -3, -3)$. It is **zero where the signal is flat**, **positive at the rising edge** and **negative at the falling edge**. The kernel has turned "where does something change?" into numbers.
+
+**Smoother** $w = (\tfrac13, \tfrac13, \tfrac13)$. Each output is the average of three neighbours:
+
+- $y[0] = (0 + 0 + 0)/3 = 0$, $y[1] = (0 + 0 + 3)/3 = 1$, $y[2] = (0 + 3 + 3)/3 = 2$, $y[3] = (3 + 3 + 3)/3 = 3$, $y[4] = 2$, $y[5] = 1$.
+
+Output: $(0, 1, 2, 3, 2, 1)$. The sharp cliff became a gentle ramp. This is a **moving average**, the same idea as the averages in [the optimisers post](/blog/foundations-optimisers/), but over neighbouring positions instead of over time steps.
+
+A trained network does not get hand-picked kernels. It starts from random ones and backpropagation shapes them into whatever detectors reduce the loss. The first layer of an image network typically ends up with edge-like and colour-blob kernels, and Krizhevsky and colleagues showed exactly such learned first-layer filters for AlexNet (2012).
+
+<figure class="blog-figure blog-figure--wide">
+  <KernelGallery alt="The step signal 0, 0, 0, 3, 3, 3, 0, 0 drawn as bars, with the outputs of four kernels drawn below it: edge detector gives 0, 3, 3, 0, minus 3, minus 3; smoother gives 0, 1, 2, 3, 2, 1; identity; and a custom kernel with editable taps." />
+  <figcaption><strong>Figure 3. Same signal, different kernels.</strong> Pick a preset or type your own three taps. The output bars and the arithmetic for the highlighted position update live.</figcaption>
+</figure>
+
+
+## Padding: valid and same
+
+Our six inputs gave only four outputs, and the eight-sample step signal gave six. The window cannot hang off the end, so each layer shrinks the signal by $k - 1$. Stack ten such layers and the signal wastes away.
+
+**Padding** adds extra values, usually zeros, to both ends before sliding. Two common choices:
+
+- **Valid**: no padding. Output length $L - k + 1$.
+- **Same**: pad so that the output is as long as the input. For odd $k$ and stride 1, that means $p = (k - 1)/2$ zeros on each side; for $k = 3$, one zero each side.
+
+Worked example on the step signal with the edge kernel and one zero each side: the padded input is $(0, 0, 0, 0, 3, 3, 3, 0, 0, 0)$, ten numbers, giving eight outputs:
+
+$$
+(0, 0, 3, 3, 0, -3, -3, 0)
+$$
+
+Eight in, **eight out**. The two new outputs at the ends only see a zero and a real value. Zeros are a guess about what lies beyond the edge, which is why outputs right at the border are slightly less trustworthy.
+
+
+## Stride, dilation and the output length
+
+Two more knobs change *where* the kernel lands.
+
+**Stride** $s$ is how far the kernel jumps between outputs. Stride 1 visits every position; stride 2 visits every second one, so the output is about half as long. That is **downsampling**: fewer numbers, each summarising a wider stretch. The Mimi codec inside Pocket TTS uses strides 4, 5 and 6, then 16, to squeeze 24,000 samples per second down to 12.5 frames per second; the [Mimi post](/blog/mimi-codec-explained/#one-strided-convolution-in-full) works through one strided layer in full.
+
+Example: the smoother with one zero of padding each side and stride 2 on the step signal. It keeps every second output of the stride-1 version: $(0, 1, 3, 1)$.
+
+**Dilation** $d$ spreads the kernel's taps apart, leaving $d - 1$ skipped inputs between them. With $d = 2$ the kernel $(-1, 0, 1)$ reads $x[n]$, $x[n+2]$, $x[n+4]$. It covers a span of 5 with only 3 weights. Example on the step signal, no padding: $y[n] = x[n+4] - x[n]$ gives $(3, 3, 0, -3)$.
+
+All of these fit in one formula for the output length:
+
+$$
+L_{\text{out}} = \left\lfloor \frac{L + 2p - d(k - 1) - 1}{s} \right\rfloor + 1
+$$
+
+- $L$ is the input length; $p$ is the padding added to *each* side.
+- $k$ is the kernel size, $d$ the dilation, $s$ the stride.
+- $d(k-1) + 1$ is the span the kernel covers, end to end.
+- $\lfloor \cdot \rfloor$ means "round down": a window that would hang off the end is dropped.
+
+In words: take the padded length, subtract the kernel's span, count how many strides fit, and add 1 for the starting position.
+
+Worked example: $L = 10$, $k = 3$, $p = 1$, $s = 2$, $d = 2$. The span is $2 \times 2 + 1 = 5$. Then $(10 + 2 - 4 - 1)/2 = 7/2 = 3.5$, rounded down to 3, plus 1 gives **4** outputs. Check with the earlier cases: valid on the step signal is $(8 - 2 - 1)/1 + 1 = 6$; same is $(8 + 2 - 2 - 1)/1 + 1 = 8$. What if $L$ were 11 instead? $(11 + 2 - 5)/2 = 4$, plus 1 is **5**.
+
+Dumoulin and Visin's "A guide to convolution arithmetic for deep learning" (2016) draws every one of these cases, and is worth keeping open.
+
+<figure class="blog-figure blog-figure--wide">
+  <ConvShapeExplorer alt="An input row with padding cells shaded at both ends and the kernel's taps drawn as dots joined to each output, spaced by dilation and stepping by stride. A live formula line shows L out = floor of (L plus 2p minus d times (k minus 1) minus 1) over s, plus 1, with the numbers filled in." />
+  <figcaption><strong>Figure 4. Padding, stride and dilation.</strong> Move the sliders and watch which inputs each output reads. The formula fills in your numbers and must agree with the count of output cells.</figcaption>
+</figure>
+
+
+## Two dimensions: images
+
+An image is a grid, so the kernel becomes a small grid too, and it slides both across and down. In one sentence: lay the 3 by 3 kernel on a 3 by 3 patch, multiply the nine pairs, add them, then slide.
+
+$$
+y[r, c] = \sum_{i=0}^{k-1} \sum_{j=0}^{k-1} w[i, j]\, x[r + i,\, c + j]
+$$
+
+- $x[r, c]$ is the pixel in row $r$, column $c$ (both counted from 0, top-left).
+- $w[i, j]$ is the kernel weight in kernel row $i$, kernel column $j$.
+- $y[r, c]$ is the output pixel whose window starts at row $r$, column $c$.
+
+Take a 5 by 5 toy image of a dark area on the left and a bright area on the right (0 dark, 9 bright), every row the same:
+
+$$
+x = \begin{pmatrix} 0&0&0&9&9 \\ 0&0&0&9&9 \\ 0&0&0&9&9 \\ 0&0&0&9&9 \\ 0&0&0&9&9 \end{pmatrix}, \qquad
+w = \begin{pmatrix} -1&0&1 \\ -1&0&1 \\ -1&0&1 \end{pmatrix}
+$$
+
+This kernel is a **vertical edge detector**: in each of its three rows it computes "right minus left", then adds the rows.
+
+- $y[0,0]$, window columns 0 to 2: each row gives $0 - 0 = 0$, total **0**.
+- $y[0,1]$, window columns 1 to 3: each row gives $9 - 0 = 9$, total $9 + 9 + 9 =$ **27**.
+- $y[0,2]$, window columns 2 to 4: each row gives $9 - 0 = 9$, total **27**.
+
+Every row of the image is identical, so all three output rows are the same: a 3 by 3 output of $(0, 27, 27)$ in each row. Large values mark where the edge is. The size follows the formula in each direction: $5 - 3 + 1 = 3$.
+
+Now turn the kernel on its side, so each column computes "bottom minus top" (a **horizontal edge detector**). Every column of the image is constant from top to bottom, so every output is **0**: there is no horizontal edge to find. Same image, different kernel, different answer.
+
+<figure class="blog-figure blog-figure--wide">
+  <Conv2DStepper alt="A five by five grid of pixels, dark on the left three columns and bright on the right two, with a three by three window outlined. Each step moves the window, shows the nine products and their sum, and fills one cell of a three by three output grid that ends with rows 0, 27, 27." />
+  <figcaption><strong>Figure 5. A 3 by 3 window walking over a 5 by 5 image.</strong> Step moves the window one cell, left to right then down. Choose a preset kernel (vertical edge, horizontal edge, blur), and click pixels to switch them between dark and bright.</figcaption>
+</figure>
+
+
+## Channels: many inputs, many outputs
+
+Real inputs have several **channels**: a colour image has red, green and blue planes; a hidden layer might have 64 feature maps. A convolution layer handles them like this:
+
+1. Each output channel has its own kernel **for every input channel**.
+2. It slides each of those kernels over its input channel, then **adds the results together** across input channels, plus one bias.
+3. Different output channels have different kernels, so each learns to detect a different pattern.
+
+$$
+y[o, n] = b_o + \sum_{c=1}^{C_{\text{in}}} \sum_{j=0}^{k-1} w[o, c, j]\, x[c, n + j]
+$$
+
+- $C_{\text{in}}$ is the number of input channels; $c$ counts through them.
+- $o$ picks the output channel; $b_o$ is its bias.
+- $w[o, c, j]$ is weight $j$ of the kernel connecting input channel $c$ to output channel $o$.
+
+The [Mimi post](/blog/mimi-codec-explained/#one-strided-convolution-in-full) reads the same formula, with stride added, symbol by symbol for a real layer. Here is a toy you can check in your head. Two input channels of length 3, kernel size 2, two output channels:
+
+- Input channel 1: $(1, 2, 3)$. Input channel 2: $(0, 1, -1)$.
+- Output channel 1: kernels $(1, 1)$ on channel 1 and $(1, -1)$ on channel 2, bias 0.
+- Output channel 2: kernels $(0, 1)$ on channel 1 and $(2, 0)$ on channel 2, bias 1.
+
+Output channel 1:
+
+- $n = 0$: $(1 \times 1 + 1 \times 2) + (1 \times 0 + (-1) \times 1) + 0 = 3 + (-1) =$ **2**
+- $n = 1$: $(1 \times 2 + 1 \times 3) + (1 \times 1 + (-1) \times (-1)) + 0 = 5 + 2 =$ **7**
+
+Output channel 2:
+
+- $n = 0$: $(0 \times 1 + 1 \times 2) + (2 \times 0 + 0 \times 1) + 1 = 2 + 0 + 1 =$ **3**
+- $n = 1$: $(0 \times 2 + 1 \times 3) + (2 \times 1 + 0 \times (-1)) + 1 = 3 + 2 + 1 =$ **6**
+
+**Counting parameters.** Each output channel has $C_{\text{in}} \times k$ weights (for 2-D, $C_{\text{in}} \times k \times k$) plus one bias:
+
+$$
+\text{params} = C_{\text{out}} \times C_{\text{in}} \times k_h \times k_w + C_{\text{out}}
+$$
+
+- $k_h$, $k_w$ are the kernel's height and width (for 1-D, use $k$ alone).
+
+A 2-D layer from an RGB image ($C_{\text{in}} = 3$) to 16 channels with 3 by 3 kernels: $16 \times 3 \times 9 + 16 = 432 + 16 =$ **448** parameters, whatever the image size. A 1-D audio layer from 64 to 128 channels with $k = 3$: $128 \times 64 \times 3 + 128 =$ **24,704**. Compare the ten million of the fully connected layer at the top.
+
+PyTorch agrees. `sum(p.numel() for p in layer.parameters())` adds up the kernel weights and the biases:
+
+```python
+import torch.nn as nn
+
+count = lambda m: sum(p.numel() for p in m.parameters())
+print(count(nn.Conv1d(2, 2, kernel_size=2)))     # the toy above
+print(count(nn.Conv2d(3, 16, kernel_size=3)))    # RGB to 16
+print(count(nn.Conv1d(64, 128, kernel_size=3)))  # audio layer
+```
+
+It prints:
+
+```text
+10
+448
+24704
+```
+
+The toy: $2 \times 2 \times 2 = 8$ kernel weights plus 2 biases, **10**.
+
+<figure class="blog-figure blog-figure--wide">
+  <MultiChannelStepper alt="Two input rows, 1, 2, 3 and 0, 1, minus 1, each with a two-tap kernel beneath. Each step computes one output cell: the two per-channel sums are shown separately, then added with the bias, filling output channel one with 2, 7 and output channel two with 3, 6." />
+  <figcaption><strong>Figure 6. Channels are summed, outputs are separate.</strong> Each step shows the per-channel partial sums before they are added, so you can see where the "across channels" sum happens.</figcaption>
+</figure>
+
+
+## Weight sharing and translation equivariance
+
+Using the same kernel at every position is called **weight sharing**. It buys two things. The first is the parameter saving we just counted. The second is subtler: **translation equivariance**. "Translation" means shifting; "equivariance" means the output changes in the same way as the input. In one sentence: if you shift the input, the output shifts by the same amount and is otherwise unchanged.
+
+Take the step signal and shift it right by one position: $(0, 0, 0, 0, 3, 3, 3, 0)$. Run the edge kernel $(-1, 0, 1)$:
+
+- Before the shift: $(0, 3, 3, 0, -3, -3)$
+- After the shift: $(0, 0, 3, 3, 0, -3)$
+
+The same pattern, moved right by one. The detector did not need to relearn anything: a cat in the corner of a photo or a click late in a recording triggers the same kernel. (Values near the borders can differ, because of what falls off the end or into padding. Stride also breaks exact equivariance: with stride 2, a shift of 1 is not a whole output step.)
+
+Equivariance is not **invariance**. An invariant output would not change at all when the input shifts. Classifiers often want invariance ("cat" anywhere is still "cat"), and they get closer to it by adding pooling, described [below](#pooling-the-quick-summary).
+
+<figure class="blog-figure blog-figure--wide">
+  <ShiftEquivariance alt="Two stacked rows: the step signal and its edge-kernel output. A shift slider moves the input right; the output bars move right by the same amount, with border cells marked where padding changes the values." />
+  <figcaption><strong>Figure 7. Shift the input, the output follows.</strong> Drag the shift slider. A ghost copy of the unshifted output stays behind so you can compare.</figcaption>
+</figure>
+
+
+## Receptive field: how much each output sees
+
+One output of a $k = 3$ layer sees 3 inputs. Stack a second $k = 3$ layer on top: each of its outputs sees 3 first-layer outputs, which together cover 5 inputs. The span of input that can affect one output is its **receptive field**.
+
+$$
+r_\ell = r_{\ell-1} + (k_\ell - 1) \times J_{\ell-1}, \qquad J_\ell = J_{\ell-1} \times s_\ell
+$$
+
+- $r_\ell$ is the receptive field after layer $\ell$; start with $r_0 = 1$ (one input sees itself).
+- $k_\ell$ and $s_\ell$ are layer $\ell$'s kernel size and stride.
+- $J_\ell$ is the **jump**: how many inputs apart two neighbouring outputs of layer $\ell$ sit. Start with $J_0 = 1$.
+
+In words: each new layer adds $k - 1$ extra neighbours, and each neighbour is as far apart as the jump so far.
+
+**Three layers, $k = 3$, stride 1.** Jump stays 1. $r_1 = 1 + 2 = 3$, $r_2 = 3 + 2 = 5$, $r_3 = 5 + 2 =$ **7**. Growth is slow: 2 per layer.
+
+**Three layers, $k = 3$, stride 2.** $r_1 = 1 + 2 \times 1 = 3$ (jump becomes 2), $r_2 = 3 + 2 \times 2 = 7$ (jump becomes 4), $r_3 = 7 + 2 \times 4 =$ **15**. Striding doubles the growth each layer.
+
+Dilation does the same trick without throwing away resolution: a dilated kernel of size 3 with dilation $d$ behaves like a kernel of span $2d + 1$. WaveNet (van den Oord and colleagues, 2016) doubled the dilation every layer, 1, 2, 4, up to 512, so a stack of ten layers reached 1,024 samples back while every layer kept the full sample rate. The paper gives each 1-to-512 block a receptive field of 1,024 samples.
+
+<figure class="blog-figure blog-figure--wide">
+  <ReceptiveFieldTower alt="A tower of four rows: the input at the bottom and three convolution layers above. Clicking a top output lights up the cells it depends on in each row below, widening to 3, 5, 7 inputs for stride 1, and 3, 7, 15 for stride 2." />
+  <figcaption><strong>Figure 8. The receptive field grows with depth.</strong> Choose stride 1, stride 2 or dilation 1, 2, 4, then Step to add one layer at a time; the gold cells are the inputs one output depends on.</figcaption>
+</figure>
+
+
+## Pooling: the quick summary
+
+A **pooling** layer is a window with no weights: it summarises each window with a fixed rule. **Max pooling** keeps the largest value; **average pooling** keeps the mean. It is usually used with stride equal to the window, to shrink the signal.
+
+Example: $(1, 3, 2, 5, 4, 0)$, window 2, stride 2.
+
+- Max: $\max(1, 3) = 3$, $\max(2, 5) = 5$, $\max(4, 0) = 4$, giving **(3, 5, 4)**.
+- Average: $(1+3)/2 = 2$, $(2+5)/2 = 3.5$, $(4+0)/2 = 2$, giving **(2, 3.5, 2)**.
+
+Max pooling says "was the pattern present anywhere in this window?" and ignores exactly where, which buys a little shift invariance. LeCun and colleagues' LeNet-5 (1998) alternated convolutions with subsampling layers of this kind. Many modern networks replace pooling with strided convolutions, which learn their own way to summarise; Mimi downsamples only with strided convolutions.
+
+
+## Causal convolution: audio and streaming
+
+The convolutions so far look at neighbours on both sides. For live audio that is a problem: output at time $n$ would need samples from the future, which have not arrived yet.
+
+A **causal** convolution only looks backwards. You get it by putting all the padding on the **left**: pad $k - 1$ zeros before the signal (or $k - s$ with stride $s$), none after. Then output $n$ depends only on inputs at $n$ and earlier.
+
+Example: kernel $(1, 0, -1)$ on $x = (1, 2, 0, 3)$ with two zeros on the left. The padded input is $(0, 0, 1, 2, 0, 3)$, and the outputs are $(0 - 1, 0 - 2, 1 - 0, 2 - 3) = (-1, -2, 1, -1)$. The output for time 0 used only $x[0]$; the output for time 3 used $x[1]$ to $x[3]$. Four in, four out, nothing from the future.
+
+This is how WaveNet generated audio one sample at a time, and how Mimi and SoundStream encode speech as it arrives. Rather than rebuild it here, see the [causal padding section of the Mimi post](/blog/mimi-codec-explained/#causal-padding-and-why-streaming-needs-it), and the causal strided convolution figure in the [SoundStream review](/paper-reviews/soundstream/), which shows each output reading exactly two strides of past input.
+
+
+## Transposed convolution: going back up
+
+Encoders shrink; decoders must grow back. A **transposed convolution** (sometimes wrongly called "deconvolution") runs the strided picture in reverse: each input value **stamps** a scaled copy of the kernel into the output, the stamps are placed $s$ apart, and overlapping stamps add.
+
+Example: input $(1, 2)$, kernel $(1, 1, 1)$, stride 2. The first input stamps $(1, 1, 1)$ at positions 0 to 2; the second stamps $(2, 2, 2)$ at positions 2 to 4. Position 2 gets both: $1 + 2 = 3$. Output: **(1, 1, 3, 2, 2)**, five numbers from two. The length is $(L - 1) \times s + k = 1 \times 2 + 3 = 5$.
+
+The uneven bump at position 2 is why kernels that are not a multiple of the stride can leave a checkerboard pattern. Mimi's decoder uses kernel = 2 × stride to keep overlaps even; the [Mimi post](/blog/mimi-codec-explained/#how-a-transposed-convolution-upsamples) and its strided-convolution figure show the full layer.
+
+
+## Backpropagation through a convolution
+
+Training works exactly as in [post 1](/blog/foundations-neurons-backprop/): the loss sends back a gradient for every output, and we need the gradient for every weight. The only new twist is that each weight is used at **every** position, so its gradient **adds up** contributions from all of them.
+
+In one sentence: the gradient for kernel weight $j$ is the input slid against the output gradients, which is itself a cross-correlation.
+
+$$
+\frac{\partial L}{\partial w[j]} = \sum_{n} g[n]\, x[n + j]
+$$
+
+- $L$ is the loss.
+- $g[n] = \partial L / \partial y[n]$ is the gradient arriving at output $n$ (how much the loss changes if $y[n]$ nudges up).
+- $x[n + j]$ is the input that weight $j$ touched when computing $y[n]$.
+
+Why: $y[n]$ contains the term $w[j]\, x[n+j]$, so nudging $w[j]$ moves $y[n]$ by $x[n+j]$ times the nudge, and the chain rule multiplies that by $g[n]$. Sum over every output the weight helped make.
+
+Worked example. Input $x = (1, 2, 3, 4)$, kernel $w = (1, 0, -1)$. Forward: $y[0] = 1 - 3 = -2$, $y[1] = 2 - 4 = -2$. Suppose the loss sends back $g = (1, 2)$.
+
+- $\partial L / \partial w[0] = g[0]\, x[0] + g[1]\, x[1] = 1 \times 1 + 2 \times 2 =$ **5**
+- $\partial L / \partial w[1] = g[0]\, x[1] + g[1]\, x[2] = 1 \times 2 + 2 \times 3 =$ **8**
+- $\partial L / \partial w[2] = g[0]\, x[2] + g[1]\, x[3] = 1 \times 3 + 2 \times 4 =$ **11**
+
+That is the 2-tap "kernel" $g = (1, 2)$ slid along $x$: a cross-correlation of input and output gradient. The bias gradient is just $g[0] + g[1] = 3$.
+
+The gradient for the **input** (needed to keep backpropagating to earlier layers) runs the other way: each $g[n]$ stamps a copy of the kernel back onto the inputs it came from, exactly like the transposed convolution above. Here: $g[0]$ stamps $(1, 0, -1)$ at positions 0 to 2, $g[1] = 2$ stamps $(2, 0, -2)$ at positions 1 to 3, giving $\partial L / \partial x = (1, 2, -1, -2)$. That is why the transposed convolution has its name: it is the backward pass of an ordinary one.
+
+With a learning rate of 0.1, plain gradient descent from [post 2](/blog/foundations-loss-gradient-descent/) would move the kernel to $(1 - 0.5, 0 - 0.8, -1 - 1.1) = (0.5, -0.8, -2.1)$.
+
+<figure class="blog-figure blog-figure--wide">
+  <KernelGradientStepper alt="The input 1, 2, 3, 4 with the output gradient 1, 2 sliding along it. Each step computes one kernel gradient: 5, then 8, then 11, showing the two products and their sum. A second tab stamps the kernel back to give the input gradient 1, 2, minus 1, minus 2." />
+  <figcaption><strong>Figure 9. The kernel gradient is a sliding sum too.</strong> Step through the three weight gradients, the bias and the update, then watch the output gradients stamp the kernel back to give the input gradient.</figcaption>
+</figure>
+
+
+## A short history
+
+Fukushima's **Neocognitron** (1980) stacked layers of local feature detectors with shared structure and pooling-like stages, inspired by the visual cortex, but trained them without backpropagation. LeCun and colleagues (1989) trained a network of shared-weight local kernels end to end with backpropagation to read handwritten US zip codes, and the 1998 paper on gradient-based learning for document recognition presented **LeNet-5**. Krizhevsky, Sutskever and Hinton's **AlexNet** (2012) scaled the same recipe up on GPUs (graphics processing units) and won the ImageNet image-classification challenge by a wide margin, which started the deep learning boom. WaveNet (2016) carried dilated causal convolutions to raw audio, and the speech codecs on this site still build on that lineage.
+
+
+## What to remember
+
+- A convolution slides one small kernel along the input and computes the same weighted sum at every position. Deep learning's version does not flip the kernel; strictly it is cross-correlation.
+- Weight sharing: a 3-tap kernel has 3 weights whatever the input length; a layer's parameter count is $C_{\text{out}} \times C_{\text{in}} \times k_h \times k_w + C_{\text{out}}$.
+- Output length: $\lfloor (L + 2p - d(k-1) - 1)/s \rfloor + 1$.
+- Input channels are summed; each output channel has its own set of kernels.
+- Shift the input and the output shifts with it (equivariance). Pooling adds a little invariance.
+- Receptive field grows by $(k - 1) \times \text{jump}$ per layer: 3, 5, 7 at stride 1; 3, 7, 15 at stride 2.
+- Causal convolution pads only the past, so audio can be processed as it arrives.
+- The kernel gradient is the input cross-correlated with the output gradient; the input gradient is a transposed convolution.
+
+
+## Try it yourself
+
+- **Figure 2**: click $x[3]$ twice to change it from 3 to 5. The outputs must read **1, −3, −1, 3**.
+- **Figure 3**: choose the smoother. The outputs must read **0, 1, 2, 3, 2, 1**. Choose Identity, $(0, 1, 0)$, and the output must equal the input without its two end samples: **0, 0, 3, 3, 3, 0**.
+- **Figure 4**: set $L = 10$, $k = 3$, $p = 1$, $s = 2$, $d = 2$. The formula and the drawing must both show **4** outputs. Change $L$ to 11: **5**.
+- **Figure 5**: switch to the horizontal edge kernel. Every output must be **0**. Click pixel (row 0, column 3) to make it dark (0) with the vertical kernel: $y[0,1]$ drops from 27 to **18** while $y[0,2]$ stays 27, because that window still sees a 9 in its right column.
+- **Figure 6**: set the bias of output channel 2 to 0. Its outputs must read **2, 5**.
+- **Figure 7**: shift by 1. The output must read **0, 0, 3, 3, 0, −3**.
+- **Figure 8**: stride 2, three layers: **3, 7, 15**. Dilation 1, 2, 4 with $k = 3$: **3, 7, 15** as well, but with no loss of length.
+- **Figure 9**: set $g = (1, 0)$. The kernel gradient must equal the first window of the input: **1, 2, 3**.
+
+
+## Sources
+
+- K. Fukushima (1980). "Neocognitron: A self-organizing neural network model for a mechanism of pattern recognition unaffected by shift in position." *Biological Cybernetics*, 36(4), 193–202.
+- Y. LeCun, B. Boser, J. S. Denker, D. Henderson, R. E. Howard, W. Hubbard and L. D. Jackel (1989). "Backpropagation Applied to Handwritten Zip Code Recognition." *Neural Computation*, 1(4), 541–551.
+- Y. LeCun, L. Bottou, Y. Bengio and P. Haffner (1998). "Gradient-Based Learning Applied to Document Recognition." *Proceedings of the IEEE*, 86(11), 2278–2324.
+- A. Krizhevsky, I. Sutskever and G. E. Hinton (2012). "ImageNet Classification with Deep Convolutional Neural Networks." *Advances in Neural Information Processing Systems 25* (NeurIPS 2012), 1097–1105.
+- A. van den Oord, S. Dieleman, H. Zen, K. Simonyan, O. Vinyals, A. Graves, N. Kalchbrenner, A. Senior and K. Kavukcuoglu (2016). "WaveNet: A Generative Model for Raw Audio." arXiv:1609.03499.
+- V. Dumoulin and F. Visin (2016). "A guide to convolution arithmetic for deep learning." arXiv:1603.07285.
+- I. Goodfellow, Y. Bengio and A. Courville (2016). *Deep Learning*, MIT Press, chapter 9. Textbook treatment of convolution, cross-correlation, equivariance and pooling.
+

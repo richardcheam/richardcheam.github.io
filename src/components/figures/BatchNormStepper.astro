@@ -1,0 +1,75 @@
+---
+// Foundations, normalisation post: batch norm on the 4-by-3 batch, one
+// column at a time: mean, subtract, variance, divide, scale and shift.
+// Column means 3, 4, 40; standard deviations 1, 3, 20. Feature 2 becomes
+// −1, −0.33, −0.33, 1.67. Feature 1 with γ = 2, β = 1 becomes −1, 3, −1, 3.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-bn>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 250" role="img" aria-labelledby="bn2-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="bn2-title">A batch of four examples by three features, normalised column by column</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Scale γ for <span data-cn>feature 1</span> <strong data-vg></strong></span><input class="scrub" data-g type="range" min="0" max="3" step="0.1" value="1" /></label>
+    <label><span class="fig-panel__name">Shift β for <span data-cn>feature 1</span> <strong data-vb></strong></span><input class="scrub" data-b type="range" min="-2" max="2" step="0.1" value="0" /></label>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt, par } from "../../lib/tiny-net";
+  import { INK, MUTED, GOLD, TINT, JADE } from "../../lib/net-diagram";
+  import { txt } from "../../lib/plot";
+  import { X, col, mean, variance } from "../../lib/norms";
+  const STAGES = ["mean", "subtract", "variance", "divide", "scale and shift"];
+  document.querySelectorAll<HTMLElement>("[data-bn]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const gamma = [1, 1, 1], beta = [0, 0, 0];
+    let active = 0;
+    const st = (j: number) => { const c = col(X, j), m = mean(c), v = variance(c), s = Math.sqrt(v); return { c, m, v, s, d: c.map((x) => x - m), z: c.map((x) => (x - m) / s), y: c.map((x) => (gamma[j] * (x - m)) / s + beta[j]) }; };
+    const r = (v: number) => fmt(v, 2);
+    const syncSliders = () => { $<HTMLInputElement>("[data-g]").value = String(gamma[active]); $<HTMLInputElement>("[data-b]").value = String(beta[active]); };
+    const steps = () => [0, 1, 2].flatMap((j) => {
+      const s = st(j), f = `feature ${j + 1}`, enter = () => { active = j; syncSliders(); };
+      return [
+        { say: `${f}: average this column over the 4 examples in the batch.`, math: `mean = (${s.c.join(" + ")}) / 4 = ${r(s.m)}`, enter },
+        { say: "Subtract the mean from each value.", math: `distances: ${s.d.map(r).join(", ")}`, enter },
+        { say: "Square the distances and average them: the variance. Its square root is the standard deviation.", math: `squares ${s.d.map((d) => r(d * d)).join(", ")} → variance ${r(s.d.reduce((a, d) => a + d * d, 0))} / 4 = ${r(s.v)}, standard deviation ${r(s.s)}`, enter },
+        { say: "Divide each distance by the standard deviation. The column now has mean 0 and standard deviation 1.", math: s.d.map((d, i) => `${r(d)} / ${r(s.s)} = ${r(s.z[i])}`).join(",  "), enter },
+        { say: `Apply this feature's learned scale γ and shift β. The sliders change them for ${f}.`, math: s.z.map((z, i) => `${fmt(gamma[j], 2)} × ${par(z, 2)} + ${par(beta[j], 2)} = ${r(s.y[i])}`).join("\n"), enter },
+      ];
+    });
+    function draw(k: number) {
+      const j0 = k < 0 ? -1 : Math.floor(k / 5), stage = k < 0 ? -1 : k % 5;
+      let s = txt(30, 22, "Input batch", `font-size="12" font-weight="700" fill="${INK}"`) + txt(430, 22, "Batch-normalised", `font-size="12" font-weight="700" fill="${INK}"`);
+      const cx = (j: number, side: number) => side + 90 + j * 90;
+      [0, 1].forEach((side) => { const base = side ? 430 : 30; [0, 1, 2].forEach((j) => (s += txt(cx(j, base), 46, `feature ${j + 1}`, `font-size="11" text-anchor="middle" fill="${MUTED}"`))); });
+      if (j0 >= 0) [30, 430].forEach((b) => (s += `<rect x="${cx(j0, b) - 40}" y="52" width="80" height="${4 * 30 + 6}" rx="5" fill="${TINT}"/>`));
+      X.forEach((row, i) => {
+        const y = 74 + i * 30;
+        s += txt(30, y, `example ${i + 1}`, `font-size="11" fill="${MUTED}"`);
+        row.forEach((v, j) => {
+          s += txt(cx(j, 30), y, String(v), `font-size="13" font-weight="${j === j0 ? 700 : 400}" text-anchor="middle" fill="${INK}"`);
+          const done = j < j0 || (j === j0 && stage >= 3), S = st(j);
+          s += txt(cx(j, 430), y, done ? r(j < j0 || stage === 4 ? S.y[i] : S.z[i]) : "", `font-size="13" font-weight="${j === j0 ? 700 : 400}" text-anchor="middle" fill="${INK}"`);
+        });
+      });
+      // Statistics row.
+      [0, 1, 2].forEach((j) => {
+        const S = st(j), show = j < j0 || (j === j0 && stage >= 0);
+        s += txt(cx(j, 30), 204, show ? `mean ${r(S.m)}` : "", `font-size="11.5" text-anchor="middle" fill="${GOLD}" font-weight="700"`);
+        s += txt(cx(j, 30), 222, show && (j < j0 || stage >= 2) ? `std ${r(S.s)}` : "", `font-size="11.5" text-anchor="middle" fill="${GOLD}" font-weight="700"`);
+        s += txt(cx(j, 430), 204, j < j0 || (j === j0 && stage === 4) ? `γ ${fmt(gamma[j], 2)}, β ${fmt(beta[j], 2)}` : "", `font-size="11" text-anchor="middle" fill="${JADE}"`);
+      });
+      if (j0 >= 0) s += txt(30, 246, `Feature ${j0 + 1}, stage ${stage + 1} of 5: ${STAGES[stage]}`, `font-size="11.5" fill="${MUTED}"`);
+      $("[data-draw]").innerHTML = s;
+      root.querySelectorAll<HTMLElement>("[data-cn]").forEach((el) => (el.textContent = `feature ${active + 1}`));
+      $("[data-vg]").textContent = fmt(gamma[active], 2); $("[data-vb]").textContent = fmt(beta[active], 2);
+    }
+    const redraw = stepper(root, steps, draw, { delay: 1.4 });
+    $<HTMLInputElement>("[data-g]").addEventListener("input", (e) => { gamma[active] = +(e.target as HTMLInputElement).value; redraw(); });
+    $<HTMLInputElement>("[data-b]").addEventListener("input", (e) => { beta[active] = +(e.target as HTMLInputElement).value; redraw(); });
+  });
+</script>

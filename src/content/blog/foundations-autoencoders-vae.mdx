@@ -1,0 +1,409 @@
+---
+title: "Autoencoders and VAEs"
+title_key: ["Autoencoders", "VAEs"]
+date: 2026-10-15
+category: "deep-learning"
+read_time: "30 min"
+series_order: 12
+series: foundations
+featured: false
+excerpt: "An autoencoder squeezes data through a narrow code and rebuilds it. A variational autoencoder makes that code a little cloud instead of a point, so the space of codes has no holes and you can pick a random point and decode something real. Every step worked on tiny numbers."
+question: "How do you compress data into a few numbers in a way that lets you invent new data by picking numbers at random?"
+my_work: "A concept note. I worked every example by hand, checked each number with a short script, and specified the figures from the standard formulas."
+result: "A linear autoencoder that squeezes six 2-D points to one number each rebuilds them with an average squared error of 0.667, close to the best possible 0.657 found by principal component analysis. For a one-number VAE with an identity decoder, the loss has a closed form, and its best cloud shrinks toward the prior as β grows: μ = 2/3 and σ = 0.577 at β = 1."
+evidence_limit: "Explains textbook methods on toy data. No experiments; all numbers are simple arithmetic, and the glyph figures use two tiny seeded models trained offline with a short script."
+lesson: "Reconstruction alone builds a good compressor with a messy code space. The KL term trades a little reconstruction for a code space that is smooth and filled, which is what generation needs."
+---
+
+import BottleneckStepper from "../../components/figures/BottleneckStepper.astro";
+import LatentHoleMap from "../../components/figures/LatentHoleMap.astro";
+import ReparamStepper from "../../components/figures/ReparamStepper.astro";
+import KlCalculator from "../../components/figures/KlCalculator.astro";
+import VaeCloudExplorer from "../../components/figures/VaeCloudExplorer.astro";
+import BetaTradeoff from "../../components/figures/BetaTradeoff.astro";
+import LatentInterpolationStrip from "../../components/figures/LatentInterpolationStrip.astro";
+import VaeArchitecture from "../../components/figures/VaeArchitecture.astro";
+
+So far in this series every network has had a teacher: a label to match, a next word to predict. This post is about a network whose teacher is the input itself. It looks at a picture, writes down a few numbers, and then has to redraw the picture from those numbers alone. That network is an **autoencoder**.
+
+It sounds pointless (why copy something you already have?) until you notice the catch: the few numbers in the middle are far fewer than the numbers in the picture. To succeed, the network must find what matters and throw the rest away. And once we change it slightly into a **variational autoencoder** (VAE), those few numbers become a space we can pick from at random to make new data.
+
+This is not a detour from speech. The codec under Pocket TTS is a VAE: it turns every 80 milliseconds of audio into **32** numbers, and the language model then predicts those numbers ([Pocket TTS post](/blog/pocket-tts-calm-explained/#the-continuous-alternative), [Mimi post](/blog/mimi-codec-explained/#the-bottleneck-continuous-and-regularized)). By the end of this post you will know why it is a VAE and not a plain autoencoder.
+
+
+## The whole model at a glance
+
+Before taking it apart, here is a whole VAE (variational autoencoder) at work, on the small model this post trains later: 5 × 5 pixel glyphs (a vertical bar, a horizontal bar, a ring and a cross) squeezed to a code of just 2 numbers. Step through it once now. Every piece (the cloud of codes, the sampling trick, the two losses) gets its own section below, and it is worth coming back here at the end.
+
+Two paths use the same parts. **Training** runs the whole chain: an image goes in, the encoder turns it into a small cloud of possible codes, one random code is drawn from the cloud, the decoder rebuilds an image from it, and a loss compares the rebuilt image with the original. **Generating** keeps only the decoder and feeds it a random code.
+
+<figure class="blog-figure blog-figure--wide">
+  <VaeArchitecture alt="Three glyph boxes, an encoder, mean and spread boxes, a noise draw, a two-dimensional code plane with a cloud and a sampled point, a decoder with sixteen hidden values, the rebuilt glyph, and the losses. Stepping lights each stage in order with its numbers. A toggle switches to the generating path, where only the decoder runs on a random code." />
+  <figcaption><strong>Figure 1. A VAE from input to output.</strong> Training: image → encoder → μ and σ → z = μ + σε → decoder → rebuilt image, scored by the reconstruction and KL losses. Switch to Generating to see the decoder alone turn a random code into a new glyph. All numbers come from the trained glyph model used later in this post; New ε draws a different random code.</figcaption>
+</figure>
+
+## Compression as a game of telephone
+
+Imagine describing a friend's face over the phone using only three numbers. You might say height of the forehead, width of the smile, darkness of the hair. Your listener draws a face from those three numbers. If the drawing looks like your friend, your three numbers were well chosen.
+
+An autoencoder is two networks playing this game:
+
+- The **encoder** reads the input $x$ and writes a short **code** $z$ (also called the **latent**, from the Latin for "hidden").
+- The **decoder** reads only $z$ and writes a rebuilt input $\hat x$ (x-hat).
+- The narrow middle is the **bottleneck**.
+
+Both are trained together on one goal: make $\hat x$ as close to $x$ as possible. The score for that is the **reconstruction loss**. For numbers it is usually the squared error from [the loss post](/blog/foundations-loss-gradient-descent/#losses-for-numbers-squared-and-absolute-error), added up over every entry:
+
+$$
+L_{\text{rec}} = \sum_{j} (\hat x_j - x_j)^2
+$$
+
+In words: for every entry of the input, take the gap between the rebuilt value and the true one, square it, and add them all.
+
+- $x_j$ is entry $j$ of the input (one pixel, one coordinate).
+- $\hat x_j$ is the decoder's version of that entry.
+- The sum runs over every entry.
+
+Everyday picture: you photocopy a page through a very narrow slot; the loss counts how far each letter of the copy is from the original. For black-and-white pixels, cross-entropy from [the loss post](/blog/foundations-loss-gradient-descent/#losses-for-choices-probabilities-and-cross-entropy) is the other common choice: each pixel becomes a yes-or-no guess.
+
+Notice there is no label anywhere. The data supplies its own answer key. That is why autoencoders were one of the first ways to learn useful features from unlabelled data: Hinton and Salakhutdinov showed in 2006 that a deep autoencoder could squeeze images of digits and faces to as few as **30** numbers and rebuild them better than the classic linear method we meet next.
+
+## A linear autoencoder by hand
+
+The smallest possible autoencoder: inputs are points on a flat page (two numbers each), the code is **one** number, and both halves are linear.
+
+Our six points are A(4, 3), B(3, 1), C(1, 2) and their mirror images (−4, −3), (−3, −1), (−1, −2). Their average is (0, 0), which keeps the arithmetic clean.
+
+**Encoder.** One weight per input coordinate, no bias:
+
+$$
+z = w_1 x_1 + w_2 x_2
+$$
+
+In words: the code is a weighted sum of the two coordinates. Take $w = (0.8, 0.6)$. This is an arrow of length 1, since $0.8^2 + 0.6^2 = 0.64 + 0.36 = 1$.
+
+**Decoder.** Multiply the code back out along the same arrow:
+
+$$
+\hat x = (z \times w_1,\ z \times w_2)
+$$
+
+In words: walk $z$ steps along the arrow $w$, starting from the origin.
+
+Everyday picture: the encoder is a sun overhead that casts each point's shadow onto a straight stick. The code is how far along the stick the shadow lands. The decoder can only put the point back somewhere on the stick.
+
+Work point B(3, 1):
+
+1. Encode: $z = 0.8 \times 3 + 0.6 \times 1 = 2.4 + 0.6 =$ **3**.
+2. Decode: $\hat x = (3 \times 0.8,\ 3 \times 0.6) = (2.4, 1.8)$.
+3. Error: $(2.4 - 3)^2 + (1.8 - 1)^2 = 0.36 + 0.64 =$ **1**.
+
+Point A(4, 3): $z = 3.2 + 1.8 = 5$, $\hat x = (4, 3)$, error **0**. A already sits on the stick. Point C(1, 2): $z = 0.8 + 1.2 = 2$, $\hat x = (1.6, 1.2)$, error $0.36 + 0.64 = 1$. The mirror points give the same errors, so the average over all six is $(0 + 1 + 1 + 0 + 1 + 1) / 6 =$ **0.667**.
+
+What if we pick a worse stick? With $w = (1, 0)$ (keep only the first coordinate), the errors are 9, 1, 4 for A, B, C, average **4.667**. With $w = (0, 1)$, average **8.667**. Training moves $w$ the way [gradient descent](/blog/foundations-loss-gradient-descent/#gradient-descent-in-two-dimensions) always does, toward the stick with the smallest average error.
+
+<figure class="blog-figure blog-figure--wide">
+  <BottleneckStepper alt="Six points on a grid and a stick through the origin. Step by step, one point's shadow drops onto the stick, its one-number code appears in a narrow bottleneck box, the decoder places the rebuilt point on the stick, and a dashed line shows the error with its squared length." />
+  <figcaption><strong>Figure 2. Squeeze to one number and back.</strong> Press Step to encode, decode and score each point. Turn the stick with the slider to see the average error change; "Best angle" jumps to the PCA direction.</figcaption>
+</figure>
+
+### The link to PCA
+
+The best stick is not a mystery. It is the direction along which the points are most spread out, called the first **principal component**; finding it is **principal component analysis** (PCA), a method from 1901. For our six points it is about $(0.816, 0.578)$, and its average error is **0.657**, just below our 0.667. Our hand-picked $(0.8, 0.6)$ was nearly optimal.
+
+This is a known result: a linear autoencoder with squared error, trained well, learns the same subspace as PCA. So a linear autoencoder adds nothing new. The interest starts when encoder and decoder are deep, nonlinear networks: then the "stick" can bend into a curve, which is what Hinton and Salakhutdinov's deep autoencoder did, and why it beat PCA on their images.
+
+## How big should the bottleneck be
+
+If the code is smaller than the input, the autoencoder is **undercomplete**. It cannot copy everything, so it must choose. That is the useful case.
+
+If the code is as large as the input or larger, it is **overcomplete**. Now there is a cheap way to score zero loss: copy the input through unchanged. Nothing is learned. Overcomplete autoencoders need some other pressure to stay useful.
+
+One such pressure is noise. A **denoising autoencoder** (Vincent and colleagues, 2008) corrupts the input before the encoder sees it, for example by setting a random fraction of the pixels to zero, but scores the decoder against the clean input. Copying no longer works, because the input it sees is wrong. To fill in the missing pixels it has to learn what real inputs look like. If you have read [the regularisation post](/blog/foundations-regularisation/), this is a close cousin of dropout, applied to the input.
+
+## The latent space and its holes
+
+Every input lands somewhere in the code space. With a two-number code, we can draw that space as a map, and each training example is a dot on it. This map is the **latent space**.
+
+Here is the question that matters for generation: what happens if we pick a point on that map that no training example landed on, and decode it?
+
+For a plain autoencoder, often nothing good. Training only ever asked the decoder to handle the codes of real examples. Nothing in the loss cares about the empty regions between them, so the decoder's output there is whatever its weights happen to produce: a smear, a blend of two shapes that matches neither, or noise. The encoder also has no reason to keep codes near the origin or packed together, so clusters can sit far apart with wide gaps. Those gaps are the **holes**.
+
+<figure class="blog-figure blog-figure--wide">
+  <LatentHoleMap alt="A two-dimensional map of codes from a tiny autoencoder trained on 5 by 5 glyphs. Each training glyph is a coloured dot in a tight cluster. Clicking anywhere decodes that point into a 5 by 5 glyph shown at the side, with its distance to the nearest real glyph. Clicks between clusters give blurred, broken glyphs." />
+  <figcaption><strong>Figure 3. Decode this point.</strong> A plain autoencoder, two-number code, trained on twelve 5 × 5 glyphs (seeded). Click inside a cluster: a clean glyph. Click in a gap: garbage. Switch to the VAE (same network, trained with the VAE loss) and click the same spots. Over 200 random draws from N(0, 1), a plain-autoencoder draw decodes on average 2.43 squared pixels from the nearest real glyph; a VAE draw only 0.52.</figcaption>
+</figure>
+
+So a plain autoencoder is a good compressor and a bad generator. To generate, we need a code space where every reasonable point decodes to something real, and we need to know which points are "reasonable" so we can pick them at random. The VAE solves both.
+
+## The VAE idea: codes as little clouds
+
+Kingma and Welling (2013, published at ICLR 2014) and, independently, Rezende, Mohamed and Wierstra (2014) proposed the same fix from a probabilistic angle. The intuition is simple.
+
+Instead of mapping an input to one point, the encoder maps it to a small **cloud**: a bell curve with a centre and a width. For each code number it outputs two things:
+
+- $\mu$ (mu), the **mean**: where the cloud is centred.
+- $\sigma$ (sigma), the **spread**, or standard deviation: how wide it is.
+
+During training we do not decode the centre. We draw a random point from the cloud and decode that. The decoder must therefore rebuild the input well from *any* point near $\mu$, not just $\mu$ itself.
+
+Everyday picture: instead of marking your house on a map with a pin, you mark it with a coin. Anyone who lands anywhere under the coin must still find your house. Neighbouring coins overlap, so the region between two houses is covered by both, and the decoder learns to make sensible in-between outputs there. The holes start to fill.
+
+But the encoder could cheat: make every cloud tiny ($\sigma$ near 0, back to a pin) or spread clouds far apart. A second loss term stops both, and we will reach it after one technical problem.
+
+## Sampling with the reparameterisation trick
+
+Training needs a gradient for $\mu$ and $\sigma$. But "draw a random point from the cloud" is not a calculation with a slope. If a dice roll sits in the middle of the network, backpropagation has nothing to differentiate.
+
+The trick is to move the randomness out of the way. Draw plain noise from a fixed bell curve first, then shift and stretch it:
+
+$$
+z = \mu + \sigma \times \varepsilon, \qquad \varepsilon \sim \mathcal{N}(0, 1)
+$$
+
+In words: take a standard random number, stretch it by the spread, and slide it to the centre.
+
+- $\varepsilon$ (epsilon) is a random number from the **standard normal** bell curve $\mathcal{N}(0, 1)$: centred at 0, spread 1. About two thirds of draws fall between −1 and 1.
+- $\sigma \times \varepsilon$ stretches it to the right width.
+- Adding $\mu$ moves it to the right place.
+- $\mathcal{N}(\mu, \sigma^2)$ is the bell curve with centre $\mu$ and spread $\sigma$; $z$ is a sample from it.
+
+Everyday picture: a dart thrower with a fixed wobble. The wobble ($\varepsilon$) is the thrower's own; you only choose where to aim ($\mu$) and how far back to stand ($\sigma$). Once the dart lands, you can say exactly how moving the aim would have moved it.
+
+Worked example. Take $\mu = 0.8$, $\sigma = 0.5$, and suppose the draw is $\varepsilon = -0.6$.
+
+1. Stretch: $0.5 \times (-0.6) = -0.3$.
+2. Shift: $z = 0.8 + (-0.3) =$ **0.5**.
+
+Now the gradient. Use the simplest decoder, $\hat x = z$, with target $x = 1$, and loss $(z - 1)^2$.
+
+3. Loss slope at $z$: $2 \times (0.5 - 1) =$ **−1**.
+4. Since $z = \mu + \sigma \varepsilon$, nudging $\mu$ by a little moves $z$ by the same amount. So the slope for $\mu$ is $-1 \times 1 =$ **−1**.
+5. Nudging $\sigma$ moves $z$ by $\varepsilon$ times as much. So the slope for $\sigma$ is $-1 \times (-0.6) =$ **0.6**.
+6. A gradient step with learning rate 0.1: $\mu \to 0.8 - 0.1 \times (-1) =$ **0.9**, $\sigma \to 0.5 - 0.1 \times 0.6 =$ **0.44**.
+
+The centre moved toward the target, and the cloud shrank, because this particular draw landed on the wrong side. Change $\varepsilon$ to $+0.6$ and $z = 1.1$, overshooting the target: the slope for $\sigma$ is again positive, $2 \times 0.1 \times 0.6 = 0.12$. Reconstruction alone *always* wants a smaller cloud. Keep that in mind.
+
+The randomness $\varepsilon$ is treated as a fixed input, like data. Every arrow from the loss back to $\mu$ and $\sigma$ is ordinary multiplication and addition, so backpropagation from [the first post](/blog/foundations-neurons-backprop/) works unchanged. The Mimi codec uses exactly this line, per channel, for its 32 latent channels ([Mimi post](/blog/mimi-codec-explained/#the-bottleneck-continuous-and-regularized)).
+
+<figure class="blog-figure blog-figure--wide">
+  <ReparamStepper alt="A small graph: boxes for mu, sigma and a dice labelled epsilon feed a multiply node and an add node that produce z, then the loss. Steps draw epsilon, multiply, add, compute the loss, then light up the gradient path backward through add and multiply to mu and sigma, while the dice path stays grey." />
+  <figcaption><strong>Figure 4. Moving the dice out of the way.</strong> Step through one sample and one backward pass. The gradient reaches μ and σ; it never needs to pass through the random draw.</figcaption>
+</figure>
+
+## The KL term: keeping clouds near the middle
+
+Now the second loss term. We want every cloud to stay close to one shared reference cloud, the standard normal $\mathcal{N}(0, 1)$, called the **prior**. This does two jobs: it keeps the clouds wide (no pins) and keeps them near the origin (no far-flung clusters). If every input's cloud roughly overlaps the standard normal, then the whole latent space is covered, and a random draw from $\mathcal{N}(0, 1)$ lands in a region the decoder knows.
+
+We need a number that says how different two bell curves are. That number is the **Kullback-Leibler divergence**, or KL divergence, after Solomon Kullback and Richard Leibler.
+
+### KL in plain words
+
+KL asks: if points really come from cloud $q$, how surprised would someone be, on average, who believed they came from cloud $p$ instead? It is the average, over samples from $q$, of the log of how much more likely $q$ says each sample is than $p$ does:
+
+$$
+\mathrm{KL}(q \Vert p) = \text{average over } z \text{ from } q \text{ of } \ln \frac{q(z)}{p(z)}
+$$
+
+- $q(z)$ is the height of the encoder's bell curve at $z$; $p(z)$ is the height of the standard normal at $z$.
+- $\ln$ is the natural logarithm. Where the two heights agree, the ratio is 1 and $\ln 1 = 0$: no surprise.
+
+It is **0** exactly when the two curves are identical, and positive otherwise. It is not symmetric: $\mathrm{KL}(q \Vert p)$ and $\mathrm{KL}(p \Vert q)$ usually differ.
+
+### The formula for one-number codes
+
+For two bell curves, that average can be done once, with algebra, and the result is short. The log of a bell curve's height is a constant minus a squared distance:
+
+$$
+\ln q(z) = -\ln \sigma - \frac{(z-\mu)^2}{2\sigma^2} + c, \qquad \ln p(z) = -\frac{z^2}{2} + c
+$$
+
+where $c$ is the same constant in both. Subtract, and average over $z$ drawn from $q$. Two facts do the work: on average $(z - \mu)^2$ is $\sigma^2$ (that is what spread means), and on average $z^2$ is $\mu^2 + \sigma^2$ (the squared centre plus the spread). So
+
+$$
+\mathrm{KL} = -\ln \sigma - \frac{1}{2} + \frac{\mu^2 + \sigma^2}{2} = \frac{1}{2}\Big(\mu^2 + \sigma^2 - \ln \sigma^2 - 1\Big)
+$$
+
+In words: half of (centre squared, plus spread squared, minus the log of spread squared, minus one).
+
+- $\mu^2$ is the **off-centre penalty**: it grows as the cloud drifts from 0.
+- $\sigma^2 - \ln \sigma^2 - 1$ is the **width penalty**. It is exactly 0 at $\sigma = 1$, grows when the cloud is too wide (the $\sigma^2$ part) and grows fast when it is too narrow (the $-\ln \sigma^2$ part shoots up as $\sigma$ approaches 0). A pin, $\sigma = 0$, costs infinitely much.
+
+With a code of many numbers, each channel gets its own $\mu$ and $\sigma$ and the KL is the sum over channels. This is the formula in the [Mimi post](/blog/mimi-codec-explained/#the-bottleneck-continuous-and-regularized), summed over its 32 channels.
+
+### Worked for a few clouds
+
+| $\mu$ | $\sigma$ | $\mu^2$ | $\sigma^2$ | $-\ln \sigma^2$ | bracket | KL |
+|---|---|---|---|---|---|---|
+| 0 | 1 | 0 | 1 | 0 | $0 + 1 + 0 - 1 = 0$ | **0** |
+| 2 | 1 | 4 | 1 | 0 | $4 + 1 + 0 - 1 = 4$ | **2** |
+| 0 | 0.5 | 0 | 0.25 | 1.386 | $0.25 + 1.386 - 1 = 0.636$ | **0.318** |
+| 0 | 2 | 0 | 4 | −1.386 | $4 - 1.386 - 1 = 1.614$ | **0.807** |
+| 1 | 0.5 | 1 | 0.25 | 1.386 | $1 + 0.25 + 1.386 - 1 = 1.636$ | **0.818** |
+| 0 | 0.1 | 0 | 0.01 | 4.605 | $0.01 + 4.605 - 1 = 3.615$ | **1.808** |
+
+Read down the table. Moving the centre to 2 costs 2. Halving the width costs 0.318, doubling it costs 0.807, and squeezing it to a tenth costs 1.808, more than moving it off-centre by $\sqrt{3.6} \approx 1.9$ would. Narrow clouds are expensive.
+
+<figure class="blog-figure blog-figure--wide">
+  <KlCalculator alt="Two bell curves on one axis: the standard normal in grey and an encoder cloud in colour, with sliders for its centre and spread. Below, the KL formula fills in term by term with the current numbers, and a shaded band shows where the coloured curve is higher than the grey one." />
+  <figcaption><strong>Figure 5. How far is this cloud from the standard normal?</strong> Drag μ and σ and watch each term of the bracket. Presets load the six rows of the table.</figcaption>
+</figure>
+
+## The VAE loss and its tug of war
+
+Put the two terms together. For one input:
+
+$$
+L = L_{\text{rec}} + \beta \times \mathrm{KL}
+$$
+
+In words: rebuild well, and keep your cloud close to the standard normal; $\beta$ (beta) sets how much the second matters. The original VAE uses $\beta = 1$. (Formally, this sum is the negative of the **evidence lower bound**, or ELBO, which Kingma and Welling derive from probability theory; we skip that derivation here.)
+
+The two terms pull in opposite directions. Reconstruction wants pins: a tiny $\sigma$ means the decoder always sees nearly the same $z$, so it can rebuild precisely. KL wants every cloud to be the standard normal, which would make all inputs look the same to the decoder.
+
+A toy where we can see the whole tug of war: a one-number code, the decoder $\hat x = z$, target $x = 1$, squared error. Averaged over the random $\varepsilon$, the reconstruction loss has a closed form:
+
+$$
+\text{average } L_{\text{rec}} = (\mu - x)^2 + \sigma^2
+$$
+
+In words: the error of the centre, plus the extra error from wobbling around it. Check at $\mu = 0.8$, $\sigma = 0.5$: $(0.8 - 1)^2 + 0.25 = 0.04 + 0.25 =$ **0.29**. The KL for that cloud is $\frac{1}{2}(0.64 + 0.25 + 1.386 - 1) =$ **0.638**. Total at $\beta = 1$: **0.928**.
+
+Setting both slopes to zero gives the best cloud for any $\beta$: $\mu = 2x / (2 + \beta)$ and $\sigma^2 = \beta / (2 + \beta)$.
+
+| $\beta$ | best $\mu$ | best $\sigma$ | reconstruction | KL |
+|---|---|---|---|---|
+| 0 | 1 | 0 | 0 | infinite |
+| 0.5 | 0.8 | 0.447 | 0.24 | 0.725 |
+| 1 | 0.667 | 0.577 | 0.444 | 0.438 |
+| 4 | 0.333 | 0.816 | 1.111 | 0.092 |
+| 20 | 0.091 | 0.953 | 1.736 | 0.006 |
+
+At $\beta = 0$ the VAE becomes a plain autoencoder: a pin exactly on the target. As $\beta$ grows the cloud slides to 0 and widens to 1, and the code tells the decoder less and less about $x$.
+
+<figure class="blog-figure blog-figure--wide">
+  <VaeCloudExplorer alt="A number line with the target x marked, a coloured bell curve for the encoder's cloud and twenty sampled points drawn from it as dots, each with its decoded value and error. Sliders for mu, sigma and beta. Live readouts show average reconstruction loss, KL and total, with a marker for the best cloud at this beta." />
+  <figcaption><strong>Figure 6. One cloud, two pulls.</strong> Toy: one-number code, decoder x̂ = z, target 1. Drag μ and σ to minimise the total; then press "Jump to best" and change β.</figcaption>
+</figure>
+
+<figure class="blog-figure blog-figure--wide">
+  <BetaTradeoff alt="A curve of reconstruction loss against KL traced out as beta goes from 0 to 20, with a dot that moves along it as a beta slider changes, and the best cloud drawn beside it." />
+  <figcaption><strong>Figure 7. The price of a tidy space.</strong> Each point is the best cloud for one β in the toy above. Lower left is impossible: you cannot have both a perfect rebuild and zero KL.</figcaption>
+</figure>
+
+### Turning beta up: β-VAE
+
+Higgins and colleagues (2017) studied $\beta > 1$ on purpose and called it the **β-VAE**. A strong pull toward independent standard normals pushes the model to use each code number for one separate factor of the data (in their image examples, things like position, size or rotation), which they call a **disentangled** code. The price is blurrier reconstructions, the same trade we saw in the table.
+
+### Turning it too far: posterior collapse
+
+The extreme of that table has a name. If the decoder is powerful enough to produce good outputs without help, for example a language model that predicts each word from the previous words, the cheapest solution is to set every cloud to exactly $\mathcal{N}(0, 1)$, pay zero KL, and let the decoder ignore $z$ completely. The code then carries no information. This is **posterior collapse** ("posterior" is the formal name for the encoder's cloud). Bowman and colleagues (2016) hit it when training VAEs on sentences, and countered it by starting with $\beta = 0$ and raising it slowly during training (KL annealing), and by dropping some of the decoder's input words so it had to rely on $z$.
+
+This is a different failure from the one in [Zero loss, empty representation](/blog/representation-collapse-explained/). There, an encoder outputs the same vector for every input because the training objective allows it. Here the encoder's clouds all match the prior and the decoder stops listening. Both end with a code that says nothing about its input, but the mechanism differs.
+
+## Generating new things
+
+Once trained, the VAE's encoder can be set aside. To make something new:
+
+1. Draw $z$ from the prior, $\mathcal{N}(0, 1)$ in every code number.
+2. Decode it.
+
+That is the whole generator. It works because the KL term made the encoder's clouds, put together, cover roughly the region where the prior puts its draws. A plain autoencoder offers no such promise: there is no known distribution to draw from, and draws land in holes.
+
+When the VAE is used purely as a compressor, as in a codec, the noise is not needed after training: the encoder's mean $\mu$ is used as the code. That is what the Mimi post describes for the Pocket TTS codec: "At inference the noise is dropped and the mean is used."
+
+## Walking between two codes
+
+A good latent space lets you walk from one code to another and see a smooth change. Take the codes of two inputs, $z_A$ and $z_B$, and decode points on the straight line between them:
+
+$$
+z(t) = (1 - t) \times z_A + t \times z_B
+$$
+
+In words: at $t = 0$ you are at A, at $t = 1$ at B, and in between you are that fraction of the way along.
+
+- $t$ is a number from 0 to 1, how far along the line you are.
+
+Example with two-number codes $z_A = (-1.2, 0.4)$ and $z_B = (1.0, -0.8)$. At $t = 0.25$: $0.75 \times (-1.2) + 0.25 \times 1.0 = -0.9 + 0.25 = -0.65$, and $0.75 \times 0.4 + 0.25 \times (-0.8) = 0.3 - 0.2 = 0.1$, so $z = (-0.65, 0.1)$. At $t = 0.5$: $(-0.1, -0.2)$. At $t = 0.75$: $(0.45, -0.5)$.
+
+In a VAE the decoded steps change gradually from A to B, through blends of the two. A plain autoencoder makes no such promise. In the toy of Figure 8 its steps snap from one shape to the other with no in-between at all, because its codes sit far apart and the decoder draws a sharp border between them; in other models the middle of the line can land in a hole and decode to garbage. The same straight-line idea, between noise and a real latent, is the backbone of [flow matching in the Pocket TTS post](/blog/pocket-tts-calm-explained/#the-straight-line-path).
+
+<figure class="blog-figure blog-figure--wide">
+  <LatentInterpolationStrip alt="Two rows of nine 5 by 5 glyphs: the decoded points along a straight line between the codes of two training glyphs. The top row comes from the plain autoencoder and switches abruptly between the two shapes; the bottom row comes from the VAE and passes through a blend. A slider moves a marker along the line and prints its coordinates." />
+  <figcaption><strong>Figure 8. Walking across the map.</strong> The same two glyphs, the same straight line, two models. On this toy the plain autoencoder snaps from one shape to the other; the VAE passes through a soft blend. Pick any two glyphs as the endpoints.</figcaption>
+</figure>
+
+## The discrete cousin: VQ-VAE
+
+There is a second way to tidy a code space: forbid in-between values altogether. The **vector-quantised VAE** (VQ-VAE) of van den Oord, Vinyals and Kavukcuoglu (2017) keeps a **codebook**, a short list of learned vectors, and replaces each encoder output with the nearest entry. The code is then a list of whole numbers (which entries were picked), and generation is done by a separate model that predicts those numbers, like predicting words.
+
+Rounding to the nearest entry has no useful slope, so VQ-VAE passes the decoder's gradient straight through the rounding step to the encoder. All of this, plus the residual version that stacks several codebooks, is built step by step in [the RVQ post](/blog/residual-vector-quantization/), including [the straight-through trick](/blog/residual-vector-quantization/#the-straight-through-trick).
+
+## Latent spaces in speech
+
+Both kinds of bottleneck appear in Richard's speech posts.
+
+- **Original Mimi** (the codec in Moshi) quantises. Each 12.5-per-second frame becomes a list of integers from a residual vector quantiser with codebooks of **2,048** entries, and Moshi uses 8 of them ([Mimi post](/blog/mimi-codec-explained/#the-bottleneck-continuous-and-regularized)). This is the VQ-VAE family.
+- **The Pocket TTS codec** (the CALM speech VAE) is a VAE. Its encoder outputs a mean and spread for each of **32** channels, it is trained with the reparameterisation line and the KL formula from this post, and the KL weight is small (the CALM paper lists **0.01**), so the prior shapes the space without overriding reconstruction. One second of speech becomes $12.5 \times 32 = 400$ numbers ([Mimi post](/blog/mimi-codec-explained/#a-second-of-sound-and-why-it-is-too-long)).
+- **Pocket TTS** then predicts those continuous 32-number latents one frame at a time, starting each from Gaussian noise ([Pocket TTS post](/blog/pocket-tts-calm-explained/#the-continuous-alternative)). The Mimi post spells out why the VAE matters: generation "is easiest when latents themselves live in a compact, roughly Gaussian cloud with no holes, which is what the KL term encourages." That is exactly the hole-filling of Figure 3, in 32 dimensions.
+
+## Counting the parameters
+
+A VAE is two ordinary networks, so its count is the sum of their [dense layers](/blog/foundations-neurons-backprop/#counting-the-parameters), each $n_{\text{in}} \times n_{\text{out}} + n_{\text{out}}$. The one twist is the encoder's last layer: for a code of $k$ numbers it outputs $2k$, a mean and a log-variance for each.
+
+The glyph model of [Figure 1](#the-whole-model-at-a-glance), with a 2-number code:
+
+- Encoder: $25 \to 16$ is $25 \times 16 + 16 = 416$; $16 \to 4$ is $16 \times 4 + 4 = 68$. Total **484**.
+- Decoder: $2 \to 16$ is $2 \times 16 + 16 = 48$; $16 \to 25$ is $16 \times 25 + 25 = 425$. Total **473**.
+
+```python
+import torch.nn as nn
+
+count = lambda m: sum(p.numel() for p in m.parameters())
+# the encoder outputs 4 numbers: μ and log-variance for each of 2 codes
+encoder = nn.Sequential(nn.Linear(25, 16), nn.Tanh(), nn.Linear(16, 4))
+decoder = nn.Sequential(nn.Linear(2, 16), nn.Tanh(),
+                        nn.Linear(16, 25), nn.Sigmoid())
+print("encoder", count(encoder), "decoder", count(decoder))
+print("total", count(encoder) + count(decoder))
+```
+
+It prints:
+
+```text
+encoder 484 decoder 473
+total 957
+```
+
+The sampling step $z = \mu + \sigma \varepsilon$ has no parameters. After training only the decoder is needed to generate, so the model you ship is the 473.
+
+## What to remember
+
+- An autoencoder is an encoder, a narrow code and a decoder, trained to rebuild its input. The data is its own answer key.
+- A linear autoencoder with squared error learns the same direction as PCA; depth and nonlinearity let the code bend.
+- An overcomplete autoencoder can just copy; noise (denoising) or a narrow bottleneck forces it to learn structure.
+- A plain autoencoder's latent space has holes: decoding a random point can give garbage.
+- A VAE encodes each input as a cloud with centre $\mu$ and spread $\sigma$, and samples $z = \mu + \sigma \times \varepsilon$ so gradients flow to both.
+- The KL term, $\frac{1}{2}(\mu^2 + \sigma^2 - \ln \sigma^2 - 1)$ per number, pulls each cloud toward $\mathcal{N}(0, 1)$, filling the holes. $\beta$ sets the trade against reconstruction; too much invites posterior collapse.
+- To generate, decode a draw from $\mathcal{N}(0, 1)$. VQ-VAE swaps the clouds for a codebook; Pocket TTS's codec is a continuous VAE, original Mimi a quantised one.
+
+## Try it yourself
+
+- **Figure 2.** Set the stick angle to 36.87° (the arrow (0.8, 0.6)) and press Step three times on point B: code **3**, rebuilt point **(2.4, 1.8)**, error **1**. The average over all six points shows **0.667**. Press "Best angle": about 35.3°, average **0.657**. Set the angle to 0°: average **4.667**.
+- **Figure 4.** With μ = 0.8, σ = 0.5 and ε fixed at −0.6, step through: z = **0.5**, loss slope **−1**, slope for μ **−1**, slope for σ **0.6**, and after one update μ = **0.9**, σ = **0.44**. Set ε = 0.6: z = **1.1**, slope for σ **0.12**.
+- **Figure 5.** Load μ = 0, σ = 0.1: KL **1.808**. Then μ = 1, σ = 0.5: KL **0.818**.
+- **Figure 6.** At μ = 0.8, σ = 0.5, β = 1, read reconstruction **0.29**, KL **0.638**, total **0.928**. Press "Jump to best": μ **0.667**, σ **0.577**, total **0.882**. Set β = 4 and jump again: μ **0.333**, σ **0.816**.
+- **Figure 3.** Press "Decode 5 random draws" with the plain model, then with the VAE. The plain model's draws mostly land in holes (distances above 1.5); the VAE's mostly decode to real glyphs. The averages over 200 draws are **2.43** and **0.52**.
+
+## Sources
+
+- Hinton, G. E. and Salakhutdinov, R. R. (2006). "Reducing the dimensionality of data with neural networks." *Science* 313 (5786): 504 to 507.
+- Vincent, P., Larochelle, H., Bengio, Y. and Manzagol, P.-A. (2008). "Extracting and composing robust features with denoising autoencoders." *Proceedings of ICML 2008*.
+- Kingma, D. P. and Welling, M. (2014). "Auto-encoding variational Bayes." *ICLR 2014*. arXiv:1312.6114.
+- Rezende, D. J., Mohamed, S. and Wierstra, D. (2014). "Stochastic backpropagation and approximate inference in deep generative models." *ICML 2014*. arXiv:1401.4082.
+- Higgins, I., Matthey, L., Pal, A., Burgess, C., Glorot, X., Botvinick, M., Mohamed, S. and Lerchner, A. (2017). "β-VAE: Learning basic visual concepts with a constrained variational framework." *ICLR 2017*.
+- van den Oord, A., Vinyals, O. and Kavukcuoglu, K. (2017). "Neural discrete representation learning." *NeurIPS 2017*. arXiv:1711.00937.
+- Bowman, S. R., Vilnis, L., Vinyals, O., Dai, A. M., Jozefowicz, R. and Bengio, S. (2016). "Generating sentences from a continuous space." *CoNLL 2016*. arXiv:1511.06349.
+- Pearson, K. (1901). "On lines and planes of closest fit to systems of points in space." *Philosophical Magazine* 2 (11): 559 to 572. (PCA.)
+- Kullback, S. and Leibler, R. A. (1951). "On information and sufficiency." *Annals of Mathematical Statistics* 22 (1): 79 to 86.
+

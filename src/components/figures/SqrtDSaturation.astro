@@ -1,0 +1,62 @@
+---
+// Foundations, attention post: dot products of random vectors of length d
+// spread out like √d; dividing by √d brings the spread back to about 1 and
+// stops softmax from snapping to one winner. Seeded draws (mulberry32 7).
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-sqrtd>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 270" role="img" aria-labelledby="sq-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="sq-title">A histogram of dot products widening with vector length, and softmax weights saturating unless scaled</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Vector length d <strong data-vd></strong></span><input class="scrub" data-d type="range" min="0" max="8" step="1" value="2" /></label>
+    <div><span class="fig-panel__name">Divide by √d</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-s="0" aria-pressed="true">Off</button>
+      <button type="button" class="fig-chip" data-s="1" aria-pressed="false">On</button>
+    </div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt } from "../../lib/tiny-net";
+  import { INK, MUTED, GOLD, JADE, NEG } from "../../lib/net-diagram";
+  import { txt } from "../../lib/plot";
+  import { dot, softmax, normals } from "../../lib/attention";
+  const DS = [1, 2, 4, 8, 16, 32, 64, 128, 256], N = 2000;
+  // Precompute, per d, 2,000 dot products and one query with three keys.
+  const DATA = DS.map((d) => {
+    const g = normals(7 + d), vec = () => Array.from({ length: d }, g);
+    const dots = Array.from({ length: N }, () => dot(vec(), vec()));
+    const q = vec(), ks = [vec(), vec(), vec()];
+    return { d, dots, scores: ks.map((k) => dot(q, k)) };
+  });
+  const std = (v: number[]) => { const m = v.reduce((a, b) => a + b, 0) / v.length; return Math.sqrt(v.reduce((a, b) => a + (b - m) ** 2, 0) / v.length); };
+  document.querySelectorAll<HTMLElement>("[data-sqrtd]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    let di = 2, scale = false;
+    const set = (i: number, sc: boolean) => { di = i; scale = sc; $<HTMLInputElement>("[data-d]").value = String(i); root.querySelectorAll("[data-s]").forEach((o) => o.setAttribute("aria-pressed", String((o as HTMLElement).dataset.s === (sc ? "1" : "0")))); };
+    const view = () => { const D = DATA[di], f = scale ? Math.sqrt(D.d) : 1; const dots = D.dots.map((v) => v / f), sc = D.scores.map((v) => v / f); return { D, dots, sc, w: softmax(sc), sd: std(dots) }; };
+    const steps = () => [[2, false, "d = 4: dot products of random vectors spread about 2 either side of zero."], [6, false, "d = 64: the spread is about 8. Softmax now sees big differences and gives almost all its weight to one token."], [6, true, "Divide by √64 = 8: the spread is back to about 1 and the weights are a gentle mix again."], [8, true, "d = 256, scaled: still a spread of about 1. The vector length no longer decides how sharp attention is."]].map(([i, sc, say]) => ({ say: say as string, math: "", enter: () => set(i as number, sc as boolean) }))
+      .map((s0, n) => ({ ...s0, get math() { const v = view(); return `spread of the dot products: ${fmt(v.sd, 2)}  (√d = ${fmt(Math.sqrt(DATA[di].d), 2)})\none query, three keys: scores ${v.sc.map((x) => fmt(x, 2)).join(", ")} → softmax ${v.w.map((x) => fmt(x, 3)).join(", ")}`; } }));
+    function draw() {
+      const v = view(), lim = 40, bins = 40, hist = Array(bins).fill(0);
+      v.dots.forEach((x) => { const b = Math.floor(((x + lim) / (2 * lim)) * bins); if (b >= 0 && b < bins) hist[b]++; });
+      const top = Math.max(...hist);
+      let s = txt(30, 20, `2,000 dot products of random vectors, d = ${v.D.d}${scale ? ", divided by √d" : ""}`, `font-size="12" font-weight="700" fill="${INK}"`);
+      hist.forEach((c, b) => (s += `<rect x="${30 + b * 10}" y="${200 - (c / top) * 160}" width="9" height="${(c / top) * 160}" fill="${JADE}" fill-opacity="0.7"/>`));
+      s += `<line x1="30" x2="430" y1="200" y2="200" stroke="#cfd5d4"/>` + [-40, -20, 0, 20, 40].map((x) => txt(30 + ((x + lim) / (2 * lim)) * 400, 216, String(x), `font-size="10" text-anchor="middle" fill="${MUTED}"`)).join("");
+      s += txt(30, 244, `spread ${fmt(v.sd, 2)}, √d = ${fmt(Math.sqrt(v.D.d), 2)}`, `font-size="13" font-weight="700" fill="${INK}"`);
+      s += txt(480, 20, "Softmax over three scores (one random draw)", `font-size="12" font-weight="700" fill="${INK}"`);
+      v.w.forEach((w, j) => (s += `<rect x="${490 + j * 80}" y="${200 - w * 150}" width="56" height="${w * 150}" fill="${w > 0.95 ? NEG : GOLD}" fill-opacity="0.85"/>` + txt(518 + j * 80, 216, fmt(w, 3), `font-size="12" font-weight="700" text-anchor="middle" fill="${INK}"`) + txt(518 + j * 80, 232, `score ${fmt(v.sc[j], 2)}`, `font-size="10" text-anchor="middle" fill="${MUTED}"`)));
+      s += txt(480, 256, Math.max(...v.w) > 0.95 ? "Saturated: one weight is almost 1, gradients vanish." : "A gentle mix: gradients flow.", `font-size="11.5" font-weight="700" fill="${Math.max(...v.w) > 0.95 ? NEG : JADE}"`);
+      $("[data-draw]").innerHTML = s;
+      $("[data-vd]").textContent = String(v.D.d);
+    }
+    const redraw = stepper(root, steps, draw, { delay: 2.4 });
+    $<HTMLInputElement>("[data-d]").addEventListener("input", (e) => { di = +(e.target as HTMLInputElement).value; redraw(); });
+    root.querySelectorAll<HTMLButtonElement>("[data-s]").forEach((b) => b.addEventListener("click", () => { scale = b.dataset.s === "1"; root.querySelectorAll("[data-s]").forEach((o) => o.setAttribute("aria-pressed", String(o === b))); redraw(); }));
+  });
+</script>

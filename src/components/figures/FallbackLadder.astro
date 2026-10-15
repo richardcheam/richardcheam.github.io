@@ -1,0 +1,77 @@
+---
+// Whisper review, Figure 4: temperature fallback (Sec 4.5, pp. 12 to 13).
+// Decode at T = 0; if the gzip-style compression ratio is above 2.4 or the
+// average log probability is below -1, raise T by 0.2 and try again, up to 1.0.
+// The ratio is computed live with the browser's zlib ("deflate"), as in the
+// released code. Candidate texts and token probabilities are toy values.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram fbl" role="region" aria-label={alt} data-fbl>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 380" role="img" aria-labelledby="fbl-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="fbl-title">A decoding attempt climbing the temperature ladder until its output passes two checks</title>
+    <g data-ladder></g>
+    <text data-r1 x="20" y="330" font-size="12.5" font-weight="700" fill="#2b2b30"></text>
+    <text data-r2 x="20" y="352" font-size="11.5" fill="#5f5f66"></text>
+    <text data-r3 x="20" y="372" font-size="11.5" fill="#5f5f66"></text>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Check any text's compression ratio</span><input class="fig-text" data-in type="text" value="thank you thank you thank you thank you thank you thank you thank you thank you" /></label>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<style>
+  .fbl .fig-text { font: inherit; font-size: 0.88rem; padding: 0.2rem 0.45rem; border: 1px solid var(--line, #d5d5dc); border-radius: 4px; background: transparent; color: inherit; width: 30rem; max-width: 100%; }
+</style>
+
+<script>
+  import { setupFigure, wait } from "../../lib/figure-motion";
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-fbl]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const mk = (g: Element, tag: string, a: Record<string, string | number>, txt?: string) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, String(a[k])); if (txt !== undefined) e.textContent = txt; g.append(e); return e; };
+    const zlibLen = async (s: string) => {
+      if (!("CompressionStream" in window)) return NaN;
+      const cs = new Blob([new TextEncoder().encode(s)]).stream().pipeThrough(new (window as any).CompressionStream("deflate"));
+      return (await new Response(cs).arrayBuffer()).byteLength;
+    };
+    const ratio = async (s: string) => new TextEncoder().encode(s).length / (await zlibLen(s));
+    const RUNGS = [
+      { T: 0.0, text: "so the plan is so the plan is so the plan is so the plan is so the plan is so the plan is so the plan is so the plan is", p: [0.9, 0.9, 0.9, 0.9] },
+      { T: 0.2, text: "so the plan is to, uh, move the meeting to Thursday", p: [0.5, 0.1, 0.3, 0.6] },
+      { T: 0.4, text: "so the plan is to move the meeting to Thursday", p: [0.7, 0.5, 0.6, 0.8] },
+    ];
+    const avg = (p: number[]) => p.reduce((a, b) => a + Math.log(b), 0) / p.length;
+    let at = 3, ratios: number[] = [];
+    async function compute() { ratios = await Promise.all(RUNGS.map((r) => ratio(r.text))); }
+    function draw() {
+      const g = $("[data-ladder]"); g.replaceChildren();
+      mk(g, "text", { x: 20, y: 20, "font-size": 11.5, "font-weight": 700, fill: "#2b2b30" }, "Temperature");
+      mk(g, "text", { x: 470, y: 20, "font-size": 11.5, "font-weight": 700, fill: "#2b2b30" }, "ratio (alarm > 2.4)");
+      mk(g, "text", { x: 620, y: 20, "font-size": 11.5, "font-weight": 700, fill: "#2b2b30" }, "avg log p (alarm < −1)");
+      [0, 0.2, 0.4, 0.6, 0.8, 1.0].forEach((T, k) => {
+        const y = 300 - k * 46;
+        mk(g, "line", { x1: 20, x2: 760, y1: y + 18, y2: y + 18, stroke: "#f2f2f5" });
+        mk(g, "text", { x: 20, y: y + 6, "font-size": 13, "font-weight": 700, fill: k < at ? "#2b2b30" : "#c9c9d0", "font-family": "ui-monospace, monospace" }, T.toFixed(1));
+        const r = RUNGS[k];
+        if (r && k < at) {
+          const cr = ratios[k], lp = avg(r.p), okR = cr <= 2.4, okL = lp >= -1, pass = okR && okL;
+          mk(g, "text", { x: 70, y: y + 6, "font-size": 11, fill: "#2b2b30" }, r.text.length > 60 ? r.text.slice(0, 58) + "…" : r.text);
+          mk(g, "text", { x: 470, y: y + 6, "font-size": 13, "font-weight": 700, fill: okR ? "#4F5D3A" : "#a33b3b", "font-family": "ui-monospace, monospace" }, isNaN(cr) ? "n/a" : cr.toFixed(2));
+          mk(g, "text", { x: 620, y: y + 6, "font-size": 13, "font-weight": 700, fill: okL ? "#4F5D3A" : "#a33b3b", "font-family": "ui-monospace, monospace" }, lp.toFixed(2));
+          mk(g, "text", { x: 720, y: y + 6, "font-size": 12, "font-weight": 700, fill: pass ? "#4F5D3A" : "#a33b3b" }, pass ? "keep" : "retry");
+          if (r.T < 0.5) mk(g, "text", { x: 70, y: y + 20, "font-size": 9.5, fill: "#5f5f66" }, "previous text used (T < 0.5)");
+        }
+      });
+      $("[data-r1]").textContent = at >= 3 ? "Kept at T = 0.4: the loop at 0.0 compressed too well, the guess at 0.2 was too unsure." : "";
+      const p = RUNGS[1].p;
+      $("[data-r2]").textContent = `At 0.2: average of ln ${p.join(", ln ")} = ${avg(p).toFixed(2)}, below −1.`;
+      $("[data-r3]").textContent = "Ratios use your browser's zlib on UTF-8 bytes, like the released code. Texts and probabilities are toy values.";
+    }
+    const inp = $<HTMLInputElement>("[data-in]");
+    const own = async () => { const r = await ratio(inp.value), g = $("[data-ladder]"); g.querySelector("[data-own]")?.remove(); mk(g, "text", { "data-own": 1, x: 20, y: 46, "font-size": 11.5, fill: r > 2.4 ? "#a33b3b" : "#4F5D3A", "font-weight": 700 }, `Your text: ${new TextEncoder().encode(inp.value).length} bytes, ratio ${isNaN(r) ? "n/a" : r.toFixed(2)} ${r > 2.4 ? "(would trigger a retry)" : "(passes)"}`); };
+    inp.addEventListener("input", own);
+    compute().then(() => { draw(); own(); });
+    setupFigure(root, () => { at = 0; if (ratios.length) draw(); }, async (alive) => { await compute(); for (at = 1; at <= 3; at++) { if (!alive()) return; draw(); own(); await wait(1.1); } at = 3; });
+  });
+</script>

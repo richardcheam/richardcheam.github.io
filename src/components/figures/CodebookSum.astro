@@ -1,0 +1,76 @@
+---
+// Foundations, embeddings post: one codec frame with an id per codebook;
+// each id looks up a row of its own table and the rows are added. Ids
+// (2, 3) give (0.5, 0.5, 0) + (0.1, 0.1, 0.1) = (0.6, 0.6, 0.1). The same
+// sum is a multi-hot vector times the two tables stacked.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-cbsum>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 240" role="img" aria-labelledby="cb-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="cb-title">Two codebook ids each looking up a row, and the rows added into one vector</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Codebook 1 id</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-a="0" aria-pressed="false">0</button><button type="button" class="fig-chip" data-a="1" aria-pressed="false">1</button><button type="button" class="fig-chip" data-a="2" aria-pressed="true">2</button><button type="button" class="fig-chip" data-a="3" aria-pressed="false">3</button>
+    </div></div>
+    <div><span class="fig-panel__name">Codebook 2 id</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-b="0" aria-pressed="false">0</button><button type="button" class="fig-chip" data-b="1" aria-pressed="false">1</button><button type="button" class="fig-chip" data-b="2" aria-pressed="false">2</button><button type="button" class="fig-chip" data-b="3" aria-pressed="true">3</button>
+    </div></div>
+    <div><span class="fig-panel__name">View</span><div class="fig-chips"><button type="button" class="fig-chip" data-multi aria-pressed="false">As a multi-hot vector times one stacked table</button></div></div>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt } from "../../lib/tiny-net";
+  import { INK, MUTED, GOLD, TINT, JADE } from "../../lib/net-diagram";
+  import { txt } from "../../lib/plot";
+  const C1 = [[1, 0, 0], [0, 1, 0], [0.5, 0.5, 0], [0, 0, 1]], C2 = [[0.1, 0, 0], [0, 0.2, 0], [0, 0, 0.3], [0.1, 0.1, 0.1]];
+  const vf = (v: number[]) => `(${v.map((x) => fmt(x, 2)).join(", ")})`;
+  document.querySelectorAll<HTMLElement>("[data-cbsum]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    let a = 2, b = 3, multi = false;
+    const sum = () => C1[a].map((x, i) => Math.round((x + C2[b][i]) * 100) / 100);
+    const steps = () => multi
+      ? [
+        { say: "Write the frame as one long vector: a 1 at codebook 1's id and a 1 at codebook 2's id, zeros elsewhere.", math: `multi-hot = (${[0, 1, 2, 3].map((i) => (i === a ? 1 : 0)).join(", ")} | ${[0, 1, 2, 3].map((i) => (i === b ? 1 : 0)).join(", ")})` },
+        { say: "Stack the two tables into one 8-row table. Multiplying picks out exactly two rows.", math: `rows picked: ${a} of table 1 and ${b} of table 2 (row ${4 + b} of the stack)` },
+        { say: "And adds them: the same vector, from one ordinary matrix multiplication.", math: `${vf(C1[a])} + ${vf(C2[b])} = ${vf(sum())}` },
+      ]
+      : [
+        { say: `Codebook 1 says ${a}: read row ${a} of its table.`, math: `table 1, row ${a} = ${vf(C1[a])}` },
+        { say: `Codebook 2 says ${b}: read row ${b} of its own table.`, math: `table 2, row ${b} = ${vf(C2[b])}` },
+        { say: "Add the rows: one vector for the whole frame, passed to the model.", math: `${vf(C1[a])} + ${vf(C2[b])} = (${C1[a].map((x, i) => `${fmt(x)} + ${fmt(C2[b][i])}`).join(", ")}) = ${vf(sum())}` },
+      ];
+    function draw(k: number) {
+      let s = "";
+      const tbl = (l: number, title: string, T: number[][], pick: number, on: boolean, off = 0) => {
+        let t = txt(l, 22, title, `font-size="12" font-weight="700" fill="${INK}"`);
+        T.forEach((row, i) => {
+          const y = 46 + (i + off) * 24, lit = i === pick && on;
+          if (lit) t += `<rect x="${l - 6}" y="${y - 16}" width="170" height="22" rx="4" fill="${TINT}" stroke="${GOLD}" stroke-width="2"/>`;
+          t += txt(l, y, `${multi ? (off ? i + 4 : i) : i}`, `font-size="11" fill="${MUTED}"`) + txt(l + 30, y, vf(row), `font-size="12.5" font-weight="${lit ? 700 : 400}" fill="${INK}"`);
+        });
+        return t;
+      };
+      if (multi) {
+        s += txt(30, 22, "multi-hot", `font-size="12" font-weight="700" fill="${INK}"`);
+        [...[0, 1, 2, 3].map((i) => (i === a ? 1 : 0)), ...[0, 1, 2, 3].map((i) => (i === b ? 1 : 0))].forEach((v, i) => (s += `<rect x="40" y="${30 + i * 24}" width="30" height="22" rx="3" fill="${v ? TINT : "#fff"}" stroke="${v ? GOLD : "#cfd5d4"}"/>` + txt(55, 46 + i * 24, String(v), `font-size="12" font-weight="700" text-anchor="middle" fill="${v ? INK : "#B9C0BF"}"`)));
+        s += tbl(130, "stacked table (8 rows)", C1, a, k >= 1) + tbl(130, "", C2, b, k >= 1, 4);
+      } else {
+        s += txt(30, 22, "one frame", `font-size="12" font-weight="700" fill="${INK}"`) + `<rect x="40" y="40" width="70" height="30" rx="4" fill="${k === 0 ? TINT : "#fff"}" stroke="${INK}"/>` + txt(75, 60, `id ${a}`, `font-size="13" font-weight="700" text-anchor="middle" fill="${INK}"`) + `<rect x="40" y="80" width="70" height="30" rx="4" fill="${k === 1 ? TINT : "#fff"}" stroke="${INK}"/>` + txt(75, 100, `id ${b}`, `font-size="13" font-weight="700" text-anchor="middle" fill="${INK}"`);
+        s += txt(30, 128, "codebook 1", `font-size="10.5" fill="${MUTED}"`) + txt(30, 142, "and 2", `font-size="10.5" fill="${MUTED}"`);
+        s += tbl(150, "codebook 1 table", C1, a, k >= 0) + tbl(370, "codebook 2 table", C2, b, k >= 1);
+      }
+      s += txt(570, 60, "frame vector", `font-size="12" font-weight="700" fill="${INK}"`) + `<rect x="570" y="72" width="160" height="34" rx="5" fill="${k >= 2 ? TINT : "#fff"}" stroke="${k >= 2 ? JADE : "#cfd5d4"}" stroke-width="2"/>` + txt(650, 95, k >= 2 ? vf(sum()) : "?", `font-size="14" font-weight="700" text-anchor="middle" fill="${INK}"`);
+      s += txt(570, 140, "Toy: 2 codebooks of 4 entries,", `font-size="11" fill="${MUTED}"`) + txt(570, 156, "3 numbers each. Moshi: 8 codebooks", `font-size="11" fill="${MUTED}"`) + txt(570, 172, "of 2,048 entries.", `font-size="11" fill="${MUTED}"`);
+      $("[data-draw]").innerHTML = s;
+    }
+    const redraw = stepper(root, steps, draw, { delay: 1.8 });
+    const pick = (attr: string, f: (v: number) => void) => root.querySelectorAll<HTMLButtonElement>(`[${attr}]`).forEach((btn) => btn.addEventListener("click", () => { f(+btn.getAttribute(attr)!); root.querySelectorAll(`[${attr}]`).forEach((o) => o.setAttribute("aria-pressed", String(o === btn))); redraw(); }));
+    pick("data-a", (v) => (a = v)); pick("data-b", (v) => (b = v));
+    $<HTMLButtonElement>("[data-multi]").addEventListener("click", (e) => { multi = !multi; (e.currentTarget as HTMLElement).setAttribute("aria-pressed", String(multi)); redraw(); });
+  });
+</script>

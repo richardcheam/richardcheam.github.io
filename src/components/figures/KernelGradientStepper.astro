@@ -1,0 +1,60 @@
+---
+// Foundations, convolutions post: the backward pass of a convolution.
+// x = (1, 2, 3, 4), w = (1, 0, −1), incoming gradient g = (1, 2): kernel
+// gradient 5, 8, 11, bias gradient 3, input gradient 1, 2, −1, −2. One step
+// with η = 0.1 moves the kernel to (0.5, −0.8, −2.1).
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-kgrad>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 230" role="img" aria-labelledby="kgr-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="kgr-title">The output gradient sliding along the input to give the kernel gradient, then stamping back to give the input gradient</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Gradient at output 0 <strong data-v="0"></strong></span><input class="scrub" data-g="0" type="range" min="-2" max="2" step="1" value="1" /></label>
+    <label><span class="fig-panel__name">Gradient at output 1 <strong data-v="1"></strong></span><input class="scrub" data-g="1" type="range" min="-2" max="2" step="1" value="2" /></label>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt, par } from "../../lib/tiny-net";
+  import { INK, MUTED, GOLD, TINT, JADE, NEG } from "../../lib/net-diagram";
+  import { txt } from "../../lib/plot";
+  const X = [1, 2, 3, 4], W = [1, 0, -1], ETA = 0.1;
+  document.querySelectorAll<HTMLElement>("[data-kgrad]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const g = [1, 2];
+    const dw = () => W.map((_, j) => g[0] * X[j] + g[1] * X[j + 1]);
+    const dx = () => X.map((_, i) => g.reduce((s, gn, n) => s + (i - n >= 0 && i - n < 3 ? gn * W[i - n] : 0), 0));
+    const steps = () => {
+      const a = dw(), b = dx();
+      return [
+        ...W.map((_, j) => ({ say: j === 0 ? "Weight 0 touched x[0] when making y[0] and x[1] when making y[1]. Multiply each by that output's gradient and add." : `Weight ${j}: the same, one input further along. The output gradient is sliding along the input.`, math: `∂L/∂w[${j}] = ${par(g[0])} × ${X[j]} + ${par(g[1])} × ${X[j + 1]} = ${fmt(a[j])}` })),
+        { say: "The bias was added to every output, so its gradient is the sum of the output gradients.", math: `∂L/∂b = ${par(g[0])} + ${par(g[1])} = ${fmt(g[0] + g[1])}` },
+        { say: "One gradient-descent step on the kernel.", math: `w = (${W.map((w, j) => `${fmt(w)} − ${fmt(ETA)} × ${par(a[j])}`).join(", ")}) = (${W.map((w, j) => fmt(Math.round((w - ETA * a[j]) * 1e6) / 1e6)).join(", ")})` },
+        { say: "For the layer below we also need the input gradient: each output gradient stamps a scaled copy of the kernel back onto the inputs it came from.", math: `${par(g[0])} × (1, 0, −1) at positions 0 to 2 → (${[0, 1, 2, 3].map((i) => fmt(i < 3 ? g[0] * W[i] : 0)).join(", ")})` },
+        { say: "The second stamp adds on top. This stamping is a transposed convolution.", math: `+ ${par(g[1])} × (1, 0, −1) at positions 1 to 3 → ∂L/∂x = (${b.map((v) => fmt(v)).join(", ")})` },
+      ];
+    };
+    function draw(k: number) {
+      const a = dw(), b = dx(), cell = (x: number, y: number, v: string, on: boolean, col = INK) => `<rect x="${x}" y="${y}" width="56" height="32" rx="4" fill="${on ? TINT : "#fff"}" stroke="${on ? JADE : "#cfd5d4"}" stroke-width="${on ? 2.5 : 1}"/>` + txt(x + 28, y + 21, v, `font-size="14" font-weight="700" text-anchor="middle" fill="${col}"`);
+      let s = txt(30, 44, "input x", `font-size="11" fill="${MUTED}"`) + txt(30, 98, "output gradient g", `font-size="11" fill="${MUTED}"`);
+      X.forEach((v, i) => (s += cell(160 + i * 64, 24, fmt(v), k >= 0 && k <= 2 && (i === k || i === k + 1))));
+      const off = k >= 0 && k <= 2 ? k : 0;
+      g.forEach((v, n) => (s += cell(160 + (n + off) * 64, 78, fmt(v), k >= 0 && k <= 2, GOLD)));
+      s += txt(460, 44, "kernel w = (1, 0, −1)", `font-size="11.5" fill="${MUTED}"`);
+      s += txt(460, 98, "kernel gradient", `font-size="11" fill="${MUTED}"`);
+      a.forEach((v, j) => (s += cell(460 + j * 64, 108, j <= k ? fmt(v) : "?", j === k)));
+      if (k >= 3) s += txt(460, 166, `bias gradient ${fmt(g[0] + g[1])}`, `font-size="12" font-weight="700" fill="${INK}"`);
+      s += txt(30, 192, "input gradient", `font-size="11" fill="${MUTED}"`);
+      const stamped = X.map((_, i) => (k >= 5 ? (i < 3 ? g[0] * W[i] : 0) : 0) + (k >= 6 && i >= 1 ? g[1] * W[i - 1] : 0));
+      X.forEach((_, i) => (s += cell(160 + i * 64, 172, k >= 5 ? fmt(k >= 6 ? b[i] : stamped[i]) : "?", (k === 5 && i < 3) || (k === 6 && i >= 1), k >= 6 ? INK : MUTED)));
+      $("[data-draw]").innerHTML = s;
+      root.querySelectorAll<HTMLElement>("[data-v]").forEach((el) => (el.textContent = fmt(g[+el.dataset.v!])));
+    }
+    const redraw = stepper(root, steps, draw, { delay: 1.8 });
+    root.querySelectorAll<HTMLInputElement>("[data-g]").forEach((inp) => inp.addEventListener("input", () => { g[+inp.dataset.g!] = +inp.value; redraw(); }));
+  });
+</script>

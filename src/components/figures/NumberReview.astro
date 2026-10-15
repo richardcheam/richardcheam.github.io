@@ -1,0 +1,88 @@
+---
+// Number verbalisation, shown on three illustrative examples (Khmer with an
+// English gloss), one per outcome. The counts at the bottom are the project's
+// (report section 3.3).
+const { alt } = Astro.props;
+const rows = [
+  {
+    text: "ឆ្នាំ ២០២៤", textGl: "year 2024",
+    rule: "ឆ្នាំ ពីរពាន់ម្ភៃបួន", ruleGl: "year two-thousand twenty-four",
+    said: "ឆ្នាំ ពីរពាន់ម្ភៃបួន", saidGl: "same as the rule",
+    verdict: "Rule confirmed", note: "train on the spoken form", c: "#4F5D3A",
+  },
+  {
+    text: "១៥ នាក់", textGl: "15 people",
+    rule: "ដប់ប្រាំ នាក់", ruleGl: "fifteen people",
+    said: "ដប់ប្រាំមួយ នាក់", saidGl: "sixteen people",
+    verdict: "Recording dropped", note: "the speaker misread: 13 such", c: "#a33b3b",
+  },
+  {
+    text: "១០០%", textGl: "100% (typo)",
+    rule: "មួយរយភាគរយ", ruleGl: "one hundred percent",
+    said: "ដប់ភាគរយ", saidGl: "ten percent, as the source meant",
+    verdict: "Text corrected", note: "keep the audio, fix the text", c: "#8a6a1f",
+  },
+];
+const COLS = [24, 190, 380, 570];
+const HEAD = ["Written text", "Rule proposes", "Speaker actually said", "Decision"];
+const KM = "'Noto Sans Khmer', 'Khmer OS', 'Khmer Sangam MN', sans-serif";
+---
+<div class="blog-diagram nr" tabindex="0" role="region" aria-label={alt} data-nr>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 390" role="img" aria-labelledby="nr-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="nr-title">Three example number readings and the decision for each</title>
+    {HEAD.map((h, i) => <text x={COLS[i]} y="26" font-size="11" letter-spacing="0.8" fill="#5f5f66">{h.toUpperCase()}</text>)}
+    {rows.map((r, i) => (
+      <g transform={`translate(0 ${44 + i * 82})`}>
+        <rect x="16" y="0" width="748" height="70" rx="6" fill="#f6f6f8" />
+        <g data-cell={`${i}-0`}>
+          <text x={COLS[0]} y="30" font-size="19" fill="#2b2b30" font-family={KM}>{r.text}</text>
+          <text x={COLS[0]} y="52" font-size="11" fill="#5f5f66">{r.textGl}</text>
+        </g>
+        <g data-cell={`${i}-1`}>
+          <text x={COLS[1] - 18} y="34" font-size="14" fill="#594578">→</text>
+          <text x={COLS[1]} y="30" font-size="17" fill="#594578" font-family={KM}>{r.rule}</text>
+          <text x={COLS[1]} y="52" font-size="11" fill="#5f5f66">{r.ruleGl}</text>
+        </g>
+        <g data-cell={`${i}-2`}>
+          <text x={COLS[2] - 16} y="34" font-size="14" fill="#2b2b30">→</text>
+          <text x={COLS[2]} y="30" font-size="17" fill="#2b2b30" font-family={KM}>{r.said}</text>
+          <text x={COLS[2]} y="52" font-size="11" fill="#5f5f66">{r.saidGl}</text>
+        </g>
+        <g data-cell={`${i}-3`}>
+          <rect x={COLS[3] - 6} y="12" width="186" height="46" rx="5" fill={r.c} fill-opacity="0.12" stroke={r.c} />
+          <text x={COLS[3] + 6} y="31" font-size="12.5" font-weight="700" fill={r.c}>{r.verdict}</text>
+          <text x={COLS[3] + 6} y="48" font-size="10.5" fill="#2b2b30">{r.note}</text>
+        </g>
+      </g>
+    ))}
+    <g data-tally>
+      <text x="24" y="300" font-size="12" fill="#2b2b30">After <tspan font-weight="700">121</tspan> sentences checked by ear, only confirmed rules run on their own.</text>
+      <text x="24" y="318" font-size="12" fill="#2b2b30">They agreed <tspan font-weight="700">169 / 169</tspan> times, and <tspan font-weight="700">40</tspan> fresh recordings exposed <tspan font-weight="700">2</tspan> gaps, both fixed.</text>
+      <rect x="24" y="334" width="600" height="16" rx="3" fill="#ececf1" />
+      <rect data-gauge x="24" y="334" width="0" height="16" rx="3" fill="#4F5D3A" />
+      <text data-count x="636" y="347" font-size="12.5" font-weight="700" fill="#4F5D3A" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"></text>
+      <text x="24" y="372" font-size="10.5" fill="#5f5f66">digit recordings that got a spoken form; grey = patterns too ambiguous to read automatically (100,000 and above, "dot + 3 digits")</text>
+    </g>
+  </svg>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { animate, dur, setupFigure, tween, wait } from "../../lib/figure-motion";
+
+  document.querySelectorAll<HTMLElement>("[data-nr]").forEach((root) => {
+    const cells = Array.from(root.querySelectorAll<SVGGElement>("[data-cell]"));
+    const tally = root.querySelector<SVGGElement>("[data-tally]")!, gauge = root.querySelector("[data-gauge]")!, count = root.querySelector("[data-count]")!;
+    const show = (t: number) => { gauge.setAttribute("width", String(600 * (16736 / 18220) * t)); count.textContent = `${Math.round(16736 * t).toLocaleString("en")} / 18,220`; };
+    setupFigure(root, () => { cells.forEach((c) => (c.style.opacity = "0")); tally.style.opacity = "0"; show(0); }, async (alive) => {
+      // Walk each example left to right: text, rule, what was heard, decision.
+      for (const c of cells) {
+        if (!alive()) return;
+        animate(c, { opacity: [0, 1] }, { duration: dur(0.35) });
+        await wait(c.dataset.cell!.endsWith("3") ? 0.7 : 0.4);
+      }
+      animate(tally, { opacity: [0, 1] }, { duration: dur(0.4) });
+      await tween(1.2, (t) => alive() && show(t));
+    });
+  });
+</script>

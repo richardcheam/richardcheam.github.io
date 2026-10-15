@@ -1,0 +1,316 @@
+---
+title: "MoshiRAG: Retrieval That Fits Inside a Sentence"
+published: true
+date: 2026-10-12
+question: "Can a full-duplex speech model look facts up without breaking the conversation's timing?"
+excerpt: "MoshiRAG lets a 7B full-duplex model trigger a lookup, keep talking, and absorb the answer before it reaches the fact. On TriviaQA, accuracy goes from 22.8% to 69.6%, and the keyword still arrives 3.1 s after the user stops."
+type: paper
+topic: [speech, architecture, inference, evaluation]
+tags: [Speech, Full duplex, Moshi, RAG, Kyutai]
+org: "Kyutai · TTIC"
+authors: "Chung-Ming Chien, Manu Orsini, Eugene Kharitonov, Neil Zeghidour, Karen Livescu, Alexandre Défossez"
+source_url: https://arxiv.org/abs/2604.12928
+source_label: "Read the paper (ICML 2026)"
+source_date: 2026-05-12
+links:
+  - label: "Code"
+    url: https://github.com/kyutai-labs/moshi-rag
+  - label: "Weights"
+    url: https://huggingface.co/kyutai/moshika-rag-pytorch-bf16
+  - label: "Kyutai blog"
+    url: https://kyutai.org/blog/2026-04-30-moshi-rag/
+math: true
+tldr:
+  - "**Authors' claim:** a full-duplex model can reach factuality comparable to the best released non-duplex speech models by retrieving asynchronously, while keeping full-duplex interactivity (Abstract, p. 1)."
+  - "**Evidence:** with a Gemma 3 27B back end, TriviaQA accuracy rises from 22.8% (vanilla Moshi) to 69.6%, WebQuestions from 26.6% to 67.2%. GPT-4o Audio still leads at 90.6% and 81.0% (Table 1, p. 7)."
+  - "**The trick:** the lookup only has to finish before the word that answers the question, not before the reply starts. MoshiRAG starts at once and says that word 3.1 s later (Sec 3.1, p. 3; Table 1, p. 7)."
+  - "**My reading:** the cascade's knowledge attached to full duplex's timing. The transcript leaves the critical path for timing but stays on it for content, and the injection step loses more than the retrieval does (App. B.2, Table 8, p. 14)."
+---
+import FactSlot from "../../components/figures/FactSlot.astro";
+import EmbeddingSum from "../../components/figures/EmbeddingSum.astro";
+import InjectionModes from "../../components/figures/InjectionModes.astro";
+import TrainingExample from "../../components/figures/TrainingExample.astro";
+import AccuracyLeak from "../../components/figures/AccuracyLeak.astro";
+import TimingToy from "../../components/figures/TimingToy.astro";
+
+## The question and why it matters
+
+In [cascaded vs full duplex](/blog/cascade-vs-full-duplex/) the trade looked clean. A cascade puts a large text LLM in the middle, so it knows a lot, but it waits for you to stop talking. Moshi listens and speaks at the same time, but it answers from the weights of a 7B model trained mostly on speech, and speech corpora hold far fewer words than text corpora. The authors name exactly that as one cause of weak factuality in audio-native models (Sec 1, p. 1). On spoken TriviaQA, vanilla Moshi answers 22.8% correctly (Table 1, p. 7).
+
+A bigger front end is ruled out because real-time inference would become too expensive (Abstract, p. 1). The other obvious fix, retrieval-augmented generation (RAG: fetch relevant text first, then answer conditioned on it), seems to bring the wait back: look something up, then speak.
+
+MoshiRAG's observation is that a spoken answer does not start with its answer. "Oh, the Eiffel Tower! It opened back in..." The word that actually answers arrives seconds after the reply begins. If the lookup finishes inside that gap, the listener never hears a wait. The paper calls the gap the **keyword delay** and builds the whole system around it (Sec 1, p. 2; Sec 3.1, Fig 2, p. 3).
+
+<figure class="blog-figure blog-figure--wide">
+  <FactSlot alt="Interactive timeline on an 80 ms grid. The user asks when the Eiffel Tower opened. Moshi starts replying at once and emits a retrieval token. Below, the back end waits 0.5 s for the transcript, then calls an LLM. The reference then streams into Moshi one vector per frame. If all vectors are in before the keyword at 3.1 s, the answer 1889 is grounded. Drag the back-end time or switch encoders to see the reference arrive partly or entirely too late." />
+  <figcaption><strong>Figure 1. The race.</strong> Drag the back-end time and switch encoders. The 0.5 s ASR wait, the 3.1 s keyword delay, the 1.5 s accuracy drop and the 2 s target are the paper's; the sentence and the 65-token reference length are illustrative. Source: Sec 3.3.3, p. 4 (ASR wait); Table 1, p. 7 (keyword delay); App. C, Fig 6b, p. 16 (accuracy drop); Sec 3.1, p. 3 (target).</figcaption>
+</figure>
+
+I read it because it is the first concrete design I have seen that combines the two columns of my comparison table instead of choosing one.
+
+## Moshi in four sentences
+
+Moshi runs at 12.5 Hz: every 80 ms it reads one frame of your audio, encoded by [Mimi](/blog/mimi-codec-explained/), and writes one frame of its own (Sec 3.2, p. 3). A large *temporal transformer* moves across time, and a small *depth transformer* fills in the 8 audio tokens of the current step (Sec 3.3.1, p. 4). Alongside its audio, Moshi writes a time-aligned text token at each step, its *inner monologue*, with padding where no word starts (Sec 3.2, p. 3). The input to the temporal transformer at step $i$ is just a sum of embeddings (Eq 1, p. 4):
+
+$$
+h_i = \mathrm{emb}^{\text{model}}_{\text{text},i} + \mathrm{emb}^{\text{model}}_{\text{speech},i} + \mathrm{emb}^{\text{user}}_{\text{speech},i}
+$$
+
+- $h_i$ is what the temporal transformer reads at step $i$: one vector.
+- Each $\mathrm{emb}$ is an **embedding**, a learned vector standing for one token. The superscript says whose stream it is (model = Moshi, user = you), and the subscript says which kind (text or speech) and which step ($i$).
+
+In words: at every 80 ms step, Moshi's own word, Moshi's own sound and your sound are each turned into a vector, and the three vectors are added into one.
+
+Remember that sum. MoshiRAG's whole intervention is a fourth term added to it.
+
+## Front end and back end
+
+The paper splits the system by who touches audio. The **front end** is everything that hears or produces sound in real time. The **back end** never touches audio: it is text in, text out, with relaxed timing. By that definition a classic cascade's ASR and TTS are front end and its LLM is back end (Sec 3.2, p. 3). The difference is that here the back end runs *beside* the conversation instead of *in series* with it. All parts talk in plain text, so each can be swapped without retraining the others (Sec 3.3, p. 4).
+
+- **Moshi 7B**, fine-tuned, with two additions: a ⟨ret⟩ token and a reference encoder (Sec 3.2, p. 3).
+- **A 1B streaming ASR** with 0.5 s latency. It exists only to give the retriever a text version of what you said. The authors note Moshi could have been taught to transcribe, but a separate model saved training effort (Sec 3.3.2, p. 4; fn 4, p. 3).
+- **A retrieval back end**: an LLM prompted to write a short reference (Gemma 3 27B by default), or a web search through Tavily (Sec 3.3.3, pp. 4 to 5; Sec 5, p. 6).
+
+The code and weights are public ([code](https://github.com/kyutai-labs/moshi-rag) under MIT and Apache 2.0, weights under CC-BY 4.0). According to the README, the front end needs a GPU with at least 24 GB, and a locally run back end needs a GPU of its own.
+
+## The trigger: ⟨ret⟩
+
+MoshiRAG adds one token to Moshi's text vocabulary, ⟨ret⟩. Moshi predicts it on its text stream like any word. When it appears at step $i_{\text{ret}}$, the system collects your words from the ASR and Moshi's own words from its inner monologue, and sends that transcript to the back end (Sec 3.2, p. 3).
+
+Nothing scores how hard the question is. The model learns *when* to fire purely from training data: in every knowledge-heavy turn, the text token just before the first word of the reply is replaced by ⟨ret⟩ (Sec 4.2, p. 6). So the trigger fires at the very start of the answer, not in the middle of your question. The authors list this as a limitation: the trigger "relies entirely on training data" (Sec 6, p. 9). Their Appendix C also shows it fires less often when your speech is harder to transcribe (App. C, Fig 6a, p. 16).
+
+Between ⟨ret⟩ and the reference's arrival, Moshi keeps talking. The paper calls this **pre-RAG content** (Sec 3.2, p. 4). One nuance: the paper's text offers "Let me check that for you..." as an example of filler (Sec 3.2, p. 4), but the data-generation prompt forbids "let me check" phrases, so the user never learns Moshi has a helper (Table 15, p. 19). The training scripts use leads like "That's a big question a lot of people are asking" rather than announcing a lookup (Table 14, p. 18).
+
+## The timing budget, in frames
+
+The paper defines four delays (Sec 3.1, p. 3):
+
+- **TTFAT** (time to first audio token): from the end of your question to the reply's first audio token. It excludes codec decoding (fn 3, p. 3).
+- **Keyword delay (KD):** from the start of the reply to the first appearance of the *keyword*, the word that directly answers.
+- **E2EKD** (end-to-end keyword delay): end of the question to the keyword, so E2EKD = TTFAT + KD.
+- **Retrieval delay:** from ⟨ret⟩ to the end of retrieval. It *includes* the 0.5 s ASR wait, because the clock starts at ⟨ret⟩.
+
+The paper's constraint is that the retrieval delay must be shorter than E2EKD (Sec 3.1, p. 3). Because existing speech models often have an E2EKD over 3 s, the authors set a target retrieval delay of at most 2 s (Sec 3.1, p. 3). Converted to Moshi's clock (seconds × 12.5 = frames):
+
+<div class="blog-table-scroll">
+
+| Quantity | Seconds | Frames | Source |
+|:--|--:|--:|:--|
+| ASR wait after ⟨ret⟩ | 0.5 | 6.25 | Sec 3.3.3, p. 4 |
+| Retrieval delay past which accuracy falls sharply | 1.5 | 18.75 | App. C, Fig 6b, p. 16 |
+| Design target for retrieval | 2.0 | 25 | Sec 3.1, p. 3 |
+| MoshiRAG keyword delay (= E2EKD, TTFAT is 0) | 3.1 | 38.75 | Table 1, p. 7 |
+| A 250-token reference, one vector per frame | 20 | 250 | Sec 3.3.1, p. 4 |
+
+</div>
+
+So the retriever has about 39 frames between ⟨ret⟩ and the keyword, and six go to the ASR wait. There is a second cost the paper's inequality leaves out, and Figure 1 makes visible: once the reference arrives, it still takes $l$ frames to stream in. My restatement of the budget is
+
+$$
+d + l / f_r \le \text{E2EKD}
+$$
+
+where $d$ is the retrieval delay, $l$ the number of reference vectors and $f_r = 12.5$ Hz. The repository README (not the paper) separately warns that the system "is sensitive to retrieval delays over 3 seconds". The two numbers are not in conflict: 1.5 s is where measured accuracy drops, 3 s is an operational warning.
+
+## Getting the reference in
+
+The back end returns text, but Moshi's only input is the per-step sum $h_i$. So the reference is turned into vectors and added to that sum, one vector per step:
+
+1. **Encode.** A frozen pretrained encoder, ARC-Encoder, maps the reference text to vectors $\mathrm{emb}^{\text{ref}}_{1:l}$. It is built to compress: four times fewer vectors than input tokens (Sec 3.3.1, p. 4).
+2. **Project.** One trainable linear layer maps each vector to Moshi's width: $h^{\text{ref}}_k = \mathrm{proj}(\mathrm{emb}^{\text{ref}}_k)$ (Sec 3.3.1, p. 4).
+3. **Add, streaming.** From the step the retrieval finishes, add one projected vector per step for $l$ steps (Eq 2, p. 4):
+
+$$
+h'_i =
+\begin{cases}
+h_i + h^{\text{ref}}_{\,i - (i_{\text{ret}} + d f_r)} & \text{if } i_{\text{ret}} + d f_r < i \le i_{\text{ret}} + d f_r + l \\
+h_i & \text{otherwise}
+\end{cases}
+$$
+
+Read it step by step. $i_{\text{ret}}$ is the step where ⟨ret⟩ was predicted. $d$ is the retrieval delay in seconds, so $d f_r$ is that delay in frames: with $d = 1.2$ s, $d f_r = 15$. The window opens at the next step, where the subscript $i - (i_{\text{ret}} + d f_r)$ equals 1, so the first reference vector is added; at the step after, the second; and so on for $l$ steps. Outside the window nothing changes, so a turn without retrieval is plain Moshi. And the sequence never gets longer: the reference rides on frames that exist anyway.
+
+<figure class="blog-figure blog-figure--wide">
+  <EmbeddingSum alt="Grid with one column per step from 26 to 50. Three rows of embedding vectors (Moshi text, Moshi speech, user speech) are summed into a bottom row. A fourth reference row is empty until step 32, holds reference vectors 1 to 17 for steps 32 to 48, then is empty again. A readout shows the subscript arithmetic for the selected step." />
+  <figcaption><strong>Figure 2. Equation 2, one column per 80 ms step.</strong> Drag the step. Example values: ⟨ret⟩ at step 16, retrieval delay 1.2 s (15 frames), l = 17 vectors. Source: Eq 2, p. 4; example values illustrative.</figcaption>
+</figure>
+
+<div class="note-callout">
+
+**A typo in the paper.** Equation 2 is printed with $d/f_r$ (Eq 2, p. 4; also the dropout formula in Sec 4.2, p. 6), which divides seconds by hertz. The quantity that indexes steps is frames, $d \cdot f_r$, and that is what this review uses.
+
+</div>
+
+**Why compress.** Each vector costs one 80 ms step. The paper's example: a 250-token reference would take 250 steps, 20 s, longer than a whole conversational turn (Sec 3.3.1, p. 4). The reference prompt caps documents at fifty words (Table 15, pp. 19 and 22). If I assume about 1.3 tokens per word (my assumption, not the paper's), that is roughly 65 tokens: 65 steps (5.2 s) uncompressed, 17 steps (1.36 s) with 4× compression. During training, the reference is dropped with probability 0.2 and a learned "dropout" vector is added instead, so Moshi learns to cope when retrieval returns nothing useful (Sec 4.2, p. 6).
+
+### Add or splice?
+
+The alternative is **insertive** injection: put the reference vectors into the sequence as extra positions, the way a text LLM sees a RAG document in its prompt. The model can attend to them directly, but the sequence grows by $l$ for every retrieval (App. B.1, p. 12). The authors also tried cross-attention and report that it did not train as well (fn 15, p. 12).
+
+<figure class="blog-figure blog-figure--wide">
+  <InjectionModes alt="Two sequences through three retrievals. In the insertive one, 17 reference positions are spliced in each time and the length grows from 60 to 111 positions. In the additive one, reference vectors stack on existing positions and the length stays 60. Below, Table 6 bars: with T5, TriviaQA 82.0 insertive vs 28.5 additive and HaluEval 47.1 vs 13.9; with ARC-Encoder, TriviaQA 82.2 vs 73.1 and HaluEval 49.0 vs 41.8." />
+  <figcaption><strong>Figure 3. Same references, two ways in.</strong> Sequence lengths are schematic. Numbers are Table 6 (App. B.1.1, p. 13), measured with true transcripts, all references for a conversation condensed into one passage, injected at the start of the conversation.</figcaption>
+</figure>
+
+Insertive wins in both rows, so addition loses information. With ARC-Encoder the loss is moderate; with the long T5 encoding, additive nearly collapses, which the authors attribute to the reference arriving too late to be used (App. B.1.1, p. 13). They chose additive anyway to keep the sequence bounded in long conversations (App. B.1.1, p. 13). Among encoders in the realistic setup (App. B.1.2, Table 7, p. 13), ARC ×4 beats ARC ×8 and T5 on all four sets, for example HaluEval 36.3 vs 33.1 vs 31.7. Compressing harder arrives sooner but loses content.
+
+## Training data: teaching a lead
+
+There is no natural corpus of spoken conversations where an assistant absorbs a lookup mid-reply, so the authors make one.
+
+1. **Topics.** About 474k from QA training sets (307k Natural Questions, 90k HotpotQA, 76k TriviaQA) plus 5.5k expert-domain topics: 111 domains, 50 topics each, generated by Gemma 3 27B (Sec 4.1.1, p. 5). Appendix A says 472k for the QA part (App. A, p. 12); the gap is internal to the paper.
+2. **Scripts with three roles.** Three Gemma 3 27B instances. A *user LLM* sees the topic but not the references. A *Moshi LLM* and a *reference LLM* see the conversation and references but not the topic, so Moshi must infer what the user wants from what the user says (Sec 4.1.2, p. 5).
+3. **Lead, body, tail.** Each knowledge-heavy Moshi turn is written in three labelled parts: a *lead* that needs no outside knowledge, a *body* grounded in a reference of at most fifty words, and an optional *tail*. The lead is what buys the time (Sec 4.1.2, p. 5; Table 15, p. 19).
+4. **Three styles.** v1 is a plain topical conversation, v2 a user who challenges Moshi, v3 a user who drifts into small talk. A single-turn subset uses the dataset questions directly (Sec 4.1.2, p. 5).
+5. **Speech.** A multi-channel TTS voices both sides: a fixed voice for Moshi and user voices sampled from an internal dataset. Conversations average about 2 minutes, single-turn examples about 15 s (Sec 4.1.3, pp. 5 to 6).
+
+In total: 1,901,376 conversations and 47,770 hours (App. A, Table 4, p. 12). There is no real retrieval in this data, so the arrival time is simulated with Eq 3 (Sec 4.2, p. 6):
+
+$$
+d' =
+\begin{cases}
+\mathcal{U}(0,\ d_{\text{lead}}) & \text{if } d_{\text{lead}} < 2 \text{ or } p < 0.2 \\
+\mathcal{U}(1.0,\ d_{\text{lead}} - 1.0) & \text{otherwise}
+\end{cases}
+$$
+
+- $d'$ is the simulated delay: how many seconds after the lead starts the reference arrives.
+- $\mathcal{U}(a, b)$ means "a number drawn uniformly at random between $a$ and $b$", every value equally likely.
+- $p$ is a separate random number between 0 and 1; "$p < 0.2$" happens one time in five.
+
+where $d_{\text{lead}}$ is how long the lead lasts and $p$ is uniform on (0, 1). Usually the reference lands at least 1 s after the lead starts and at least 1 s before the body. One time in five, or whenever the lead is under 2 s, it lands anywhere in the lead (Sec 4.2, p. 6). A 3 s lead usually gets $d'$ between 1.0 and 2.0 s, which is 12.5 to 25 frames.
+
+<figure class="blog-figure blog-figure--wide">
+  <TrainingExample alt="Three panels. A script with a reference passage and a Moshi turn split into lead, body and tail. The same turn voiced as audio, with lead, body and tail segments on Moshi's text and audio streams and a retrieval token placed just before the lead. A strip under the lead where sampled arrival times land, mostly inside the middle second, some anywhere in the lead." />
+  <figcaption><strong>Figure 4. Building one example.</strong> Press Sample to draw arrival times from Eq 3; red ticks come from the wide branch. Script text abridged from the paper's Table 14 (p. 18); durations illustrative. Source: Eq 3, p. 6.</figcaption>
+</figure>
+
+Training starts from Moshi with all weights trainable except the reference encoder: 100k updates, learning rate 2×10⁻⁶, batch 32 (Sec 4.2, p. 6).
+
+## What the evidence shows
+
+### Factuality
+
+Spoken questions with text answers: Llama Questions, Web Questions and TriviaQA follow the OpenAudioBench protocol and its LLM judge, plus a new set of the first 1,000 HaluEval questions voiced by TTS with CommonVoice speakers (Sec 5.1, p. 6). All are single-turn, which the authors acknowledge (Sec 5, p. 6). Each MoshiRAG row has two numbers: **ref**, whether the retrieved reference contains the right answer, and **resp**, whether Moshi's spoken answer does (Table 1 caption, p. 7).
+
+<div class="blog-table-scroll">
+
+| Model | LlamaQ | WebQ | TriviaQA | HaluEval |
+|:--|--:|--:|--:|--:|
+| Vanilla Moshi | 62.3 | 26.6 | 22.8 | 10.5 |
+| Moshi fine-tuned on the RAG data, no retrieval | 61.2 | 37.0 | 29.7 | 18.7 |
+| MoshiRAG, Gemma 3 27B (ref / resp) | 83.0 / 80.3 | 71.5 / 67.2 | 73.7 / 69.6 | 42.0 / 36.3 |
+| MoshiRAG, GPT-4.1 (ref / resp) | 87.8 / 80.6 | 77.7 / 68.9 | 86.8 / 78.2 | 61.2 / 51.3 |
+| MoshiRAG, Tavily (ref / resp) | 84.6 / 78.2 | 73.5 / 66.1 | 84.9 / 77.5 | 54.3 / 47.0 |
+| Qwen3-Omni-A3B-Instruct | 84.7 | 68.8 | 73.6 | 38.9 |
+| GPT-4o Audio | 88.4 | 81.0 | 90.6 | 68.7 |
+
+</div>
+
+Source: Table 1, p. 7, accuracy %.
+
+- **The control matters.** The same data without retrieval reaches 29.7 on TriviaQA, so most of the jump to 69.6 comes from retrieval, not from the new data (Sec 5.1, p. 6; Table 1, p. 7).
+- **ref bounds resp.** On average the spoken answer trails the reference by about 5 points: information lost in injection (Sec 5.1, p. 7).
+- **A better back end, no retraining.** GPT-4.1 lifts TriviaQA to 78.2 and HaluEval to 51.3. Caveat: for back ends other than Gemma, the authors *assumed* a fixed 1.5 s retrieval delay because API latency was unstable (fn 11, p. 7). Those rows measure the knowledge, not a live system's timing.
+- **Still behind GPT-4o Audio** everywhere. "Comparable to the best publicly released" holds against Qwen3-Omni, the strongest open row (Abstract, p. 1; Table 1, p. 7).
+
+### Where the errors come from
+
+Appendix B.2 (p. 14) separates the two places accuracy can leak: the transcript the retriever reads, and the injection into Moshi. These numbers use a different judge (Gemma 3 27B; Table 8 caption, p. 14) from Table 1, so the same system scores differently; compare them only with each other.
+
+<figure class="blog-figure blog-figure--wide">
+  <AccuracyLeak alt="Slope chart for HaluEval. Left axis: the reference contains the answer. Right axis: Moshi says it. Perfect reference: 97.2 to 65.1, a loss of 32.1. True transcript with Gemma: 57.2 to 50.8. ASR transcript with Gemma, the real system: 42.0 to 36.3. The gap between the two Gemma lines on the left, 15.2 points, is the cost of ASR errors." />
+  <figcaption><strong>Figure 5. Two leaks.</strong> HaluEval, Table 8 (App. B.2, p. 14). Slopes are the injection loss; the vertical gap on the left is the transcript loss.</figcaption>
+</figure>
+
+Two lessons, both the authors': true transcripts raise spoken accuracy on HaluEval by 14.5 points (ASR word error rate there is 11.5%; App. B.2, Table 8, p. 14), and even a perfect reference, correct 97.2% of the time, yields only 65.1% spoken accuracy (App. B.2, Table 8, p. 14). On hard questions, injection is the bigger bottleneck.
+
+### Delay and compute
+
+TTFAT is measured on one H100 per model, except MoshiRAG (front end on one GPU, back end on another; Sec 5.2 and fn 12, p. 7). Keywords are found by an LLM and timed with word timestamps from an ASR model (Sec 5.2, p. 7).
+
+<div class="blog-table-scroll">
+
+| Model | TTFAT (s) | KD (s) | E2EKD (s) | Relative FLOPs per second of audio |
+|:--|--:|--:|--:|--:|
+| Vanilla Moshi | 0.0 | 2.1 | 2.1 | 0.22 |
+| Moshi fine-tuned, no retrieval | 0.0 | 3.1 | 3.1 | 0.22 |
+| MoshiRAG (Gemma) | 0.0 | 3.1 | 3.1 | 0.37 |
+| Qwen3-Omni-A3B | 3.7 | 2.0 | 5.7 | 0.57 |
+| Kimi-Audio | 0.2 | 3.3 | 3.5 | 6.93 |
+| LLaMA-Omni2 | 0.1 | 2.8 | 2.9 | 2.58 |
+
+</div>
+
+Source: Table 1, p. 7. The lead costs one second (Sec 5.2, p. 7): keyword delay goes from 2.1 to 3.1 s, and the fine-tuned model without retrieval shows the same 3.1 s, so the extra second comes from the lead/body template, not from waiting on the lookup. An end-to-end 3.1 s is still lower than every other system here except LLaMA-Omni2 and vanilla Moshi (Sec 5.2, Table 1, p. 7).
+
+### Interactivity
+
+Full-Duplex-Bench plays pre-recorded audio and scores reactions (Sec 5.3, pp. 7 to 8). *TOR* (takeover rate) is the share of cases where the model takes the turn: lower is better during your pauses, higher is better when you have finished.
+
+<div class="blog-table-scroll">
+
+| Track | Metric | Vanilla Moshi | Fine-tuned, no retrieval | MoshiRAG |
+|:--|:--|--:|--:|--:|
+| Pause (synthetic) | TOR, lower better | 0.99 | 0.39 | 0.32 |
+| Backchannel | per second | 0.001 | 0.017 | 0.010 |
+| Turn taking | TOR, higher better | 0.94 | 0.98 | 0.83 |
+| Turn taking | latency (s) | 0.27 | 0.18 | 0.18 |
+| Interruption | GPT score, out of 5 | 0.77 | 4.19 | 3.75 |
+| Interruption | latency (s) | 0.26 | 0.52 | 1.02 |
+
+</div>
+
+Source: Table 2, p. 8. The gains also appear in the fine-tuned column without retrieval, so the authors credit the training data (longer turns, challenging and distracting users), not retrieval (Sec 5.3, p. 8). There are costs: turn-taking TOR drops from 0.94 to 0.83, and the response to an interruption slows from 0.26 s to 1.02 s.
+
+### Math it was never trained on
+
+On five spoken math sets, MoshiRAG with Gemma reaches 33.9% on GSM8K against vanilla Moshi's 2.1%, while its references are right 66.2% of the time (Sec 5.4, Table 3, p. 8). References full of numbers and steps survive injection badly. Asking the LLM to summarize first helps (51.2%), still behind the math-specialized STITCH-S at 56.7% (Table 3, p. 8). The authors frame this as early tool use: the back end solves the problem, Moshi voices it (Sec 1, p. 2).
+
+## Toy experiments
+
+I cannot run MoshiRAG itself: the front end needs a 24 GB GPU. Instead, two small toys that isolate its two mechanisms. Neither is a reproduction, and both use my assumptions.
+
+**Toy 1, the timing budget.** Each dot below is one simulated exchange: retrieval delay is the 0.5 s ASR wait plus a back-end call drawn from a lognormal around the chosen median, and the keyword delay is drawn around the paper's 3.1 s (Table 1, p. 7). A dot is green if all $l$ reference vectors are in before the keyword.
+
+<figure class="blog-figure blog-figure--wide">
+  <TimingToy alt="Scatter plot of 400 simulated exchanges, retrieval delay on x and keyword delay on y. The diagonal separates references that arrive before the keyword from those that arrive after; a parallel line above it marks references fully injected in time. Side tallies give the share of each, and controls change the back-end median latency and the encoder." />
+  <figcaption><strong>Figure 6. Toy 1 in the browser.</strong> Assumed: back-end latency lognormal, σ = 0.35; keyword delay normal(3.1, 0.8) s; a 65-token reference. Python version: <a href="/code/moshirag/timing_toy.py">timing_toy.py</a>.</figcaption>
+</figure>
+
+With 200,000 samples in the Python version and a 0.8 s back-end median, the reference *starts* arriving before the keyword 97.8% of the time, but is *fully* in only 0.0% of the time uncompressed, 67.8% with ARC ×4 and 88.5% with ARC ×8. Raising the median from 0.3 s to 3.5 s takes ARC ×4 from 87.2% to 3.3%. On timing alone, more compression always wins; Table 7 (p. 13) says ×8 still loses to ×4, so compression also costs content, which this toy does not model.
+
+**Toy 2, add or splice.** A 2-layer causal transformer of width 16 (CPU, about 90 s) sees a random token stream and a 6-symbol reference, and must recite the reference in reverse in the last six positions while also recalling the stream tokens the reference was added onto. Reversing the order makes the first answer slot need the *last* reference vector. Two seeds, 1,500 steps each; chance is 0.062.
+
+<div class="blog-table-scroll">
+
+| Injection | When it arrives | Reference recall | Per answer slot | Stream recall |
+|:--|:--|--:|:--|--:|
+| Insertive | early | 1.000 | all 1.0 | 1.000 |
+| Additive | early | 1.000 | all 1.0 | 1.000 |
+| Insertive | late | 1.000 | all 1.0 | 1.000 |
+| Additive | late, still streaming in | 0.686 | 0.06, 0.06, then 1.0 × 4 | 1.000 |
+
+</div>
+
+In this toy, addition costs only timing: the two slots that need vectors not yet added fall to chance, and summing never erased the stream tokens underneath. The paper's remaining gap between insertive and additive (49.0 vs 41.8 on HaluEval, with references injected early; Table 6, p. 13) is therefore not explained by superposition at this scale; a width-16 toy cannot test the capacity of a 7B model's input space. Code: <a href="/code/moshirag/inject_toy.py">inject_toy.py</a>.
+
+## My interpretation
+
+MoshiRAG does not make Moshi know more. It turns the gap between starting to speak and needing a fact into a scheduling slot. The general idea is latency hiding, like a CPU prefetch: issue the slow request early, do useful work while it is in flight, use the result just in time. A cascade cannot do this because it does not speak until the reply is ready; a full-duplex model can, because speaking and thinking run on parallel streams.
+
+But note who creates the slot. Vanilla Moshi's keyword delay was 2.1 s; the lead template pushes it to 3.1 s (Sec 5.2, Table 1, p. 7). The system does not just find time in natural speech, it learns to make time. That is a fair trade, since the end-to-end delay still beats most systems, but it is a design choice, not a free observation.
+
+It also quietly brings back the part of the cascade I criticised. The retriever reads an ASR transcript, so tone and hesitation are gone on that path, and Figure 5 shows transcript errors cost 15 points on HaluEval (Table 8, p. 14). The difference is that the transcript now sits on the critical path for content, not for timing.
+
+Additive injection is the weakest link. Both controlled experiments in the paper say more of the reference is available than reaches the voice (Tables 6 and 8, pp. 13 to 14). My toy reproduces only the timing half of that story.
+
+The 3.1 s budget suits trivia with a natural lead. It suits a yes/no question or "what time is it?" less well, where a three-second preamble would sound evasive, and the benchmarks do not test it.
+
+## Open questions
+
+- **When to retrieve.** The trigger is learned from data only. The authors propose tying it to query difficulty or training it with RL (Sec 6, p. 9).
+- **Short answers.** Factuality and perceived evasiveness on questions whose natural answer comes first.
+- **Late references.** What Moshi says when the reference lands after the keyword: does it stall, guess, or correct itself? Figure 6b of the paper (p. 16) shows accuracy falling, not the behaviour.
+- **A better way in.** An injection that keeps the sequence bounded but loses less than addition; the authors call this open (App. B.1.1, p. 13).
+- **Multi-turn evaluation.** Training is mostly multi-turn, but no benchmark here tests later turns (Sec 5, p. 6; Table 4, p. 12).

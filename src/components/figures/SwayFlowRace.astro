@@ -1,0 +1,76 @@
+---
+// F5-TTS review, Figure 5: does Sway Sampling help when the velocity is exact?
+// 1-D flow from N(0, 1) to two narrow targets N(-2, 0.1^2) and N(2, 0.1^2)
+// (a "which word" choice), straight OT paths, exact marginal velocity.
+// 2,000 starts (seed 1) solved with Euler on an even grid and on a sway grid,
+// compared with a 4,000-step reference. 60 paths are drawn.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram sfr" role="region" aria-label={alt} data-sfr>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 360" role="img" aria-labelledby="sfr-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="sfr-title">Euler paths on an even and a sway time grid, compared with the exact paths</title>
+    <g data-panels></g>
+    <text data-r1 x="20" y="318" font-size="12.5" font-weight="700" fill="#2b2b30"></text>
+    <text data-r2 x="20" y="340" font-size="11.5" fill="#5f5f66"></text>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Steps</span><div class="fig-chips">
+      {[4, 8, 16].map((n) => <button type="button" class="fig-chip" data-n={n} aria-pressed={n === 4 ? "true" : "false"}>{n}</button>)}
+    </div></div>
+    <label><span class="fig-panel__name">Sway s (right panel)<strong data-vs></strong></span><input class="scrub" data-s type="range" min="-1" max="0" step="0.1" value="-1" /></label>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { setupFigure, tween } from "../../lib/figure-motion";
+  import { gauss } from "../../lib/flow-math";
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-sfr]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const sIn = $<HTMLInputElement>("[data-s]");
+    const mk = (g: Element, tag: string, a: Record<string, string | number>, txt?: string) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, String(a[k])); if (txt !== undefined) e.textContent = txt; g.append(e); return e; };
+    const sway = (u: number, s: number) => u + s * (Math.cos((Math.PI / 2) * u) - 1 + u);
+    // Exact marginal velocity for the two-Gaussian target on straight paths.
+    const vel = (t: number, x: number) => {
+      let num = 0, den = 0;
+      for (const c of [-2, 2]) { const m = t * c, s2 = (1 - t) ** 2 + t * t * 0.01, s = Math.sqrt(s2), w = Math.exp(-((x - m) ** 2) / (2 * s2)) / s, ds = (-(1 - t) + t * 0.01) / s; num += w * (c + (ds / s) * (x - m)); den += w; }
+      return num / den;
+    };
+    const solve = (x0: number, ts: number[]) => { const p = [x0]; let x = x0; for (let k = 0; k < ts.length - 1; k++) { x += (ts[k + 1] - ts[k]) * vel(ts[k], x); p.push(x); } return p; };
+    const g = gauss(1), starts = Array.from({ length: 2000 }, () => g());
+    const fine = Array.from({ length: 4001 }, (_, k) => k / 4000);
+    const ref = starts.map((x) => solve(x, fine));
+    let n = 4, prog = 1;
+    function draw() {
+      const s = +sIn.value, grids = [Array.from({ length: n + 1 }, (_, k) => k / n), Array.from({ length: n + 1 }, (_, k) => sway(k / n, s))];
+      const gp = $("[data-panels]"); gp.replaceChildren();
+      const stats = grids.map((ts, pi) => {
+        const x0 = 20 + pi * 390, X = (t: number) => x0 + 20 + t * 330, Y = (v: number) => 150 - v * 50;
+        mk(gp, "text", { x: x0, y: 20, "font-size": 11.5, "font-weight": 700, fill: "#2b2b30" }, pi ? `Sway grid, s = ${s.toFixed(1)}` : "Even grid");
+        mk(gp, "rect", { x: x0 + 20, y: 30, width: 330, height: 240, fill: "none", stroke: "#ececf1" });
+        ts.forEach((t) => mk(gp, "line", { x1: X(t), x2: X(t), y1: 270, y2: 280, stroke: pi ? "#594578" : "#2b2b30", "stroke-width": 1.5 }));
+        mk(gp, "text", { x: X(0), y: 294, "font-size": 10, "text-anchor": "middle", fill: "#5f5f66" }, "t = 0"); mk(gp, "text", { x: X(1), y: 294, "font-size": 10, "text-anchor": "middle", fill: "#5f5f66" }, "1");
+        let err = 0, wrong = 0;
+        starts.forEach((x, i) => {
+          const p = solve(x, ts), end = p[p.length - 1], r = ref[i][4000];
+          err += Math.abs(end - r); if (Math.sign(end) !== Math.sign(r)) wrong++;
+          if (i < 60) {
+            let d = ""; for (let k = 0; k <= 4000; k += 80) d += `${k ? "L" : "M"}${X(k / 4000).toFixed(1)} ${Y(ref[i][k]).toFixed(1)}`;
+            mk(gp, "path", { d, fill: "none", stroke: "#d5d5dc", "stroke-width": 0.8 });
+            const upto = Math.round(prog * n); let e = ""; for (let k = 0; k <= upto; k++) e += `${k ? "L" : "M"}${X(ts[k]).toFixed(1)} ${Y(p[k]).toFixed(1)}`;
+            mk(gp, "path", { d: e, fill: "none", stroke: pi ? "#594578" : "#35588a", "stroke-width": 1.2, "stroke-opacity": 0.8 });
+          }
+        });
+        return { err: err / starts.length, wrong: (100 * wrong) / starts.length };
+      });
+      $("[data-r1]").textContent = `Average miss at t = 1 with ${n} steps: even ${stats[0].err.toFixed(3)}, sway ${stats[1].err.toFixed(3)}.  Wrong side: ${stats[0].wrong.toFixed(1)}% and ${stats[1].wrong.toFixed(1)}%.`;
+      $("[data-r2]").textContent = "With the exact velocity, sway does not help here, and at few steps it is worse. Grey: exact paths. The gain in the paper must come from the trained network.";
+      $("[data-vs]").textContent = s.toFixed(1); sIn.style.setProperty("--p", `${(s + 1) * 100}%`);
+    }
+    sIn.addEventListener("input", draw);
+    root.querySelectorAll<HTMLButtonElement>("[data-n]").forEach((b) => b.addEventListener("click", () => { n = +b.dataset.n!; root.querySelectorAll("[data-n]").forEach((o) => o.setAttribute("aria-pressed", String(o === b))); draw(); }));
+    draw();
+    setupFigure(root, () => { prog = 0; draw(); }, async (alive) => { await tween(2, (e) => { if (alive()) { prog = e; draw(); } }); prog = 1; draw(); });
+  });
+</script>

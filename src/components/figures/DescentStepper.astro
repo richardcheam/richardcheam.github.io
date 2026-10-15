@@ -1,0 +1,74 @@
+---
+// Foundations, loss post: gradient descent on L(w) = (w − 3)², three
+// operations per update: feel the slope, scale it, step against it.
+// Defaults w = 0, η = 0.1: w = 0.6, 1.08, 1.464, 1.7712; loss 5.76,
+// 3.6864, 2.3593; distance to the bottom × 0.8 each step.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-descent>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 300" role="img" aria-labelledby="ds-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="ds-title">A ball on the curve (w − 3)² stepping downhill, with each update written out</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <label><span class="fig-panel__name">Start w <strong data-v="w0"></strong></span><input class="scrub" data-k="w0" type="range" min="-2" max="8" step="0.5" value="0" /></label>
+    <label><span class="fig-panel__name">Learning rate η <strong data-v="eta"></strong></span><input class="scrub" data-k="eta" type="range" min="0.01" max="1.2" step="0.01" value="0.1" /></label>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt, par } from "../../lib/tiny-net";
+  import { INK, MUTED, JADE, NEG, GOLD } from "../../lib/net-diagram";
+  import { frame, txt, arrow } from "../../lib/plot";
+  const N = 4, L = (w: number) => (w - 3) ** 2, dL = (w: number) => 2 * (w - 3);
+  document.querySelectorAll<HTMLElement>("[data-descent]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const p: Record<string, number> = { w0: 0, eta: 0.1 };
+    const path = () => { const ws = [p.w0]; for (let i = 0; i < N; i++) ws.push(ws[i] - p.eta * dL(ws[i])); return ws; };
+    const steps = () => {
+      const ws = path(), out = [];
+      for (let i = 0; i < N; i++) {
+        const w = ws[i], g = dL(w), st = p.eta * g, nw = ws[i + 1], d0 = Math.abs(w - 3), d1 = Math.abs(nw - 3);
+        out.push({ say: `Update ${i + 1}: feel the slope under the ball. ${g < 0 ? "Negative: the ground rises to the left, so downhill is to the right." : g > 0 ? "Positive: downhill is to the left." : "Zero: the ball is at the bottom."}`, math: `slope = 2 × (w − 3) = 2 × (${fmt(w, 4)} − 3) = ${fmt(g, 4)}` });
+        out.push({ say: "Multiply the slope by the learning rate. This is how far to move, still pointing uphill.", math: `η × slope = ${fmt(p.eta)} × ${par(g, 4)} = ${fmt(st, 4)}` });
+        out.push({ say: `Step the other way. ${d0 > 1e-9 ? `The distance to the bottom went from ${fmt(d0, 4)} to ${fmt(d1, 4)}, multiplied by 1 − 2η = ${fmt(1 - 2 * p.eta)}.` : ""}`, math: `w = ${fmt(w, 4)} − ${par(st, 4)} = ${fmt(nw, 4)}     loss = (${fmt(nw, 4)} − 3)² = ${fmt(L(nw), 4)}` });
+      }
+      return out;
+    };
+    function draw(k: number) {
+      const ws = path(), it = k < 0 ? -1 : Math.floor(k / 3), sub = k < 0 ? -1 : k % 3;
+      const cur = it < 0 ? ws[0] : sub === 2 ? ws[it + 1] : ws[it];
+      const F = frame({ l: 50, t: 30, w: 400, h: 230, x0: -2, x1: 8, y0: 0, y1: 26 });
+      let s = F.grid([-2, 0, 2, 4, 6, 8], [0, 5, 10, 15, 20, 25], 0);
+      s += txt(50, 18, "Loss L(w) = (w − 3)²", `font-size="12" font-weight="700" fill="${INK}"`);
+      s += F.curve(L, `stroke="${JADE}" stroke-width="2.5"`);
+      // Trail of earlier positions.
+      const done = it < 0 ? 0 : sub === 2 ? it + 1 : it;
+      for (let i = 0; i < done; i++) s += `<circle cx="${F.X(ws[i])}" cy="${F.clampY(L(ws[i]))}" r="4" fill="${MUTED}" fill-opacity="0.5"/>`;
+      if (it >= 0 && sub <= 1) {
+        const w = ws[it], g = dL(w), h = 1.2;
+        s += `<line x1="${F.X(w - h)}" y1="${F.clampY(L(w) - g * h)}" x2="${F.X(w + h)}" y2="${F.clampY(L(w) + g * h)}" stroke="${GOLD}" stroke-width="2.5"/>`;
+        if (sub === 1) { const st = p.eta * g; s += arrow(F.X(w), F.Y(0) - 14, F.X(w + st), F.Y(0) - 14, NEG) + txt(F.X(w + st / 2), F.Y(0) - 22, "η × slope (uphill)", `font-size="10.5" text-anchor="middle" fill="${NEG}"`); }
+      }
+      if (it >= 0 && sub === 2) s += arrow(F.X(ws[it]), F.Y(0) - 14, F.X(ws[it + 1]), F.Y(0) - 14, GOLD) + txt(F.X((ws[it] + ws[it + 1]) / 2), F.Y(0) - 22, "the step taken", `font-size="10.5" text-anchor="middle" fill="${GOLD}"`);
+      const off = cur < -2 || cur > 8;
+      s += off ? txt(F.X(cur < -2 ? -2 : 8), 50, cur < -2 ? "◀ off the chart" : "off the chart ▶", `font-size="11.5" font-weight="700" text-anchor="${cur < -2 ? "start" : "end"}" fill="${NEG}"`) : `<circle cx="${F.X(cur)}" cy="${F.clampY(L(cur))}" r="8" fill="${INK}" stroke="#fff" stroke-width="2"/>`;
+      // Log table.
+      const cx = [490, 520, 590, 680];
+      ["step", "w", "loss", "distance"].forEach((h, i) => (s += txt(cx[i], 40, h, `font-size="11" font-weight="700" fill="${MUTED}"`)));
+      for (let i = 0; i <= done; i++) {
+        const y = 64 + i * 24, w = ws[i];
+        [String(i), fmt(w, 4), fmt(L(w), 4), fmt(Math.abs(w - 3), 4)].forEach((t, j) => (s += txt(cx[j], y, t, `font-size="12" font-weight="${i === done ? 700 : 400}" fill="${INK}"`)));
+      }
+      s += txt(490, 200, `Each step multiplies the distance by`, `font-size="11.5" fill="${MUTED}"`);
+      s += txt(490, 218, `1 − 2η = ${fmt(1 - 2 * p.eta)}`, `font-size="13" font-weight="700" fill="${Math.abs(1 - 2 * p.eta) >= 1 ? NEG : GOLD}"`);
+      s += txt(490, 238, Math.abs(1 - 2 * p.eta) >= 1 ? (Math.abs(1 - 2 * p.eta) === 1 ? "Size exactly 1: it bounces forever." : "Bigger than 1 in size: it runs away.") : 1 - 2 * p.eta < 0 ? "Negative: it hops across the bottom." : "Below 1: it closes in.", `font-size="11.5" fill="${MUTED}"`);
+      $("[data-draw]").innerHTML = s;
+      root.querySelectorAll<HTMLElement>("[data-v]").forEach((el) => (el.textContent = fmt(p[el.dataset.v!], 2)));
+    }
+    const redraw = stepper(root, steps, draw, { delay: 1.3 });
+    root.querySelectorAll<HTMLInputElement>("[data-k]").forEach((inp) => inp.addEventListener("input", () => { p[inp.dataset.k!] = +inp.value; redraw(); }));
+  });
+</script>

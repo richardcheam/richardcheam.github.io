@@ -1,0 +1,58 @@
+---
+// Foundations, convolutions post: four kernels on the step signal
+// (0, 0, 0, 3, 3, 3, 0, 0). Edge (−1, 0, 1): 0, 3, 3, 0, −3, −3. Smooth
+// (⅓, ⅓, ⅓): 0, 1, 2, 3, 2, 1. Identity: 0, 0, 3, 3, 3, 0. Sharpen
+// (−1, 3, −1): 0, −3, 6, 3, 6, −3.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-kgal>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 280" role="img" aria-labelledby="kg-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="kg-title">A step signal and what different kernels turn it into</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Kernel</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-pre="-1,0,1" aria-pressed="true">Edge</button>
+      <button type="button" class="fig-chip" data-pre="0.3333,0.3333,0.3333" aria-pressed="false">Smooth</button>
+      <button type="button" class="fig-chip" data-pre="0,1,0" aria-pressed="false">Identity</button>
+      <button type="button" class="fig-chip" data-pre="-1,3,-1" aria-pressed="false">Sharpen</button>
+    </div></div>
+    <label><span class="fig-panel__name">Tap 1 <strong data-v="0"></strong></span><input class="scrub" data-t="0" type="range" min="-3" max="3" step="0.1" value="-1" /></label>
+    <label><span class="fig-panel__name">Tap 2 <strong data-v="1"></strong></span><input class="scrub" data-t="1" type="range" min="-3" max="3" step="0.1" value="0" /></label>
+    <label><span class="fig-panel__name">Tap 3 <strong data-v="2"></strong></span><input class="scrub" data-t="2" type="range" min="-3" max="3" step="0.1" value="1" /></label>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { fmt, par } from "../../lib/tiny-net";
+  import { INK, MUTED, GOLD, JADE, NEG, TINT } from "../../lib/net-diagram";
+  import { txt } from "../../lib/plot";
+  import { conv1d, clean } from "../../lib/conv";
+  const X = [0, 0, 0, 3, 3, 3, 0, 0];
+  document.querySelectorAll<HTMLElement>("[data-kgal]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    let w = [-1, 0, 1];
+    const wl = (v: number) => (Math.abs(v - 1 / 3) < 0.001 ? "⅓" : v < 0 ? `(${fmt(v, 2)})` : fmt(v, 2));
+    const steps = () => conv1d(X, w).out.map((y, n) => ({ say: n === 0 ? "The kernel reads the first window: three flat zeros." : X[n + 2] !== X[n] ? "This window straddles a change in the signal." : "This window is flat.", math: `y[${n}] = ${w.map((v, j) => `${wl(v)} × ${X[n + j]}`).join(" + ")} = ${fmt(clean(y), 2)}` }));
+    function draw(k: number) {
+      const out = conv1d(X, w).out, bx = (i: number) => 80 + i * 80;
+      const top = Math.max(3, ...out.map(Math.abs));
+      let s = txt(30, 20, "Signal", `font-size="12" font-weight="700" fill="${INK}"`) + `<line x1="70" x2="720" y1="100" y2="100" stroke="#cfd5d4"/>`;
+      X.forEach((v, i) => { const on = k >= 0 && i >= k && i < k + 3; s += `<rect x="${bx(i)}" y="${100 - v * 22}" width="56" height="${v * 22}" fill="${on ? GOLD : JADE}" fill-opacity="${on ? 0.8 : 0.45}"/>` + txt(bx(i) + 28, 116, String(v), `font-size="11" text-anchor="middle" fill="${MUTED}"`); if (on) s += `<rect x="${bx(i) - 4}" y="28" width="64" height="94" fill="none" stroke="${GOLD}" stroke-dasharray="4 3"/>`; });
+      s += txt(30, 150, `Output with kernel (${w.map(wl).join(", ")})`, `font-size="12" font-weight="700" fill="${INK}"`) + `<line x1="70" x2="720" y1="214" y2="214" stroke="#cfd5d4"/>`;
+      out.forEach((v, n) => {
+        const x = bx(n + 1), h = (v / top) * 50, on = n <= k || k < 0;
+        s += `<rect x="${x}" y="${Math.min(214, 214 - h)}" width="56" height="${Math.abs(h)}" fill="${v >= 0 ? JADE : NEG}" fill-opacity="${on ? (n === k ? 1 : 0.7) : 0.12}"/>` + txt(x + 28, v >= 0 ? 232 : 206 - Math.abs(h), on ? fmt(clean(v), 2) : "", `font-size="11.5" font-weight="700" text-anchor="middle" fill="${INK}"`);
+      });
+      s += txt(30, 268, "Each output bar sits under the centre of its window.", `font-size="11" fill="${MUTED}"`);
+      $("[data-draw]").innerHTML = s;
+      root.querySelectorAll<HTMLElement>("[data-v]").forEach((el) => (el.textContent = wl(w[+el.dataset.v!])));
+    }
+    const redraw = stepper(root, steps, draw, { delay: 1.2 });
+    const sync = () => root.querySelectorAll<HTMLInputElement>("[data-t]").forEach((inp) => (inp.value = String(w[+inp.dataset.t!])));
+    root.querySelectorAll<HTMLInputElement>("[data-t]").forEach((inp) => inp.addEventListener("input", () => { w = [...w]; w[+inp.dataset.t!] = +inp.value; root.querySelectorAll("[data-pre]").forEach((o) => o.setAttribute("aria-pressed", "false")); redraw(); }));
+    root.querySelectorAll<HTMLButtonElement>("[data-pre]").forEach((b) => b.addEventListener("click", () => { w = b.dataset.pre!.split(",").map((v) => (v === "0.3333" ? 1 / 3 : +v)); sync(); root.querySelectorAll("[data-pre]").forEach((o) => o.setAttribute("aria-pressed", String(o === b))); redraw(); }));
+  });
+</script>

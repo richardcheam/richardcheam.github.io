@@ -1,0 +1,87 @@
+---
+// Whisper review, Figure 2: the decoder's job description (Sec 2.3, p. 3;
+// Fig 1, p. 4). Optional previous text, start of transcript, a language tag,
+// a task tag, optional no-timestamps, the text (with timestamp tokens at
+// 20 ms steps), end of transcript. Token spellings follow the released
+// tokenizer. The sentences are toy examples.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram ttb" role="region" aria-label={alt} data-ttb>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 250" role="img" aria-labelledby="ttb-title" class="blog-diagram-svg" font-family="Inter, 'Noto Sans Khmer', sans-serif">
+    <title id="ttb-title">Special tokens at the start of Whisper's output choosing language, task and timestamps</title>
+    <g data-row></g>
+    <text data-r1 x="20" y="196" font-size="12.5" font-weight="700" fill="#2b2b30"></text>
+    <text data-r2 x="20" y="218" font-size="12" fill="#2b2b30"></text>
+    <text data-r3 x="20" y="240" font-size="11.5" fill="#5f5f66"></text>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Spoken language</span><div class="fig-chips">
+      {["en", "fr", "km"].map((l, i) => <button type="button" class="fig-chip" data-lang={l} aria-pressed={i === 0 ? "true" : "false"}>{l}</button>)}
+    </div></div>
+    <div><span class="fig-panel__name">Options</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-o="translate" aria-pressed="false">Translate to English</button>
+      <button type="button" class="fig-chip" data-o="ts" aria-pressed="true">Timestamps</button>
+      <button type="button" class="fig-chip" data-o="prev" aria-pressed="false">Previous text</button>
+      <button type="button" class="fig-chip" data-o="silent" aria-pressed="false">Nobody speaking</button>
+    </div></div>
+    <label><span class="fig-panel__name">Round a time t (seconds)</span><input class="fig-text" data-t type="number" step="0.001" min="0" max="30" value="1.234" /></label>
+  </div>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<style>
+  .ttb .fig-text { font: inherit; font-size: 0.9rem; padding: 0.2rem 0.45rem; border: 1px solid var(--line, #d5d5dc); border-radius: 4px; background: transparent; color: inherit; width: 7rem; }
+</style>
+
+<script>
+  import { setupFigure, wait } from "../../lib/figure-motion";
+  const NS = "http://www.w3.org/2000/svg";
+  document.querySelectorAll<HTMLElement>("[data-ttb]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const mk = (g: Element, tag: string, a: Record<string, string | number>, txt?: string) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, String(a[k])); if (txt !== undefined) e.textContent = txt; g.append(e); return e; };
+    const TEXT: Record<string, string> = { en: "the cat sat", fr: "le chat s'est assis", km: "ឆ្មាអង្គុយ" };
+    const st: Record<string, boolean> = { translate: false, ts: true, prev: false, silent: false };
+    let lang = "en", shown = 99;
+    type Tok = { t: string; kind: "prev" | "special" | "lang" | "task" | "time" | "text" };
+    function tokens(): Tok[] {
+      const out: Tok[] = [];
+      if (st.prev) out.push({ t: "<|startofprev|>", kind: "prev" }, { t: "…earlier words", kind: "prev" });
+      out.push({ t: "<|startoftranscript|>", kind: "special" });
+      if (st.silent) { out.push({ t: "<|nospeech|>", kind: "lang" }); return out; }
+      out.push({ t: `<|${lang}|>`, kind: "lang" }, { t: st.translate ? "<|translate|>" : "<|transcribe|>", kind: "task" });
+      if (!st.ts) out.push({ t: "<|notimestamps|>", kind: "special" });
+      if (st.ts) out.push({ t: "<|0.40|>", kind: "time" });
+      out.push({ t: st.translate ? TEXT.en : TEXT[lang], kind: "text" });
+      if (st.ts) out.push({ t: "<|1.56|>", kind: "time" });
+      out.push({ t: "<|endoftext|>", kind: "special" });
+      return out;
+    }
+    const COL = { prev: "#b9b9c2", special: "#2b2b30", lang: "#35588a", task: "#594578", time: "#b8722c", text: "#4F5D3A" };
+    function draw() {
+      const g = $("[data-row]"); g.replaceChildren();
+      mk(g, "text", { x: 20, y: 22, "font-size": 11.5, "font-weight": 700, fill: "#2b2b30" }, "What the decoder writes, left to right");
+      let x = 20, y = 40;
+      const T = tokens();
+      T.slice(0, shown).forEach((tk) => {
+        const w = Math.max(40, tk.t.length * (tk.kind === "text" ? 8 : 6.4) + 14);
+        if (x + w > 760) { x = 20; y += 46; }
+        mk(g, "rect", { x, y, width: w, height: 32, rx: 4, fill: COL[tk.kind], "fill-opacity": tk.kind === "prev" ? 0.35 : 0.9 });
+        mk(g, "text", { x: x + w / 2, y: y + 21, "font-size": tk.kind === "text" ? 13 : 10.5, "text-anchor": "middle", fill: "#fff", "font-family": tk.kind === "text" ? "inherit" : "ui-monospace, SFMono-Regular, Menlo, monospace" }, tk.t);
+        x += w + 6;
+      });
+      mk(g, "text", { x: 20, y: 150, "font-size": 10.5, fill: "#5f5f66" }, "blue: language   purple: task   orange: time   green: text   grey: previous text (given, not graded)");
+      const t = Math.max(0, Math.min(30, +$<HTMLInputElement>("[data-t]").value || 0)), k = Math.round(t / 0.02);
+      $("[data-r1]").textContent = `${T.length} tokens. ${st.silent ? "No speech: the model stops right after saying so." : st.translate ? "Same audio, task switched: the text comes out in English." : "Language identification is just the first word the decoder writes."}`;
+      $("[data-r2]").textContent = `A time of ${t} s becomes token number round(${t} ÷ 0.02) = ${k}, which reads ${(k * 0.02).toFixed(2)} s.`;
+      $("[data-r3]").textContent = "From 0 to 30 s in 20 ms steps there are 1,501 timestamp tokens. Sentences here are toy examples.";
+      root.querySelectorAll("[data-lang]").forEach((b) => b.setAttribute("aria-pressed", String(b.getAttribute("data-lang") === lang)));
+      root.querySelectorAll("[data-o]").forEach((b) => b.setAttribute("aria-pressed", String(st[b.getAttribute("data-o")!])));
+    }
+    const replay = async (alive = () => true) => { const n = tokens().length; for (shown = 0; shown <= n; shown++) { if (!alive()) return; draw(); await wait(0.25); } shown = 99; };
+    root.querySelectorAll<HTMLButtonElement>("[data-lang]").forEach((b) => b.addEventListener("click", () => { lang = b.dataset.lang!; replay(); }));
+    root.querySelectorAll<HTMLButtonElement>("[data-o]").forEach((b) => b.addEventListener("click", () => { st[b.dataset.o!] = !st[b.dataset.o!]; replay(); }));
+    $("[data-t]").addEventListener("input", draw);
+    draw();
+    setupFigure(root, () => { shown = 0; draw(); }, replay);
+  });
+</script>

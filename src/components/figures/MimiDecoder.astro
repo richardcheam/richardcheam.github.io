@@ -1,0 +1,57 @@
+---
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" tabindex="0" role="region" aria-label={alt} data-md>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 230" role="img" aria-labelledby="md-title md-desc" class="blog-diagram-svg" font-family="Inter, sans-serif">
+<title id="md-title">Mimi decoder upsampling</title><desc id="md-desc">Five stages left to right. A narrow block of 12.5 latent frames by 32 channels widens to 512 channels, is upsampled 16 times to 200 frames per second, passes a small transformer, then is upsampled 120 times by convolutions into a 24 000 sample waveform.</desc>
+<defs><marker id="md-a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#5f5f66" stroke-width="1.6"/></marker></defs>
+<rect data-stage="0" x="20" y="70" width="40" height="60" fill="#4F5D3A" fill-opacity="0.5"/>
+<rect data-stage="1" x="110" y="40" width="40" height="120" fill="#4F5D3A" fill-opacity="0.35"/>
+<rect data-stage="2" x="200" y="40" width="130" height="120" fill="#4F5D3A" fill-opacity="0.2"/>
+<rect data-stage="3" x="380" y="40" width="40" height="120" fill="#594578" fill-opacity="0.3"/>
+<path data-stage="4" d="M470 100 C480 60 486 140 494 100 S506 50 514 100 S524 150 532 100 S542 70 548 100 S560 140 568 100 S578 40 588 100 S600 150 610 100 S622 70 630 100 S644 130 652 100 S666 55 676 100 S690 140 700 100 S716 80 726 100 S742 120 760 100" fill="none" stroke="#4F5D3A" stroke-width="1.6"/>
+<g stroke="#5f5f66" stroke-width="1.4" marker-end="url(#md-a)"><line data-arrow="0" x1="64" y1="100" x2="106" y2="100"/><line data-arrow="1" x1="154" y1="100" x2="196" y2="100"/><line data-arrow="2" x1="334" y1="100" x2="376" y2="100"/><line data-arrow="3" x1="424" y1="100" x2="466" y2="100"/></g>
+<g font-size="12" fill="#2b2b30"><text data-label="0" x="10" y="190">[12.5, 32]</text><text data-label="1" x="96" y="190">[12.5, 512]</text><text data-label="2" x="200" y="190">[200, 512] · ×16</text><text data-label="3" x="372" y="190">transformer</text><text data-label="4" x="540" y="190">[24 000] · ×6·5·4 = ×120</text></g>
+<g font-size="11" fill="#5f5f66"><text data-label="0" x="10" y="208">latents</text><text data-label="1" x="96" y="208">linear 32→512</text><text data-label="2" x="200" y="208">transposed conv</text><text data-label="3" x="372" y="208">2 layers @ 200 Hz</text><text data-label="4" x="540" y="208">SEANet decoder, causal convs</text></g>
+</svg>
+<button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+<p class="blog-figure-reading">16 × 120 = 1 920: every 32-number latent becomes 80 ms of audio.</p>
+
+<script>
+  import { animate, drawStroke, dur, hideStroke, setupFigure } from "../../lib/figure-motion";
+
+  // Left to right, each stage shows what it does to the tensor: the linear layer
+  // grows the channels, the transposed conv stretches time, the transformer
+  // reads it in place, and SEANet draws out the waveform.
+  document.querySelectorAll<HTMLElement>("[data-md]").forEach((root) => {
+    const stage = (i: number) => root.querySelector<SVGElement>(`[data-stage="${i}"]`)!;
+    const arrows = Array.from({ length: 4 }, (_, i) => root.querySelector<SVGLineElement>(`[data-arrow="${i}"]`)!);
+    const labels = (i: number) => Array.from(root.querySelectorAll<SVGTextElement>(`[data-label="${i}"]`));
+    const show = (els: SVGElement[]) => els.forEach((el) => animate(el, { opacity: [0, 1] }, { duration: dur(0.35) }));
+    const grow: Record<number, string[]> = {
+      0: ["scale(1, 0.4)", "scale(1, 1)"],
+      1: ["scale(1, 0.5)", "scale(1, 1)"],
+      2: ["scale(0.31, 1)", "scale(1, 1)"],
+      3: ["scale(1, 1)", "scale(1, 1)"],
+    };
+    setupFigure(
+      root,
+      () => {
+        for (let i = 0; i < 4; i++) { stage(i).style.opacity = "0"; stage(i).style.transformBox = "fill-box"; stage(i).style.transformOrigin = i === 2 ? "0% 50%" : "50% 50%"; }
+        hideStroke(stage(4));
+        arrows.forEach((a) => (a.style.opacity = "0"));
+        for (let i = 0; i < 5; i++) labels(i).forEach((t) => (t.style.opacity = "0"));
+      },
+      async (alive) => {
+        for (let i = 0; i < 5; i++) {
+          if (!alive()) return;
+          if (i > 0) await animate(arrows[i - 1], { opacity: [0, 1], transform: ["translateX(-8px)", "translateX(0px)"] }, { duration: dur(0.3) });
+          show(labels(i));
+          if (i < 4) await animate(stage(i), { opacity: [0, 1], transform: grow[i] }, { duration: dur(0.6), ease: [0.22, 1, 0.36, 1] });
+          else await drawStroke(stage(4), 1.4, "linear");
+        }
+      },
+    );
+  });
+</script>

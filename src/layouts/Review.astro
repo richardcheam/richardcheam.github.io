@@ -1,0 +1,106 @@
+---
+import { marked } from "marked";
+import Base from "./Base.astro";
+import ReviewCard from "../components/ReviewCard.astro";
+import "katex/dist/katex.min.css";
+import { publishedReviews, readMinutes, reviewUrl, shortDate, stripHtml, topicLabels, typeLabel, type Review } from "../lib/content";
+
+interface Props {
+  review: Review;
+}
+const { review } = Astro.props;
+const d = review.data;
+const all = await publishedReviews();
+const seriesDocs = d.series ? all.filter((r) => r.data.series === d.series).sort((a, b) => (a.data.series_order ?? 0) - (b.data.series_order ?? 0)) : [];
+const i = seriesDocs.findIndex((r) => r.id === review.id);
+const prev = i > 0 ? seriesDocs[i - 1] : undefined;
+const next = i >= 0 && i < seriesDocs.length - 1 ? seriesDocs[i + 1] : undefined;
+const related = all
+  .filter((r) => r.id !== review.id && !(d.series && r.data.series === d.series) && r.data.topic.some((t) => d.topic.includes(t)))
+  .slice(0, 3);
+const sourceLabel = d.source_label || (d.type === "tech-report" ? "Read the report" : "Read the paper");
+const inline = (md: string) => (marked.parseInline(md) as string).trim();
+import SignatureMark from "../components/SignatureMark.astro";
+---
+<Base title={d.title} description={d.excerpt ? stripHtml(d.excerpt) : undefined} image={`/og/paper-reviews/${review.id}.png`}>
+  <article class="review">
+    <div class="review-back">
+      <a class="notes-backlink" href="/paper-reviews/">Back to Paper Reviews</a>
+    </div>
+
+    <header class="review-head" data-reveal>
+      <p class="review-head__kicker">
+        <span class={`type-badge type-badge--${d.type}`}>{typeLabel(d.type, true)}</span>
+        {d.org && <span>{d.org}</span>}
+      </p>
+      {d.question && <p class="review-head__question">{d.question}</p>}
+      <h1 class="review-head__title">{d.title}</h1>
+      {d.excerpt && <p class="review-head__dek">{stripHtml(d.excerpt).trim()}</p>}
+      {(d.source_url || d.links.length > 0) && (
+        <div class="review-head__actions">
+          {d.source_url && <a class="btn btn--primary" href={d.source_url} target="_blank" rel="noopener noreferrer">{sourceLabel}<span class="btn__ext" aria-hidden="true">&#8599;</span><span class="sr-only"> (opens in a new tab)</span></a>}
+          {d.links.map((link) => <a class="btn btn--ghost" href={link.url} target="_blank" rel="noopener noreferrer">{link.label}<span class="btn__ext" aria-hidden="true">&#8599;</span><span class="sr-only"> (opens in a new tab)</span></a>)}
+        </div>
+      )}
+    </header>
+
+    <aside class="review-rail" aria-label="About this review">
+      <dl class="review-label">
+        {d.authors && <div><dt>Authors</dt><dd>{d.authors}</dd></div>}
+        {d.source_date && <div><dt>Published</dt><dd><time datetime={d.source_date.toISOString()}>{shortDate(d.source_date)}</time></dd></div>}
+        <div><dt>Reviewed</dt><dd><time datetime={d.date.toISOString()}>{shortDate(d.date)}</time></dd></div>
+        <div><dt>Reading</dt><dd>{readMinutes(review)} min</dd></div>
+        {d.topic.length > 0 && <div><dt>Topics</dt><dd>{topicLabels(d.topic, ", ")}</dd></div>}
+        {d.series && <div><dt>Series</dt><dd>{d.series_title ?? d.series}, {i + 1} of {seriesDocs.length}</dd></div>}
+        {d.tags.length > 0 && (
+          <div>
+            <dt>Tags</dt>
+            <dd class="review-label__tags">{d.tags.map((tag) => <span class="tag">{tag}</span>)}</dd>
+          </div>
+        )}
+      </dl>
+      <nav class="review-toc" aria-label="On this page" data-review-toc hidden>
+        <details class="review-toc__details" data-review-toc-details>
+          <summary class="review-toc__summary">On this page</summary>
+          <ol class="review-toc__list" data-review-toc-list></ol>
+        </details>
+      </nav>
+      <nav class="blog-rail review-constellation" aria-label="On this page" data-blog-rail data-rail-style="constellation" data-series="reviews" hidden>
+        <p class="blog-rail__current" aria-hidden="true"><span class="blog-rail__current-number" data-blog-rail-number></span><span class="blog-rail__current-text"><span class="blog-rail__current-title" data-blog-rail-title></span><span class="blog-rail__current-sub" data-blog-rail-sub></span></span></p>
+        <p class="blog-rail__label">On this page</p>
+        <ol class="blog-rail__list" data-blog-rail-list></ol>
+      </nav>
+    </aside>
+
+    <div class="review-body">
+      {d.tldr.length > 0 && (
+        <section class="review-tldr" aria-labelledby="review-tldr-title" data-reveal>
+          <h2 class="review-panel-title" id="review-tldr-title">In short</h2>
+          <ul class="review-tldr__list">{d.tldr.map((point) => <li set:html={inline(point)} />)}</ul>
+        </section>
+      )}
+      {d.glance.length > 0 && (
+        <section class="review-glance" aria-labelledby="review-glance-title" data-reveal>
+          <h2 class="review-panel-title" id="review-glance-title">At a glance</h2>
+          <dl class="review-glance__grid">{d.glance.map((item) => <div><dt>{item.label}</dt><dd>{item.value}</dd></div>)}</dl>
+        </section>
+      )}
+      <div class="review-prose" data-review-content>
+        <slot />
+        <p class="post-seal"><SignatureMark class="post-seal__mark" label="Richard Cheam" painted /></p>
+      </div>
+      {(prev || next) && (
+        <nav class="review-series" aria-label={d.series_title ?? "Series"}>
+          {prev && <a class="review-series__link review-series__link--prev" href={reviewUrl(prev)}><span class="review-series__dir">Previous in series</span><span class="review-series__title">{prev.data.title}</span></a>}
+          {next && <a class="review-series__link review-series__link--next" href={reviewUrl(next)}><span class="review-series__dir">Next in series</span><span class="review-series__title">{next.data.title}</span></a>}
+        </nav>
+      )}
+      {related.length > 0 && (
+        <section class="review-related" aria-labelledby="review-related-title">
+          <h2 class="review-panel-title" id="review-related-title">Related</h2>
+          <div class="review-related__list">{related.map((r) => <ReviewCard review={r} compact />)}</div>
+        </section>
+      )}
+    </div>
+  </article>
+</Base>

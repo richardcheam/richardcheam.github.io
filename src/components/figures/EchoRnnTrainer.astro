@@ -1,0 +1,67 @@
+---
+// Foundations, recurrent networks post: a one-unit RNN learning to remember
+// the first input after T steps (src/lib/rnn.ts, deterministic). Start
+// w_x = w_h = w_o = 0.5, η = 0.5. Loss below 0.01 at pass 6 (T 1), 8 (T 5),
+// 25 (T 10), 225 (T 15), never for T 20. Starting w_h at 1.0 solves T 20
+// at pass 5. Pass 1 is the untrained network.
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-echo>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 290" role="img" aria-labelledby="er-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="er-title">A tiny recurrent network training to remember its first input, with its loss over passes</title>
+    <g data-draw></g>
+  </svg>
+  <div class="fig-panel">
+    <div><span class="fig-panel__name">Training</span><div class="fig-chips">
+      <button type="button" class="fig-chip" data-play>Train</button>
+      <button type="button" class="fig-chip" data-one>One pass</button>
+      <button type="button" class="fig-chip" data-reset>Start over</button>
+    </div></div>
+    <label><span class="fig-panel__name">Delay T <strong data-v="T"></strong></span><input class="scrub" data-k="T" type="range" min="1" max="30" step="1" value="10" /></label>
+    <label><span class="fig-panel__name">Starting w_h <strong data-v="wh"></strong></span><input class="scrub" data-k="wh" type="range" min="0" max="1.5" step="0.1" value="0.5" /></label>
+    <label><span class="fig-panel__name">Learning rate η <strong data-v="eta"></strong></span><input class="scrub" data-k="eta" type="range" min="0.05" max="1" step="0.05" value="0.5" /></label>
+  </div>
+</div>
+
+<script>
+  import { fmt } from "../../lib/tiny-net";
+  import { INK, MUTED, GOLD, JADE, NEG } from "../../lib/net-diagram";
+  import { txt } from "../../lib/plot";
+  import { echoModel } from "../../lib/rnn";
+  const MAX = 2000;
+  const show = (v: number) => (Math.abs(v) >= 0.001 || v === 0 ? fmt(v, 4) : v.toExponential(2).replace("e-", " × 10^−").replace(/^-/, "−").replace(/^-/, "−"));
+  document.querySelectorAll<HTMLElement>("[data-echo]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const p: Record<string, number> = { T: 10, wh: 0.5, eta: 0.5 };
+    let m = echoModel(10, 0.5, 0.5), losses: number[] = [], solved = -1, playing = false, raf = 0, last = m.evaluate();
+    const reset = () => { m = echoModel(p.T, p.wh, p.eta); last = m.evaluate(); losses = [last.L]; solved = last.L < 0.01 ? 1 : -1; draw(); };
+    const passes = (n: number) => { for (let i = 0; i < n && losses.length < MAX; i++) { m.step(); last = m.evaluate(); losses.push(last.L); if (solved < 0 && last.L < 0.01) solved = losses.length; } };
+    function draw() {
+      const hs = m.hidden(1), w = m.w;
+      let s = txt(30, 20, `Hidden state at each step for first input +1 (delay ${p.T})`, `font-size="12" font-weight="700" fill="${INK}"`);
+      const bw = Math.min(40, 330 / p.T);
+      hs.forEach((h, t) => { const H = Math.abs(h) * 80; s += `<rect x="${30 + t * bw}" y="${h >= 0 ? 110 - H : 110}" width="${bw - 2}" height="${Math.max(1, H)}" fill="${h >= 0 ? GOLD : "#3E6E9E"}"/>`; });
+      s += `<line x1="30" x2="${30 + p.T * bw}" y1="110" y2="110" stroke="#cfd5d4"/>` + txt(30, 214, `final state ${show(hs[hs.length - 1])}, output ${show(w.wo * hs[hs.length - 1])} (target 1)`, `font-size="11.5" fill="${INK}"`);
+      s += txt(30, 238, `w_x ${fmt(w.wx, 3)}, w_h ${fmt(w.wh, 3)}, w_o ${fmt(w.wo, 3)}`, `font-size="11.5" fill="${MUTED}"`);
+      s += txt(30, 262, `gradient for w_x this pass: ${show(last.gx)}`, `font-size="12" font-weight="700" fill="${Math.abs(last.gx) < 1e-4 ? NEG : INK}"`);
+      // Loss curve.
+      const lx = (i: number) => 420 + (i / Math.max(50, losses.length)) * 310, ly = (v: number) => 190 - (Math.min(v, 0.5) / 0.5) * 150;
+      s += txt(420, 20, "Loss after each pass", `font-size="12" font-weight="700" fill="${INK}"`) + `<line x1="420" x2="730" y1="190" y2="190" stroke="#cfd5d4"/><line x1="420" x2="730" y1="${ly(0.01)}" y2="${ly(0.01)}" stroke="${JADE}" stroke-dasharray="3 3"/>` + txt(728, ly(0.01) - 4, "0.01: learned", `font-size="10" text-anchor="end" fill="${JADE}"`);
+      [0, 0.25, 0.5].forEach((v) => (s += txt(414, ly(v) + 4, fmt(v, 2), `font-size="10" text-anchor="end" fill="${MUTED}"`)));
+      const step = Math.max(1, Math.floor(losses.length / 300));
+      s += `<polyline fill="none" stroke="${GOLD}" stroke-width="2" points="${losses.filter((_, i) => i % step === 0 || i === losses.length - 1).map((v, j, a) => `${lx(j === a.length - 1 ? losses.length - 1 : j * step).toFixed(1)},${ly(v).toFixed(1)}`).join(" ")}"/>`;
+      s += txt(420, 222, `pass ${losses.length}, loss ${show(losses[losses.length - 1])}`, `font-size="13" font-weight="700" fill="${INK}"`);
+      s += txt(420, 246, solved > 0 ? `learned: loss below 0.01 at pass ${solved}` : losses.length >= MAX ? "never learned in 2,000 passes" : "not learned yet", `font-size="12" font-weight="700" fill="${solved > 0 ? JADE : losses.length >= MAX ? NEG : MUTED}"`);
+      $("[data-draw]").innerHTML = s;
+      root.querySelectorAll<HTMLElement>("[data-v]").forEach((el) => (el.textContent = fmt(p[el.dataset.v!], 2)));
+      $("[data-play]").textContent = playing ? "Pause" : losses.length >= MAX ? "Finished" : "Train";
+    }
+    const loop = () => { passes(8); draw(); if (playing && losses.length < MAX) raf = requestAnimationFrame(loop); else { playing = false; draw(); } };
+    const play = (on: boolean) => { playing = on && losses.length < MAX; cancelAnimationFrame(raf); if (playing) raf = requestAnimationFrame(loop); draw(); };
+    $("[data-play]").addEventListener("click", () => play(!playing));
+    $("[data-one]").addEventListener("click", () => { play(false); passes(1); draw(); });
+    $("[data-reset]").addEventListener("click", () => { play(false); reset(); });
+    root.querySelectorAll<HTMLInputElement>("[data-k]").forEach((inp) => inp.addEventListener("input", () => { p[inp.dataset.k!] = +inp.value; play(false); reset(); }));
+    reset();
+  });
+</script>
