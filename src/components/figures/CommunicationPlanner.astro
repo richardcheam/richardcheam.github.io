@@ -16,6 +16,8 @@ const fields = [
   { key: 'bucketMiB', label: 'Gradient bucket (MiB)', value: 25, min: 0.01, max: 100000, step: 0.01 },
   { key: 'backward', label: 'Backward compute time to overlap (s)', value: 1, min: 0, max: 100000, step: 0.01 },
 ];
+const scale = Math.max(defaults.backward, ...rows.map(r => r.total)) * 1.1;
+const pct = (t: number) => `${(100 * t / scale).toFixed(2)}%`;
 const kinds = (r: (typeof rows)[number]) => r.collectives.map(c => c.kind).join(' + ');
 ---
 <section class="comm-plan blog-diagram" data-comm-planner aria-label="Data-parallel communication planner">
@@ -31,6 +33,17 @@ const kinds = (r: (typeof rows)[number]) => r.collectives.map(c => c.kind).join(
   <noscript><p>The default worked example is shown below. Enable JavaScript to change its inputs.</p></noscript>
   <p class="comm-status" data-comm-status role="status" aria-live="polite" aria-atomic="true">Default: 7 billion parameters in BF16, 8 ranks, α = 5 µs, 40 GB/s, 25 MiB buckets, 1 s of backward compute.</p>
   <div data-comm-results>
+    <div class="comm-bars" aria-hidden="true">
+      <p class="comm-bars-title">Communication per step against the backward pass (dashed). Past the line, it cannot hide even with perfect overlap.</p>
+      {rows.map(r => <div class="comm-bar-row" data-comm-bar={r.stage}>
+        <span>{names[r.stage]}</span>
+        <div class="comm-track">
+          <span class="comm-seg comm-lat" data-seg="latency" style={`width:${pct(r.latency)}`}></span><span class="comm-seg comm-bw" data-seg="bandwidth" style={`width:${pct(r.bandwidthTerm)}`}></span>
+          <span class="comm-line" data-comm-line style={`left:${pct(defaults.backward)}`}></span>
+        </div>
+      </div>)}
+      <p class="comm-legend"><span><i class="comm-lat"></i>Latency term</span><span><i class="comm-bw"></i>Bandwidth term</span><span><i class="comm-line-key"></i>Backward compute</span></p>
+    </div>
     <div class="comm-table" tabindex="0" role="region" aria-label="Per-step communication estimates, scroll horizontally if needed">
       <table>
         <caption>Per rank, per optimizer step. GB = 10⁹ bytes.</caption>
@@ -62,8 +75,15 @@ const kinds = (r: (typeof rows)[number]) => r.collectives.map(c => c.kind).join(
         const v = Object.fromEntries(inputs.map(i => [i.dataset.commInput!, i.valueAsNumber]));
         const input = { parameters: Math.round(v.parameters * 1e9), bytesPerValue: v.bytesPerValue, ranks: v.ranks, alpha: v.alphaMicros * 1e-6, bandwidth: v.bandwidthGBs * 1e9, bucketBytes: v.bucketMiB * 2 ** 20 };
         let buckets = 0;
+        const all = ([0, 1, 2, 3] as const).map(stage => stageCommunication(stage, input));
+        const scale = Math.max(v.backward, ...all.map(r => r.total)) * 1.1 || 1;
+        const pct = (t: number) => `${(100 * t / scale).toFixed(2)}%`;
         for (const stage of [0, 1, 2, 3] as const) {
-          const r = stageCommunication(stage, input);
+          const r = all[stage];
+          const bar = root.querySelector<HTMLElement>(`[data-comm-bar="${stage}"]`)!;
+          bar.querySelector<HTMLElement>('[data-seg="latency"]')!.style.width = pct(r.latency);
+          bar.querySelector<HTMLElement>('[data-seg="bandwidth"]')!.style.width = pct(r.bandwidthTerm);
+          bar.querySelector<HTMLElement>('[data-comm-line]')!.style.left = pct(v.backward);
           const o = overlapBounds({ compute: v.backward, communication: r.total });
           buckets = r.buckets;
           const row = root.querySelector<HTMLElement>(`[data-comm-row="${stage}"]`)!;
@@ -103,4 +123,18 @@ const kinds = (r: (typeof rows)[number]) => r.collectives.map(c => c.kind).join(
   .comm-assumptions summary { cursor: pointer; font-weight: 600; }
   .comm-assumptions p { line-height: 1.6; }
   .comm-plan [hidden] { display: none !important; }
+  .comm-bars { margin: 1.2rem 0 .4rem; }
+  .comm-bars-title { font-size: .8rem; font-weight: 600; }
+  .comm-bar-row { display: grid; grid-template-columns: 11rem minmax(0, 1fr); gap: .7rem; align-items: center; margin: .55rem 0; font-size: .74rem; }
+  .comm-track { position: relative; display: flex; height: 18px; background: var(--bg); }
+  .comm-seg { display: block; height: 100%; transition: width .45s cubic-bezier(.22, 1, .36, 1); }
+  .comm-lat { background: color-mix(in srgb, var(--text) 70%, var(--bg)); }
+  .comm-bw { background: var(--blog-orientation); }
+  .comm-line { position: absolute; top: -4px; bottom: -4px; width: 0; border-left: 2px dashed var(--text); transition: left .45s cubic-bezier(.22, 1, .36, 1); }
+  .comm-legend { display: flex; flex-wrap: wrap; gap: .5rem 1rem; font-size: .7rem; color: var(--text-secondary); }
+  .comm-legend span { display: flex; gap: .35rem; align-items: center; }
+  .comm-legend i { width: .75rem; height: .75rem; }
+  .comm-legend .comm-line-key { width: 0; height: .9rem; border-left: 2px dashed var(--text); }
+  @media (prefers-reduced-motion: reduce) { .comm-seg, .comm-line { transition: none; } }
+  @media (max-width: 520px) { .comm-bar-row { grid-template-columns: 1fr; gap: .25rem; } }
 </style>

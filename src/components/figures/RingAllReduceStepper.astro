@@ -25,6 +25,8 @@ const end = ringAllReduceTrace(start).at(-1)!.state;
   import { INK, MUTED, JADE, GOLD, TINT } from "../../lib/net-diagram";
   import { txt, arrow } from "../../lib/plot";
   import { ringAllReduceTrace } from "../../lib/collectives";
+  import { reduce } from "../../lib/figure-motion";
+  import { animate } from "motion/mini";
   const P = 4;
   const START = Array.from({ length: P }, (_, r) => Array.from({ length: P }, (_, c) => (r + 1) * (c + 1)));
   const SUMS = Array.from({ length: P }, (_, c) => START.reduce((s, row) => s + row[c], 0));
@@ -32,6 +34,22 @@ const end = ringAllReduceTrace(start).at(-1)!.state;
   const CELL_X = (c: number) => 250 + c * 92, ROW_Y = (r: number) => 58 + r * 62;
   document.querySelectorAll<HTMLElement>("[data-ring-allreduce]").forEach((root) => {
     const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    let shown = -1;
+    // On a forward step, fly each sent chunk from its sender's cell to its
+    // receiver's cell while the receiver's number counts to the new value.
+    function flyPackets(sends: { from: number; to: number; chunk: number; value: number }[]) {
+      const layer = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      layer.setAttribute("aria-hidden", "true");
+      sends.forEach((e) => {
+        const x = CELL_X(e.chunk) + 24, y0 = ROW_Y(e.from) + 4, y1 = ROW_Y(e.to) + 4;
+        const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+        g.innerHTML = `<rect x="${x}" y="${y0}" width="32" height="28" rx="6" fill="${GOLD}"/>` + txt(x + 16, y0 + 19, String(e.value), `font-size="12.5" font-weight="700" text-anchor="middle" fill="#fff"`);
+        layer.append(g);
+        animate(g, { transform: ["translate(0px, 0px)", "translate(0px, 0px)", `translate(0px, ${y1 - y0}px)`, `translate(0px, ${y1 - y0}px)`], opacity: [1, 1, 1, 0] }, { duration: 1.1, times: [0, 0.15, 0.8, 1], ease: "easeInOut" }).then(() => g.remove());
+      });
+      $("svg").append(layer);
+      window.setTimeout(() => layer.remove(), 1400);
+    }
     const sendLines = (k: number) => TRACE[k].sends.map((s) => {
       const before = (k === 0 ? START : TRACE[k - 1].state)[s.to][s.chunk];
       return TRACE[k].phase === "reduce-scatter"
@@ -84,6 +102,10 @@ const end = ringAllReduceTrace(start).at(-1)!.state;
       s += txt(640, 160, k >= 4 ? (k >= 8 ? "all-reduce" : k >= 5 ? "all-gather" : "reduce-scatter") : k >= 1 ? "reduce-scatter" : "start", `font-size="12" font-weight="700" fill="${JADE}"`);
       s += txt(250, 316, "gold: a chunk that holds its final sum. Outlines: gold sends, green receives.", `font-size="10.5" fill="${MUTED}"`);
       $("[data-draw]").innerHTML = s;
+      // Launch after the step player has set up its transition (it runs right
+      // after draw), so the packets are not mistaken for shapes to fade in.
+      if (active && k === shown + 1 && !reduce) { const sends = active.sends; queueMicrotask(() => flyPackets(sends)); }
+      shown = k;
     }
     stepper(root, steps, draw, { delay: 2.6 });
   });
