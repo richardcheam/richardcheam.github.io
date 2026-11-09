@@ -1,96 +1,183 @@
 ---
+import { getCollection } from 'astro:content';
 import Base from '../../layouts/Base.astro';
-import { modelDevelopmentModules as modules, publishedUnits, unitKindLabel } from '../../data/model-development';
+import { modelDevelopmentModules as modules, publishedUnits, unitKindLabel, upcomingOrder } from '../../data/model-development.ts';
+import { courseOutline, minutes } from '../../lib/course';
 import sources from '../../data/model-development/sources.json';
-const moduleName = (id: string) => modules.find(m => m.id === id)!.title;
-const unitsFor = (id: string) => publishedUnits.filter(u => u.module === id);
-const start = publishedUnits[0];
+
+// Reading times come from each page's own front matter.
+const blog = await getCollection('blog');
+const reviews = await getCollection('paper-reviews');
+const readTime = (href: string) => {
+  const [, kind, id] = href.split('/');
+  const entry = kind === 'blog' ? blog.find(e => e.id === id) : reviews.find(e => e.id === id);
+  return minutes(entry?.data.read_time);
+};
+const outline = courseOutline().map(p => ({ ...p, units: p.units.map(x => ({ ...x, minutes: readTime(x.unit.href) })) }));
+const partMinutes = (units: { minutes?: number }[]) => units.reduce((s, x) => s + (x.minutes ?? 0), 0);
+const totalMinutes = partMinutes(outline.flatMap(p => p.units));
+const first = publishedUnits[0];
+const upcoming = upcomingOrder.map(id => modules.find(m => m.id === id)!);
 ---
-<Base title="Model development" description="A research field guide to foundation-model decisions: architecture, data, training systems, post-training and trustworthy evaluation.">
-  <header class="page-heading learning-head" data-reveal>
-    <p class="learning-kicker">A technical field guide · growing module by module</p>
+<Base title="Model development" description="A course in the decisions behind a foundation-model training run: what each GPU stores, what it sends, and how to choose a layout, with the evidence for each.">
+  <header class="course-head" data-reveal>
+    <p class="course-kicker">Course · foundation-model development</p>
     <h1>Model development</h1>
-    <p class="learning-dek">Learn to make the decisions behind a training run.</p>
-    <p>Architecture, data, optimization and infrastructure constrain each other. This guide connects their mechanisms to the evidence needed to choose between them.</p>
+    <p class="course-dek">Learn to make the decisions behind a training run, from the arithmetic up, and to check each one against the evidence.</p>
+    <p class="course-meta">{outline.length} parts · {publishedUnits.length} lessons · about {totalMinutes} minutes of reading, plus interactive figures</p>
+    <div class="course-progress" data-course-progress>
+      <a class="btn btn--primary" href={first.href} data-course-continue>Start the course →</a>
+      <div class="course-progress__meter" data-course-meter hidden>
+        <div class="course-progress__bar"><span data-course-fill></span></div>
+        <p data-course-count></p>
+      </div>
+    </div>
   </header>
 
-  <section class="learning-start" aria-labelledby="learning-start-title">
-    <p class="learning-kicker">Available now · distributed training systems</p>
-    <h2 id="learning-start-title">What must each GPU store, and what must it send?</h2>
-    <p>Start with a concrete decision: how to split a training job across GPUs. Derive the memory ledger, count the communication each layout requires, then choose a layout and the pilot that could overturn the choice. Two paper reviews test the evidence behind each step.</p>
-    <div class="learning-entry-links">
-      <a class="btn btn--primary" href={start.href}>Start with training memory →</a>
-      <a class="btn btn--ghost" href="#learning-path-title">See the reading path ↓</a>
-    </div>
-    <dl class="learning-facts"><div><dt>Prerequisites</dt><dd>Backpropagation, Adam, the Transformer's layers</dd></div><div><dt>Practice</dt><dd>Memory estimator, ring all-reduce stepper, communication planner, pipeline schedule</dd></div><div><dt>Evidence</dt><dd>Source-based analysis; nothing reproduced or benchmarked</dd></div></dl>
+  <section class="course-before" aria-labelledby="before-title">
+    <h2 id="before-title">Before you start</h2>
+    <p>The course assumes three ideas from the <a href="/blog/?series=foundations#blog-filters">Foundations series</a>. If any is new, read it first.</p>
+    <ul>
+      <li><a href="/blog/foundations-neurons-backprop/">Backpropagation</a> <span>why backward needs saved activations</span></li>
+      <li><a href="/blog/foundations-optimisers/">Adam and its state</a> <span>the two moving averages every GPU must store</span></li>
+      <li><a href="/blog/foundations-transformer/">The Transformer</a> <span>layers, width and the blocks being split across GPUs</span></li>
+    </ul>
   </section>
 
-  <nav class="learning-path" aria-labelledby="learning-path-title">
-    <h2 id="learning-path-title">One path through the systems module</h2>
-    <ol>
-      <li><a href="/blog/foundations-optimisers/">Understand the optimiser's state</a><span>Foundations · reuse the lesson on Adam and schedules.</span></li>
-      {publishedUnits.map(u => <li><a href={u.href}>{u.title}</a><span>{unitKindLabel[u.kind]} · {u.task}</span></li>)}
+  <section class="course-syllabus" aria-labelledby="syllabus-title">
+    <h2 id="syllabus-title">Syllabus</h2>
+    {outline.map(({ part, units }, i) => (
+      <section class="course-part" aria-labelledby={`part-${part.id}`}>
+        <header class="course-part__head">
+          <p class="course-part__number">Part {i + 1} · about {partMinutes(units)} min</p>
+          <h3 id={`part-${part.id}`}>{part.title}</h3>
+          <p class="course-part__outcome"><strong>You will be able to:</strong> {part.outcome}</p>
+        </header>
+        <ol class="course-lessons">
+          {units.map(({ unit, number, minutes: m }) => (
+            <li>
+              <a class="course-lesson" href={unit.href}>
+                <span class="course-lesson__number" data-course-dot={unit.href}><span class="course-lesson__digit">{number}</span><span class="course-lesson__tick" aria-hidden="true">✓</span></span>
+                <span class="course-lesson__body">
+                  <span class="course-lesson__meta"><span class={`course-badge course-badge--${unit.kind}`}>{unitKindLabel[unit.kind]}</span>{m && <span>{m} min</span>}</span>
+                  <span class="course-lesson__title">{unit.title}</span>
+                  <span class="course-lesson__task">{unit.task}</span>
+                </span>
+              </a>
+            </li>
+          ))}
+        </ol>
+      </section>
+    ))}
+  </section>
+
+  <section class="course-method" aria-labelledby="method-title">
+    <h2 id="method-title">How each lesson works</h2>
+    <dl class="course-types">
+      <div><dt><span class="course-badge course-badge--lesson">Concept lesson</span></dt><dd>A mechanism derived step by step, with worked numbers, figures to operate and questions to answer before revealing the explanation.</dd></div>
+      <div><dt><span class="course-badge course-badge--guide">Decision guide</span></dt><dd>How to choose under stated constraints, worked scenarios, and the small experiment that would justify the choice.</dd></div>
+      <div><dt><span class="course-badge course-badge--review">Paper review</span></dt><dd>What one paper actually measured, under which conditions, and what its comparisons do and do not control.</dd></div>
+    </dl>
+    <p class="course-labels">Claims carry one of four labels. <strong>Reported:</strong> stated in the cited source. <strong>Derived:</strong> calculated under explicit assumptions. <strong>Hypothesis:</strong> a proposed explanation to test. <strong>Unknown:</strong> the evidence does not settle it. Calculators show theoretical estimates, not measured performance, and nothing here claims a reproduced experiment.</p>
+  </section>
+
+  <section class="course-next-parts" id="coming-next" aria-labelledby="coming-title">
+    <h2 id="coming-title">Coming next</h2>
+    <p>Parts in preparation, in the recommended order of study. Each will appear in the syllabus once its pages are written and checked.</p>
+    <ol class="course-upcoming">
+      {upcoming.map(m => (
+        <li>
+          <span class="course-upcoming__title">{m.title}</span>
+          <span class="course-upcoming__question">{m.question}</span>
+          <span class="course-upcoming__prep">Prepare with: {m.foundations.map((l, j) => <>{j > 0 && ' · '}<a href={l.href}>{l.title}</a></>)}</span>
+        </li>
+      ))}
     </ol>
-  </nav>
-
-  <section class="learning-curriculum" aria-labelledby="curriculum-title">
-    <h2 id="curriculum-title">The curriculum</h2>
-    <p>The eight areas below map the research programme. Existing posts supply prerequisite reading. Distributed training systems has the first advanced pages; the other areas list their questions and readings until their pages are written and checked.</p>
-    <div class="learning-modules">{modules.map((m, i) => <article class="learning-module" id={`module-${m.id}`}>
-      <p class="learning-module-number">{String(i + 1).padStart(2, '0')} · {unitsFor(m.id).length ? `${unitsFor(m.id).length} pages available` : 'Prerequisite reading only so far'}</p>
-      <h3>{m.title}</h3><p class="learning-question">{m.question}</p><p>{m.objective}</p>
-      <p class="learning-depends">Learn after: {m.dependsOn.length ? m.dependsOn.map((id, j) => <>{j > 0 && ' · '}<a href={`#module-${id}`}>{moduleName(id)}</a></>) : 'Start here; no advanced module required.'}</p>
-      <ul>{m.foundations.map(link => <li><a href={link.href}>{link.title}</a></li>)}</ul>
-      {unitsFor(m.id).length > 0 && <ol class="learning-units">{unitsFor(m.id).map(u => <li><a href={u.href}>{u.title}</a> <span>{unitKindLabel[u.kind]}</span></li>)}</ol>}
-      <details><summary>Primary reading</summary><ul>{m.sourceIds.map(id => { const s = sources.find(s => s.id === id)!; return <li><a href={s.url}>{s.title}</a></li>; })}</ul></details>
-    </article>)}</div>
   </section>
 
-  <section class="learning-method" aria-labelledby="learning-method-title">
-    <h2 id="learning-method-title">Learn the concept, inspect the evidence, make a decision</h2>
-    <dl><div><dt>Concept lessons</dt><dd>Mechanisms, derivations and worked examples across laboratories.</dd></div><div><dt>Paper reviews</dt><dd>The specific method, experimental setup, ablations and disclosure limits.</dd></div><div><dt>Decision guides</dt><dd>Controls and small experiments that could justify the next expensive step.</dd></div></dl>
-    <p><strong>Reported</strong> means supported by the cited source. <strong>Derived</strong> means calculated under explicit assumptions. <strong>Hypothesis</strong> means a proposed explanation to test. <strong>Unknown</strong> means the evidence does not establish an answer. Calculators display theoretical estimates, not experimental performance.</p>
-  </section>
-
-  <section class="learning-sources" aria-labelledby="source-title">
-    <h2 id="source-title">Research reading index</h2>
-    <p>Prioritized primary sources for the published modules and the next questions. Research dates belong to the underlying work; this guide's source check is dated 9 November 2026. Living documentation can change.</p>
-    <ol>{sources.map(s => <li><a href={s.url}>{s.title}</a><span>{s.organization} · {s.researchDate}</span><details><summary>Reading focus and limits</summary><p>{s.read}</p><p>{s.limits}</p></details></li>)}</ol>
-    <p><a href="https://github.com/richardcheam/richardcheam.github.io/tree/master/docs/model-development/">Research questions and editorial record on GitHub ↗</a></p>
-  </section>
+  <details class="course-sources">
+    <summary>Primary sources used and planned <span>· {sources.length}</span></summary>
+    <p>Research dates belong to the underlying work; sources were checked on 9 November 2026, and living documentation can change. <a href="https://github.com/richardcheam/richardcheam.github.io/tree/master/docs/model-development/">Editorial record and coverage matrix on GitHub ↗</a></p>
+    <ol>{sources.map(s => <li><a href={s.url}>{s.title}</a><span>{s.organization} · {s.researchDate}. {s.read}.</span></li>)}</ol>
+  </details>
 </Base>
 
+<script>
+  import { completed, paintDots } from '../../lib/course-progress';
+  const units = [...document.querySelectorAll<HTMLElement>('.course-lessons [data-course-dot]')].map(el => el.dataset.courseDot!);
+  function update() {
+    paintDots();
+    const done = completed(), count = units.filter(h => done.has(h)).length;
+    const next = units.find(h => !done.has(h));
+    const cta = document.querySelector<HTMLAnchorElement>('[data-course-continue]')!;
+    const meter = document.querySelector<HTMLElement>('[data-course-meter]')!;
+    if (count === 0) { meter.hidden = true; return; }
+    meter.hidden = false;
+    document.querySelector<HTMLElement>('[data-course-fill]')!.style.width = `${(100 * count) / units.length}%`;
+    document.querySelector<HTMLElement>('[data-course-count]')!.textContent = `${count} of ${units.length} lessons complete`;
+    if (next) { cta.href = next; cta.textContent = `Continue: lesson ${units.indexOf(next) + 1} →`; }
+    else { cta.href = '#coming-next'; cta.textContent = 'Course complete · see what comes next →'; }
+  }
+  update();
+  window.addEventListener('course-progress', update);
+  window.addEventListener('pageshow', update);
+</script>
+
 <style>
-  .learning-head { max-width: 72ch; }
-  .learning-kicker { color: var(--text-secondary); font-size: .78rem; letter-spacing: .06em; text-transform: uppercase; }
-  .learning-dek { font-size: clamp(1.2rem, 2.4vw, 1.6rem); line-height: 1.45; }
-  .learning-start { padding: clamp(1.25rem, 3vw, 2rem); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface); margin: 2.5rem 0; }
-  .learning-start h2 { margin: .4rem 0 1rem; }
-  .learning-start > p { max-width: 75ch; }
-  .learning-entry-links { display: flex; flex-wrap: wrap; gap: .75rem; margin: 1.4rem 0; }
-  .learning-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.25rem; margin: 1.5rem 0 0; }
-  dt { font-size: .78rem; font-weight: 600; color: var(--text-secondary); }
-  dd { margin: .3rem 0 0; line-height: 1.5; }
-  .learning-path { padding: 1.5rem 0; border-bottom: 1px solid var(--border); }
-  .learning-path ol { padding-left: 1.5rem; }
-  .learning-path li { margin: 1rem 0; }
-  .learning-path li span { display: block; color: var(--text-secondary); font-size: .88rem; margin-top: .2rem; }
-  .learning-curriculum, .learning-method, .learning-sources { margin: 3.5rem 0; scroll-margin-top: 6rem; }
-  .learning-curriculum > p, .learning-method > p, .learning-sources > p { max-width: 78ch; }
-  .learning-modules { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 2.5rem; margin-top: 2rem; }
-  .learning-module { padding: 1.5rem 0; border-top: 1px solid var(--border); min-width: 0; scroll-margin-top: 6rem; }
-  .learning-module-number, .learning-depends { font-size: .76rem; color: var(--text-secondary); line-height: 1.6; }
-  .learning-module h3 { margin: .5rem 0; font-size: 1.15rem; }
-  .learning-question { font-weight: 600; }
-  .learning-module p, .learning-module li { font-size: .92rem; line-height: 1.65; }
-  .learning-module ul, .learning-units { padding-left: 1.2rem; }
-  .learning-units span { color: var(--text-secondary); font-size: .8rem; }
-  summary { cursor: pointer; font-size: .85rem; }
-  .learning-method dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.5rem; margin: 1.5rem 0; }
-  .learning-sources ol { padding-left: 1.3rem; }
-  .learning-sources li { padding: .85rem 0; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
-  .learning-sources li > span { display: block; margin: .25rem 0 .4rem; color: var(--text-secondary); font-size: .8rem; }
-  .learning-sources details p { max-width: 78ch; font-size: .85rem; }
-  a:focus-visible, summary:focus-visible { outline: 2px solid var(--blog-orientation); outline-offset: 4px; }
-  @media(max-width: 680px) { .learning-modules, .learning-facts, .learning-method dl { grid-template-columns: 1fr; } }
+  .course-head { max-width: 72ch; }
+  .course-kicker, .course-part__number { font-family: var(--font-mono); font-size: .76rem; letter-spacing: .04em; color: var(--text-secondary); }
+  .course-dek { font-size: clamp(1.15rem, 2.2vw, 1.5rem); line-height: 1.45; margin: .4rem 0 .8rem; }
+  .course-meta { color: var(--text-secondary); font-size: .9rem; }
+  .course-progress { display: flex; flex-wrap: wrap; align-items: center; gap: .8rem 1.5rem; margin: 1.4rem 0 0; }
+  .course-progress__meter { min-width: 14rem; }
+  .course-progress__bar { height: .5rem; border-radius: 999px; background: var(--border); overflow: hidden; }
+  .course-progress__bar span { display: block; height: 100%; width: 0; background: var(--blog-orientation); transition: width .5s ease; }
+  .course-progress__meter p { margin: .35rem 0 0; font-size: .8rem; color: var(--text-secondary); }
+  .course-before, .course-syllabus, .course-method, .course-next-parts { margin: 3.2rem 0; scroll-margin-top: 6rem; }
+  .course-before > p, .course-method > p, .course-next-parts > p { max-width: 70ch; }
+  .course-before ul { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; padding: 0; list-style: none; }
+  .course-before li { padding: .9rem 1rem; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+  .course-before li a { font-weight: 600; }
+  .course-before li span { display: block; margin-top: .25rem; font-size: .84rem; color: var(--text-secondary); }
+  .course-part { margin: 2rem 0 2.6rem; scroll-margin-top: 6rem; }
+  .course-part__head h3 { margin: .2rem 0 .4rem; font-size: 1.35rem; }
+  .course-part__outcome { max-width: 70ch; margin: 0 0 1rem; font-size: .92rem; color: var(--text-secondary); }
+  .course-part__outcome strong { color: var(--text); font-weight: 600; }
+  .course-lessons { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--border); }
+  .course-lessons li { border-bottom: 1px solid var(--border); }
+  .course-lesson { display: grid; grid-template-columns: 2.4rem minmax(0, 1fr); gap: 1rem; align-items: start; padding: 1rem .25rem; color: var(--text); text-decoration: none; }
+  .course-lesson:hover .course-lesson__title { text-decoration: underline; text-underline-offset: .15em; }
+  .course-lesson:focus-visible { outline: 2px solid var(--blog-orientation); outline-offset: 2px; }
+  .course-lesson__number { position: relative; display: grid; place-items: center; width: 2.2rem; height: 2.2rem; border: 1.5px solid var(--border-strong); border-radius: 50%; font-family: var(--font-mono); font-size: .9rem; }
+  .course-lesson__tick { display: none; }
+  .course-lesson__number.is-done { border-color: var(--blog-orientation); background: var(--blog-orientation); color: var(--bg); }
+  .course-lesson__number.is-done .course-lesson__digit { display: none; }
+  .course-lesson__number.is-done .course-lesson__tick { display: inline; }
+  .course-lesson__body { display: grid; gap: .25rem; min-width: 0; }
+  .course-lesson__meta { display: flex; flex-wrap: wrap; gap: .4rem .8rem; align-items: center; font-size: .78rem; color: var(--text-secondary); }
+  .course-lesson__title { font-size: 1.05rem; font-weight: 650; line-height: 1.35; }
+  .course-lesson__task { font-size: .9rem; color: var(--text-secondary); }
+  .course-badge { display: inline-block; padding: .1rem .5rem; border: 1px solid currentColor; border-radius: 999px; font-size: .72rem; font-weight: 600; letter-spacing: .02em; }
+  .course-badge--lesson { color: var(--blog-orientation); }
+  .course-badge--guide { color: #9A7420; }
+  .course-badge--review { color: var(--text-secondary); }
+  .course-types { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.5rem; margin: 1.2rem 0; }
+  .course-types dd { margin: .5rem 0 0; font-size: .9rem; line-height: 1.55; }
+  .course-labels { font-size: .9rem; color: var(--text-secondary); }
+  .course-labels strong { color: var(--text); }
+  .course-upcoming { margin: 1rem 0 0; padding-left: 1.4rem; }
+  .course-upcoming li { padding: .75rem 0; border-bottom: 1px solid var(--border); }
+  .course-upcoming span { display: block; }
+  .course-upcoming__title { font-weight: 650; }
+  .course-upcoming__question { font-size: .92rem; }
+  .course-upcoming__prep { margin-top: .2rem; font-size: .8rem; color: var(--text-secondary); }
+  .course-sources { margin: 2rem 0 3rem; padding: 1rem 1.2rem; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+  .course-sources summary { cursor: pointer; font-weight: 600; }
+  .course-sources summary span { color: var(--text-secondary); font-weight: 400; }
+  .course-sources > p { font-size: .85rem; color: var(--text-secondary); }
+  .course-sources ol { padding-left: 1.3rem; font-size: .88rem; }
+  .course-sources li { padding: .5rem 0; overflow-wrap: anywhere; }
+  .course-sources li span { display: block; color: var(--text-secondary); font-size: .8rem; }
+  .course-sources summary:focus-visible { outline: 2px solid var(--blog-orientation); outline-offset: 4px; }
+  @media (max-width: 760px) { .course-before ul, .course-types { grid-template-columns: 1fr; } }
 </style>

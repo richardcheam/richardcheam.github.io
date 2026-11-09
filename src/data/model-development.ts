@@ -28,6 +28,8 @@ export type UnitKind = 'lesson' | 'guide' | 'review';
  * pages are listed; planned topics stay questions in the curriculum above. */
 export interface LearningUnit {
   module: string;
+  /** The course part (a group of lessons) this page belongs to. */
+  part: string;
   kind: UnitKind;
   title: string;
   href: string;
@@ -37,11 +39,21 @@ export interface LearningUnit {
 
 export const unitKindLabel: Record<UnitKind, string> = { lesson: 'Concept lesson', guide: 'Decision guide', review: 'Paper review' };
 
+/** The course: parts in order. Each part groups consecutive published units. */
+export interface CoursePart { id: string; title: string; outcome: string }
+export const courseParts: CoursePart[] = [
+  { id: 'memory', title: 'What must each GPU store?', outcome: 'Budget a training step\'s memory and choose the ZeRO stage that addresses the real bottleneck.' },
+  { id: 'communication', title: 'What must each GPU send?', outcome: 'Cost the communication of each parallelism layout and choose one to pilot, with the measurement that could overturn it.' },
+];
+
+/** Curriculum areas still in preparation, in the recommended order of study. */
+export const upcomingOrder = ['evaluation', 'optimization', 'architecture', 'data', 'adaptation', 'posttraining', 'inference'];
+
 /** Published units in reading order. */
 export const publishedUnits: LearningUnit[] = [
-  { module: 'systems', kind: 'lesson', title: 'Training memory: from an Adam ledger to ZeRO', href: '/blog/model-development-training-memory/', task: 'Derive what each GPU stores and test the estimator\'s assumptions.' },
-  { module: 'systems', kind: 'review', title: 'ZeRO: what sharding removes, and what it leaves live', href: '/paper-reviews/zero/', task: 'Separate the memory argument from the experiments offered for it.' },
-  { module: 'systems', kind: 'lesson', title: 'Collectives: what a memory saving costs the network', href: '/blog/model-development-collectives/', task: 'Step through a ring all-reduce and derive latency and bandwidth costs.' },
-  { module: 'systems', kind: 'guide', title: 'Choosing a parallelism layout', href: '/blog/model-development-choosing-parallelism/', task: 'Order the decisions, work two scenarios and design a pilot.' },
-  { module: 'systems', kind: 'review', title: 'Megatron-LM: what the parallelism comparisons control', href: '/paper-reviews/megatron-ptd-p/', task: 'Weigh the layout rules against their hardware and controls.' },
+  { module: 'systems', part: 'memory', kind: 'lesson', title: 'Training memory: from an Adam ledger to ZeRO', href: '/blog/model-development-training-memory/', task: 'Derive what each GPU stores and test the estimator\'s assumptions.' },
+  { module: 'systems', part: 'memory', kind: 'review', title: 'ZeRO: what sharding removes, and what it leaves live', href: '/paper-reviews/zero/', task: 'Separate the memory argument from the experiments offered for it.' },
+  { module: 'systems', part: 'communication', kind: 'lesson', title: 'Collectives: what a memory saving costs the network', href: '/blog/model-development-collectives/', task: 'Step through a ring all-reduce and derive latency and bandwidth costs.' },
+  { module: 'systems', part: 'communication', kind: 'guide', title: 'Choosing a parallelism layout', href: '/blog/model-development-choosing-parallelism/', task: 'Order the decisions, work two scenarios and design a pilot.' },
+  { module: 'systems', part: 'communication', kind: 'review', title: 'Megatron-LM: what the parallelism comparisons control', href: '/paper-reviews/megatron-ptd-p/', task: 'Weigh the layout rules against their hardware and controls.' },
 ];

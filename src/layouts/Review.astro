@@ -21,6 +21,7 @@ const related = all
 const sourceLabel = d.source_label || (d.type === "tech-report" ? "Read the report" : "Read the paper");
 const inline = (md: string) => (marked.parseInline(md) as string).trim();
 import SignatureMark from "../components/SignatureMark.astro";
+import CourseBar from "../components/CourseBar.astro";
 ---
 <Base title={d.title} description={d.excerpt ? stripHtml(d.excerpt) : undefined} image={`/og/paper-reviews/${review.id}.png`}>
   <article class="review">
@@ -28,6 +29,7 @@ import SignatureMark from "../components/SignatureMark.astro";
       <a class="notes-backlink" href="/paper-reviews/">Back to Paper Reviews</a>
     </div>
 
+    <CourseBar href={reviewUrl(review)} place="top" />
     <header class="review-head" data-reveal>
       <p class="review-head__kicker">
         <span class={`type-badge type-badge--${d.type}`}>{typeLabel(d.type, true)}</span>
@@ -87,6 +89,7 @@ import SignatureMark from "../components/SignatureMark.astro";
       )}
       <div class="review-prose" data-review-content>
         <slot />
+        <CourseBar href={reviewUrl(review)} place="end" />
         <p class="post-seal"><SignatureMark class="post-seal__mark" label="Richard Cheam" painted /></p>
       </div>
       {(prev || next) && (

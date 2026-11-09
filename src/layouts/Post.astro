@@ -19,17 +19,22 @@ const seriesTitle = allSeries.find((s) => s.key === post.data.series)?.title ?? 
 const byline = date.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
 const pad = (n: number) => String(n).padStart(2, "0");
 import SignatureMark from "../components/SignatureMark.astro";
+import CourseBar from "../components/CourseBar.astro";
+import { courseStep } from "../lib/course";
+const href = `/blog/${post.id}/`;
+// Course pages show their place in the course instead of the blog series.
+const inCourse = Boolean(courseStep(href));
 ---
 <Base title={title} description={excerpt} mainClass="site-main site-main--article" image={`/og/blog/${post.id}.png`}>
   <header class="page-heading blog-heading" data-reveal>
     <p class="blog-all-posts"><a href="/blog/">← All posts</a></p>
-    <p class="blog-kicker">{seriesTitle}</p>
-    {post.data.series && <p class="blog-reading-order">Post {position} of {seriesPosts.length}</p>}
+    {inCourse ? <CourseBar href={href} place="top" /> : <p class="blog-kicker">{seriesTitle}</p>}
+    {post.data.series && !inCourse && <p class="blog-reading-order">Post {position} of {seriesPosts.length}</p>}
     <h1>{title}</h1>
     <div class="blog-meta-row">
       <p class="blog-byline">{byline} <span aria-hidden="true">·</span> {read_time} read</p>
     </div>
-    {seriesPosts.length > 0 && (
+    {seriesPosts.length > 0 && !inCourse && (
       <details class="blog-series-nav">
         <summary>Posts in this series <span>· {seriesPosts.length}</span></summary>
         <nav aria-label="Posts in this series">
@@ -53,6 +58,7 @@ import SignatureMark from "../components/SignatureMark.astro";
   </header>
   <article class="note-article">
     <slot />
+    <CourseBar href={href} place="end" />
     <p class="post-seal"><SignatureMark class="post-seal__mark" label="Richard Cheam" painted /></p>
   </article>
   <nav class="blog-rail" aria-label="On this page" data-blog-rail data-rail-style={post.data.rail} data-series={post.data.series ?? ""} data-sky={post.data.sky ?? ""} hidden>

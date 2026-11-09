@@ -46,7 +46,7 @@ experiments.
 
 Published pages are listed once, in `publishedUnits` in
 `src/data/model-development.ts`: the hub's reading path and the output check
-both read it. [`coverage-matrix.md`](docs/model-development/coverage-matrix.md)
+both read it, and so do the course bar on each lesson and review and the syllabus. Each unit names its `part` in `courseParts`; a part's units must be consecutive (`src/lib/course.ts` checks this). [`coverage-matrix.md`](docs/model-development/coverage-matrix.md)
 tracks every curriculum area, published or planned.
 
 Each interactive figure keeps its arithmetic in a tested module and contains no

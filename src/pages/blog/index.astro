@@ -4,6 +4,7 @@ import Base from "../../layouts/Base.astro";
 import { categories } from "../../data/categories";
 import { series } from "../../data/series";
 import { titleHtml } from "../../lib/title";
+import { courseStep } from "../../lib/course";
 import { categoryLabel, isoDay, postUrl, publishedPosts, shortDate, stripHtml } from "../../lib/content";
 
 // Newest first; posts published together keep their reading order.
@@ -60,7 +61,9 @@ const position = (p: (typeof posts)[number]) => {
             return (
               <li class="blog-post-row" data-filter-card data-filter-facets={`category:${post.data.category}${post.data.series ? ` series:${post.data.series}` : ""}`} data-filter-text={`${post.data.title.toLowerCase()} ${label.toLowerCase()} ${post.data.category} ${stripHtml(post.data.excerpt).toLowerCase()}`}>
                 <div class="blog-post-main">
-                  {post.data.series && <p class="blog-reading-order">Post {pos.at} of {pos.of}</p>}
+                  {(() => { const step = courseStep(postUrl(post)); return step
+                    ? <p class="blog-reading-order">Model development course · lesson {step.number} of {step.total}</p>
+                    : post.data.series && <p class="blog-reading-order">Post {pos.at} of {pos.of}</p>; })()}
                   <div class="blog-post-titleline">
                     <h3><a href={postUrl(post)} set:html={titleHtml(post.data.title, post.data.title_key)} /></h3>
                     {post.data.featured && <span class="blog-featured-label">Featured</span>}
