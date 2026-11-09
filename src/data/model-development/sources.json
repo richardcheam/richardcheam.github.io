@@ -147,12 +147,12 @@
     "title": "The Llama 3 Herd of Models",
     "organization": "Meta",
     "researchDate": "2024-07-23 report date; 2024-07-31 arXiv submission",
-    "reviewedVersion": "2024-11-23 v3",
+    "reviewedVersion": "v3, 2024-11-23",
     "url": "https://arxiv.org/abs/2407.21783",
     "read": "§§3.1–3.2; 3.4.2; 7–8; Table 3",
     "priority": 12,
     "verifiedOn": "2026-11-09",
-    "status": "prioritized future reading",
+    "status": "used in pre-training lesson P1; prioritized for P8 and D9",
     "limits": "Exact corpus and many curation thresholds unavailable."
   },
   {
@@ -258,5 +258,57 @@
     "verifiedOn": "2026-11-09",
     "status": "used in collectives module",
     "limits": "API documentation; says overlap can happen, not how much on a given job."
+  },
+  {
+    "id": "transformers-4.51.3-loss",
+    "title": "Hugging Face Transformers: causal LM loss and Trainer token counting",
+    "organization": "Hugging Face",
+    "researchDate": "Software release 4.51.3",
+    "reviewedVersion": "v4.51.3: src/transformers/loss/loss_utils.py (ForCausalLMLoss, fixed_cross_entropy) and trainer.py (get_batch_samples, training_step, compute_loss), inspected 2026-11-09",
+    "url": "https://github.com/huggingface/transformers/blob/v4.51.3/src/transformers/loss/loss_utils.py",
+    "read": "Label shift by padding -100; FP32 upcast; mean versus sum over num_items_in_batch; how the Trainer counts targets",
+    "priority": 1,
+    "verifiedOn": "2026-11-09",
+    "status": "used in pre-training lesson P1",
+    "limits": "Behaviour of one release; counting and shifting can change between versions."
+  },
+  {
+    "id": "pytorch-2.6-optim",
+    "title": "PyTorch 2.6: AdamW update and global-norm gradient clipping",
+    "organization": "PyTorch contributors",
+    "researchDate": "Software release 2.6.0",
+    "reviewedVersion": "v2.6.0: torch/optim/adam.py (AdamW path, decoupled decay param.mul_(1 - lr * weight_decay)) and torch/nn/utils/clip_grad.py, inspected 2026-11-09",
+    "url": "https://github.com/pytorch/pytorch/blob/v2.6.0/torch/optim/adam.py",
+    "read": "Order of decay, moment updates and bias correction; clip coefficient max_norm / (total_norm + 1e-6) clamped at 1",
+    "priority": 1,
+    "verifiedOn": "2026-11-09",
+    "status": "used in pre-training lesson P1",
+    "limits": "Implementation of one release; fused and foreach paths should match but were not separately inspected."
+  },
+  {
+    "id": "adamw-paper",
+    "title": "Decoupled Weight Decay Regularization",
+    "organization": "University of Freiburg",
+    "researchDate": "2017-11-14",
+    "reviewedVersion": "v3, 2019-01-04 (ICLR 2019)",
+    "url": "https://arxiv.org/abs/1711.05101v3",
+    "read": "Algorithm 2: decay scaled by the schedule multiplier η_t, not by the learning rate α",
+    "priority": 1,
+    "verifiedOn": "2026-11-09",
+    "status": "used in pre-training lesson P1",
+    "limits": "Experiments on image classification; the lesson uses only the update rule."
+  },
+  {
+    "id": "nanogpt",
+    "title": "nanoGPT model.py",
+    "organization": "Andrej Karpathy",
+    "researchDate": "Living repository",
+    "reviewedVersion": "master branch, inspected 2026-11-09 (unpinned)",
+    "url": "https://github.com/karpathy/nanoGPT/blob/master/model.py",
+    "read": "configure_optimizers: decay for parameters with dim >= 2 only; pre-shifted targets with ignore_index=-1",
+    "priority": 3,
+    "verifiedOn": "2026-11-09",
+    "status": "used in pre-training lesson P1",
+    "limits": "An educational reference implementation, not a large-scale recipe; unpinned."
   }
 ]

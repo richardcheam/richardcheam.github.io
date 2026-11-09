@@ -218,5 +218,75 @@
     ],
     "location": "/blog/model-development-choosing-parallelism/",
     "conditions": "One illustrative schedule matching FSDP2's defaults for stage 3; assumed α = 5 µs, B = 40 GB/s, 25 MiB buckets. Schedules that keep unsharded state communicate less and need more memory."
+  },
+  {
+    "id": "P1-01",
+    "status": "Reported",
+    "claim": "Transformers 4.51.3 shifts causal-LM labels inside the loss (pad one -100, drop the first label), upcasts logits to FP32 and averages over non-ignored targets unless num_items_in_batch is given.",
+    "sourceIds": [
+      "transformers-4.51.3-loss"
+    ],
+    "location": "/blog/model-development-one-update/",
+    "conditions": "Release 4.51.3 source; other releases may differ."
+  },
+  {
+    "id": "P1-02",
+    "status": "Reported",
+    "claim": "The 4.51.3 Trainer counts labels.ne(-100) over all of a step's microbatches on unshifted labels; with average_tokens_across_devices it sums the count over ranks and multiplies the loss by the number of processes.",
+    "sourceIds": [
+      "transformers-4.51.3-loss"
+    ],
+    "location": "/blog/model-development-one-update/",
+    "conditions": "Observed in source and in the lesson's script; the off-by-one-per-row effect depends on the first label not being -100."
+  },
+  {
+    "id": "P1-03",
+    "status": "Reported",
+    "claim": "PyTorch 2.6 AdamW shrinks parameters by (1 - lr x weight_decay) before the bias-corrected Adam step; clip_grad_norm_ scales all gradients by min(1, max_norm / (total_norm + 1e-6)).",
+    "sourceIds": [
+      "pytorch-2.6-optim"
+    ],
+    "location": "/blog/model-development-one-update/",
+    "conditions": "Release 2.6.0 source, single-tensor path; checked numerically in the lesson script."
+  },
+  {
+    "id": "P1-04",
+    "status": "Reported",
+    "claim": "Decoupled weight decay as published scales the decay by the schedule multiplier η_t but not by the learning rate α.",
+    "sourceIds": [
+      "adamw-paper"
+    ],
+    "location": "/blog/model-development-one-update/",
+    "conditions": "Algorithm 2 of v3 (ICLR 2019)."
+  },
+  {
+    "id": "P1-05",
+    "status": "Reported",
+    "claim": "Llama 3 uses an attention mask preventing attention between documents in the same sequence; it reports limited impact in standard pre-training and importance for continued pre-training on very long sequences.",
+    "sourceIds": [
+      "llama3"
+    ],
+    "location": "/blog/model-development-one-update/",
+    "conditions": "v3 §3.2; qualitative statement, no ablation numbers given in the quoted passage."
+  },
+  {
+    "id": "P1-06",
+    "status": "Derived",
+    "claim": "Normalizing each microbatch's summed loss by the step's total target count reproduces the token-mean gradient exactly; mean-then-divide accumulation optimizes a sequence-weighted objective instead (2.0994 versus 2.1114 in the toy batch).",
+    "sourceIds": [
+      "transformers-4.51.3-loss"
+    ],
+    "location": "/blog/model-development-one-update/",
+    "conditions": "Linearity of the gradient; toy numbers from scripts/course/p1_update.py."
+  },
+  {
+    "id": "P1-07",
+    "status": "Derived",
+    "claim": "At AdamW's first step every coordinate with |g| much larger than ε moves by about the learning rate, independent of its gradient's magnitude.",
+    "sourceIds": [
+      "pytorch-2.6-optim"
+    ],
+    "location": "/blog/model-development-one-update/",
+    "conditions": "Bias correction with zero-initialized moments; checked against torch.optim.AdamW in the script."
   }
 ]
