@@ -21,7 +21,7 @@ import MemoryEstimator from "../../components/figures/TrainingMemoryEstimator.as
 
 A parameter count is a useful first measurement, but an incomplete GPU budget. A seven-billion-parameter model with two-byte weights holds 14 billion bytes of weights. Training also needs gradients, the optimiser's memory of earlier updates, and intermediate tensors for differentiation. Some tensors persist between operations; others appear briefly and determine the peak.
 
-This first lesson in the [model-development field guide](/model-development/) builds an accounting model you can inspect and challenge. By the end, you should be able to derive a per-rank state budget, explain the difference between ZeRO stages, and choose the next measurement before requesting more GPUs. The companion [ZeRO paper review](/paper-reviews/zero/) examines what the original experiments actually establish.
+This first post in the [Model development series](/blog/?series=model-development#blog-filters) builds an accounting model you can inspect and challenge. By the end, you should be able to derive a per-rank state budget, explain the difference between ZeRO stages, and choose the next measurement before requesting more GPUs. The companion [ZeRO paper review](/paper-reviews/zero/) examines what the original experiments actually establish.
 
 Prerequisites: [backpropagation](/blog/foundations-neurons-backprop/) explains why backward needs saved information; [Adam](/blog/foundations-optimisers/) explains its two moving averages; the [Transformer lesson](/blog/foundations-transformer/) supplies the architecture vocabulary. Here, a **rank** is one distributed training process. Assume one process per GPU.
 
@@ -148,4 +148,4 @@ First compare replicated and fully sharded state with identical synthetic worklo
   <p>No. The two-gigabyte gap must cover the largest concurrent materialization, activations, buffers, workspace and allocator behavior. The estimate rules out some configurations; only a complete measured budget can support a fit decision.</p>
 </details>
 
-Return to the [learning roadmap](/model-development/) to place memory accounting before parallelism design. Read the [ZeRO review](/paper-reviews/zero/) next to practice separating a mechanism, its arithmetic, and the experiments offered as evidence.
+Read the [ZeRO review](/paper-reviews/zero/) next to practice separating a mechanism, its arithmetic, and the experiments offered as evidence.

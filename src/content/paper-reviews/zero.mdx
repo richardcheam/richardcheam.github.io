@@ -22,8 +22,8 @@ tldr:
 links:
   - label: "Training-memory lesson"
     url: "/blog/model-development-training-memory/"
-  - label: "Learning roadmap"
-    url: "/model-development/"
+  - label: "Model development series"
+    url: "/blog/?series=model-development#blog-filters"
 ---
 
 ## Reported: a compact evidence record
@@ -74,4 +74,4 @@ A proposed follow-up would hold model, sequence length, effective batch, precisi
 
 To isolate a materialization effect, change only grouping or prefetching and inspect the allocation timeline. To isolate activation pressure, change only microbatch or recomputation. These interventions test competing explanations for a peak; neither is claimed to have been run here.
 
-The [training-memory lesson](/blog/model-development-training-memory/) includes a capped synthetic experiment proposal and worked calculations. Return to the [model-development roadmap](/model-development/) afterward: the next conceptual dependency is communication and parallelism, where a memory saving must be weighed against movement and scheduling costs.
+The [training-memory lesson](/blog/model-development-training-memory/) includes a capped synthetic experiment proposal and worked calculations. The next post in the series, [Collectives](/blog/model-development-collectives/), takes up communication and parallelism, where a memory saving must be weighed against movement and scheduling costs.

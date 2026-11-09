@@ -1,6 +1,6 @@
 # Model development: coverage matrix
 
-Status date: 9 November 2026. One row per curriculum area, in the order of `src/data/model-development.ts`. **Published** means a finished page listed in `publishedUnits`; everything else is planned and has no route. Do not add a route, a navigation link or a hub entry for a planned item until its page is complete and checked.
+Status date: 9 November 2026. One row per curriculum area, in the order of `src/data/model-development.ts`. **Published** means a finished page listed in `publishedUnits`; everything else is planned and has no route. Do not add a route or a post for a planned item until its page is complete and checked.
 
 Status columns: **Implementation** (page and figures exist), **Validation** (tests, build, `check:model-development`, live browser QA), **Editorial** (Richard's review of wording and emphasis). Source IDs refer to `src/data/model-development/sources.json`; "verified" means the cited section was opened and checked on the status date.
 
