@@ -1,8 +1,10 @@
 ---
 import Base from '../../layouts/Base.astro';
-import { modelDevelopmentModules as modules, firstModule } from '../../data/model-development';
+import { modelDevelopmentModules as modules, publishedUnits, unitKindLabel } from '../../data/model-development';
 import sources from '../../data/model-development/sources.json';
 const moduleName = (id: string) => modules.find(m => m.id === id)!.title;
+const unitsFor = (id: string) => publishedUnits.filter(u => u.module === id);
+const start = publishedUnits[0];
 ---
 <Base title="Model development" description="A research field guide to foundation-model decisions: architecture, data, training systems, post-training and trustworthy evaluation.">
   <header class="page-heading learning-head" data-reveal>
@@ -13,35 +15,33 @@ const moduleName = (id: string) => modules.find(m => m.id === id)!.title;
   </header>
 
   <section class="learning-start" aria-labelledby="learning-start-title">
-    <p class="learning-kicker">First complete module · distributed systems</p>
-    <h2 id="learning-start-title">Where does training memory go?</h2>
-    <p>Start with a concrete decision: whether a model's optimizer, gradients, parameters and live buffers can share a device. Derive the ledger, change its assumptions, then examine the paper behind state sharding.</p>
+    <p class="learning-kicker">Available now · distributed training systems</p>
+    <h2 id="learning-start-title">What must each GPU store, and what must it send?</h2>
+    <p>Start with a concrete decision: how to split a training job across GPUs. Derive the memory ledger, count the communication each layout requires, then choose a layout and the pilot that could overturn the choice. Two paper reviews test the evidence behind each step.</p>
     <div class="learning-entry-links">
-      <a class="btn btn--primary" href={firstModule.lesson.href}>Study the lesson →</a>
-      <a class="btn btn--ghost" href={firstModule.review.href}>Read the ZeRO review →</a>
+      <a class="btn btn--primary" href={start.href}>Start with training memory →</a>
+      <a class="btn btn--ghost" href="#learning-path-title">See the reading path ↓</a>
     </div>
-    <dl class="learning-facts"><div><dt>Prerequisites</dt><dd>Backpropagation, Adam, tensor shapes</dd></div><div><dt>Practice</dt><dd>Memory estimator and worked questions</dd></div><div><dt>Evidence</dt><dd>Source-based analysis; no training reproduction</dd></div></dl>
+    <dl class="learning-facts"><div><dt>Prerequisites</dt><dd>Backpropagation, Adam, the Transformer's layers</dd></div><div><dt>Practice</dt><dd>Memory estimator, ring all-reduce stepper, communication planner, pipeline schedule</dd></div><div><dt>Evidence</dt><dd>Source-based analysis; nothing reproduced or benchmarked</dd></div></dl>
   </section>
 
-  <nav class="learning-path" aria-label="Dependency-aware first reading path">
-    <h2>One path through the first module</h2>
+  <nav class="learning-path" aria-labelledby="learning-path-title">
+    <h2 id="learning-path-title">One path through the systems module</h2>
     <ol>
-      <li><a href="/blog/benchmark-denominators/">Define what a comparison measures</a><span>Keep units and resource boundaries explicit.</span></li>
-      <li><a href="/blog/foundations-optimisers/">Understand the optimizer's state</a><span>Reuse the foundations lesson on Adam and schedules.</span></li>
-      <li><a href={firstModule.lesson.href}>{firstModule.lesson.title}</a><span>Work the equations and test the estimator's assumptions.</span></li>
-      <li><a href={firstModule.review.href}>{firstModule.review.title}</a><span>Separate reported evidence from the memory model.</span></li>
+      <li><a href="/blog/foundations-optimisers/">Understand the optimiser's state</a><span>Foundations · reuse the lesson on Adam and schedules.</span></li>
+      {publishedUnits.map(u => <li><a href={u.href}>{u.title}</a><span>{unitKindLabel[u.kind]} · {u.task}</span></li>)}
     </ol>
   </nav>
 
   <section class="learning-curriculum" aria-labelledby="curriculum-title">
     <h2 id="curriculum-title">The curriculum</h2>
-    <p>The eight areas below map the research program. Existing posts supply prerequisite reading; the memory module adds the first advanced lesson and paper review. Further advanced lessons will follow source and implementation review.</p>
+    <p>The eight areas below map the research programme. Existing posts supply prerequisite reading. Distributed training systems has the first advanced pages; the other areas list their questions and readings until their pages are written and checked.</p>
     <div class="learning-modules">{modules.map((m, i) => <article class="learning-module" id={`module-${m.id}`}>
-      <p class="learning-module-number">{String(i + 1).padStart(2, '0')} · {m.id === 'systems' ? 'First advanced module available' : 'Prerequisite reading'}</p>
+      <p class="learning-module-number">{String(i + 1).padStart(2, '0')} · {unitsFor(m.id).length ? `${unitsFor(m.id).length} pages available` : 'Prerequisite reading only so far'}</p>
       <h3>{m.title}</h3><p class="learning-question">{m.question}</p><p>{m.objective}</p>
       <p class="learning-depends">Learn after: {m.dependsOn.length ? m.dependsOn.map((id, j) => <>{j > 0 && ' · '}<a href={`#module-${id}`}>{moduleName(id)}</a></>) : 'Start here; no advanced module required.'}</p>
       <ul>{m.foundations.map(link => <li><a href={link.href}>{link.title}</a></li>)}</ul>
-      {m.id === 'systems' && <p><a href={firstModule.lesson.href}>Open the training-memory lesson →</a></p>}
+      {unitsFor(m.id).length > 0 && <ol class="learning-units">{unitsFor(m.id).map(u => <li><a href={u.href}>{u.title}</a> <span>{unitKindLabel[u.kind]}</span></li>)}</ol>}
       <details><summary>Primary reading</summary><ul>{m.sourceIds.map(id => { const s = sources.find(s => s.id === id)!; return <li><a href={s.url}>{s.title}</a></li>; })}</ul></details>
     </article>)}</div>
   </section>
@@ -54,7 +54,7 @@ const moduleName = (id: string) => modules.find(m => m.id === id)!.title;
 
   <section class="learning-sources" aria-labelledby="source-title">
     <h2 id="source-title">Research reading index</h2>
-    <p>Prioritized primary sources for the first module and its next questions. Research dates belong to the underlying work; this guide's source check is dated 9 November 2026. Living documentation can change.</p>
+    <p>Prioritized primary sources for the published modules and the next questions. Research dates belong to the underlying work; this guide's source check is dated 9 November 2026. Living documentation can change.</p>
     <ol>{sources.map(s => <li><a href={s.url}>{s.title}</a><span>{s.organization} · {s.researchDate}</span><details><summary>Reading focus and limits</summary><p>{s.read}</p><p>{s.limits}</p></details></li>)}</ol>
     <p><a href="https://github.com/richardcheam/richardcheam.github.io/tree/master/docs/model-development/">Research questions and editorial record on GitHub ↗</a></p>
   </section>
@@ -83,7 +83,8 @@ const moduleName = (id: string) => modules.find(m => m.id === id)!.title;
   .learning-module h3 { margin: .5rem 0; font-size: 1.15rem; }
   .learning-question { font-weight: 600; }
   .learning-module p, .learning-module li { font-size: .92rem; line-height: 1.65; }
-  .learning-module ul { padding-left: 1.2rem; }
+  .learning-module ul, .learning-units { padding-left: 1.2rem; }
+  .learning-units span { color: var(--text-secondary); font-size: .8rem; }
   summary { cursor: pointer; font-size: .85rem; }
   .learning-method dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.5rem; margin: 1.5rem 0; }
   .learning-sources ol { padding-left: 1.3rem; }

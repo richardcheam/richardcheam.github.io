@@ -35,3 +35,18 @@ test('unqualified claims must retain a valid status and experimental conditions'
   assert.ok(errors.some(e => e.includes('status')));
   assert.ok(errors.some(e => e.includes('conditions')));
 });
+
+const unit = { module: 'first', href: '/blog/example/' };
+
+test('published units must belong to a known module, and claims must live on a published unit', () => {
+  assert.deepEqual(validateResearchIndex({ modules: [first], sources: [source], claims: [claim], units: [unit] }), []);
+  const orphan = validateResearchIndex({ modules: [first], sources: [source], claims: [claim], units: [{ ...unit, module: 'ghost' }] });
+  assert.ok(orphan.some(e => e.includes('unknown module ghost')));
+  const stray = validateResearchIndex({ modules: [first], sources: [source], claims: [{ ...claim, location: '/blog/unpublished/' }], units: [unit] });
+  assert.ok(stray.some(e => e.includes('not a published unit')));
+});
+
+test('duplicate unit routes are rejected', () => {
+  const errors = validateResearchIndex({ modules: [first], sources: [source], claims: [claim], units: [unit, unit] });
+  assert.ok(errors.some(e => e.includes('duplicate unit')));
+});

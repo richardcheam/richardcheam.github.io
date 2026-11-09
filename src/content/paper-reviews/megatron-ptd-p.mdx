@@ -1,0 +1,82 @@
+---
+title: "Megatron-LM: tensor, pipeline and data parallelism, and what the comparisons control"
+title_key: "Megatron-LM"
+published: true
+date: 2026-11-09
+question: "Which of Megatron-LM's layout rules are measured results, which are conditions of one cluster, and which comparisons isolate the effect they are cited for?"
+excerpt: "A source-bounded review of Narayanan et al. (2021): the interleaved pipeline schedule, the tensor-within-a-server rule and the comparison with ZeRO-3, read for their hardware, batch and configuration conditions. No experiment is reproduced here."
+type: paper
+topic: [training]
+tags: [Megatron-LM, Tensor parallelism, Pipeline parallelism, Distributed training]
+org: "NVIDIA, Stanford University, Microsoft Research"
+authors: "Deepak Narayanan, Mohammad Shoeybi, Jared Casper, Patrick LeGresley, Mostofa Patwary, Vijay Korthikanti, Dmitri Vainbrand, Prethvi Kashinkunti, Julie Bernauer, Bryan Catanzaro, Amar Phanishayee, Matei Zaharia"
+source_url: "https://arxiv.org/abs/2104.04473v5"
+source_label: "Read Megatron-LM (reviewed version v5)"
+source_date: 2021-08-23
+read_time: "9 min"
+featured: false
+tldr:
+  - "**Reported:** 502 petaFLOP/s on 3,072 A100 GPUs for a one-trillion-parameter model, 52% of peak, with tensor parallelism inside 8-GPU servers and pipelines across them."
+  - "**Evidence boundary:** the layout rules are measured on DGX A100 servers with NVLink inside and InfiniBand between; they transfer to hardware of the same shape, not to every cluster."
+  - "**Decision:** the ZeRO-3 comparison shows a large gap at scale, but it compares tuned configurations, not one intervention. Use it to choose what to pilot."
+links:
+  - label: "Collectives lesson"
+    url: "/blog/model-development-collectives/"
+  - label: "Parallelism decision guide"
+    url: "/blog/model-development-choosing-parallelism/"
+  - label: "Learning roadmap"
+    url: "/model-development/"
+---
+
+## Reported: what the paper measured
+
+[Narayanan et al.](https://arxiv.org/html/2104.04473v5) combine three ways of splitting a Transformer across GPUs, which they call PTD-P: tensor parallelism inside a layer, pipeline parallelism across blocks of layers, and data parallelism across replicas. The arXiv record lists v1 on 9 April 2021 and the reviewed v5 on 23 August 2021, with the comment "Accepted to SC 2021".
+
+The hardware matters for everything below. §5: each server has eight 80 GB A100 GPUs "connected to each other by NVLink and NVSwitch", and "eight NVIDIA Mellanox 200Gbps HDR Infiniband HCAs for application communication". The peak 16-bit throughput of an A100 is taken as 312 teraFLOP/s.
+
+The contributions this review relies on:
+
+- **Pipeline bubble (§2.2).** With $p$ stages and $m$ microbatches per batch, a flush schedule spends $\frac{p-1}{m}$ of the ideal time in the bubble. The proposed **interleaved schedule** gives each GPU $v$ smaller chunks of layers and reduces that to $\frac{1}{v}\cdot\frac{p-1}{m}$, at the cost of more communication.
+- **Tensor-parallel communication (§2.3, §3.2).** The MLP and self-attention blocks are partitioned so that each layer needs two all-reduces in the forward pass and two in the backward pass.
+- **Takeaways (§3).** Tensor parallelism up to the number of GPUs in a server; a total model-parallel size $M = t \cdot p$ just large enough for the model to fit, with data parallelism beyond that; and a microbatch size that depends on the model's throughput and memory characteristics.
+- **Scale (abstract, §5.1).** A one-trillion-parameter model trained at 502 petaFLOP/s on 3,072 GPUs, 163 teraFLOP/s per GPU, 52% of peak. The smallest model in the scaling table reaches 44%.
+- **Ablations (§5.3–5.7).** Throughput peaks when the tensor-parallel size equals the GPUs in one server, "due to its expensive all-reduce communication". The interleaved schedule is faster than the default, but the gap closes as the batch grows. A scatter/gather optimisation (§4.1), in which each tensor-parallel rank sends only its own slice of a pipeline activation over its InfiniBand adapter and the receivers rebuild it with an all-gather over NVLink, improves communication-heavy schedules by up to 11%. Activation recomputation costs up to 33% throughput at small batches, yet allows up to 2× higher throughput at large ones.
+- **Comparison with ZeRO-3 (§5.2).** For 175-billion and 530-billion-parameter models, PTD-P was 6% and 24% faster than ZeRO-3 without model parallelism at the first GPU counts, and 70% faster when the GPU count doubled at the same batch size, attributed to "less cross-node communication". For 530 billion, ZeRO-3 did not fit on 560 GPUs, so its point used 640 GPUs and a global batch of 2,560.
+- **Training-time estimate (§5.1, equation 4).** End-to-end time $\approx \frac{8TP}{nX}$ for $T$ tokens, $P$ parameters, $n$ GPUs and measured per-GPU throughput $X$. With 450 billion tokens, 3,072 GPUs and 163 teraFLOP/s, about 84 days.
+
+## Derived: checking the arithmetic
+
+The time estimate is the easiest claim to check. With activation recomputation, the paper counts about $8$ floating-point operations per parameter per token: 2 in the forward pass, 4 in the backward pass and 2 more to recompute the forward. So
+
+$$
+\frac{8\,T\,P}{n\,X} = \frac{8 \times 450 \times 10^{9} \times 10^{12}}{3072 \times 163 \times 10^{12}\ \text{FLOP/s}} \approx 7.19 \times 10^{6}\ \text{s} \approx 83\ \text{days},
+$$
+
+consistent with the paper's 84 days. The estimate is only as good as $X$, which the paper measures end to end, so it includes communication, data loading and optimiser time. The text does not say that it covers failures, restarts or evaluation, so a calendar estimate needs those added separately. The paper also notes its FLOP formula is a lower bound on the true count.
+
+The bubble formula connects directly to the scale result. A trillion-parameter model needs many pipeline stages to fit, and $\frac{p-1}{m}$ is only small if each batch has many microbatches. That is the mechanism behind the introduction's warning that "as much as 50% of time can be spent flushing the pipeline depending on the number of microbatches injected into the pipeline."
+
+The [collectives lesson](/blog/model-development-collectives/#tensor-and-pipeline-parallelism-move-activations) turns the four all-reduces per layer into bytes. For a microbatch of one 2,048-token sequence at width 8,192 in BF16, each all-reduce carries 32 MiB, and an 80-layer model runs 320 of them per microbatch. Inside a server they ride NVLink; between servers they would compete for the InfiniBand adapters. That is the arithmetic behind the tensor-within-a-server rule. The paper's ablation is the measurement that confirms it on this hardware.
+
+## Analysis: what each comparison isolates
+
+The ablations and the ZeRO-3 comparison answer different kinds of question, and they deserve different weight.
+
+The **tensor-versus-pipeline ablation** (§5.4.1, Figure 13: a 162-billion-parameter model on 64 GPUs) evaluates the split between $t$ and $p$ "for a given model and batch size". It is close to an isolated intervention: it shows how throughput changes with where the communication crosses a server boundary, on this hardware. It supports the rule for servers with a fast internal fabric and slower links between them. It cannot say where the optimum falls on a machine whose internal and external links have a different ratio.
+
+The **ZeRO-3 comparison** sets one layout against another: PTD-P with model parallelism against ZeRO-3 with none. Where the text states microbatch sizes they match (4), but the configurations differ in several ways at once, and at 530 billion parameters ZeRO-3 needed a different GPU count, because it did not fit on 560. That answers a useful practical question: on this cluster, which approach trains these models faster? It does not isolate state sharding as the cause, because the layouts differ in more than one respect. The paper's explanation, less cross-server communication, is a plausible mechanism consistent with the ring model. It is not separately measured.
+
+The **interleaved schedule** shows how a result depends on its operating point. It helps most at small batches, where the bubble is large, and the advantage shrinks as the batch grows. Citing its peak improvement without the batch size would overstate it for a large-batch run.
+
+## Unknown: what to measure before adopting a layout
+
+The paper does not tell you how these layouts behave on a different network, with a different ratio of internal to external bandwidth, other jobs sharing links, or newer GPUs whose compute grew faster than their interconnect. Nor does it report convergence: these are throughput studies, and a layout that changes the effective batch can change the number of updates needed.
+
+A proportionate follow-up for your own cluster is the [decision guide's bounded experiment](/blog/model-development-choosing-parallelism/#a-bounded-experiment): fit the link constants with nccl-tests, then compare the two candidate layouts on one or two servers at the planned batch, with model, sequence length and precision held fixed. Report failed configurations alongside the successful ones.
+
+<details>
+  <summary>Check: the paper reports 52% of peak for the largest model. Can a smaller model on the same cluster expect at least that?</summary>
+  <p>No. The scaling table's smallest model reached 44%. Utilisation depends on how large the matrix multiplications are relative to communication and bubbles, and smaller models have smaller matrices. A percentage of peak transfers only with the configuration that produced it.</p>
+</details>
+
+Return to the [model-development roadmap](/model-development/) to see where this module sits.

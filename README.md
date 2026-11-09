@@ -44,9 +44,16 @@ routes for planned topics. Keep research publication dates separate from article
 dates, and distinguish reported findings from calculated examples and proposed
 experiments.
 
-The training-memory estimator's equations live in `src/lib/training-memory.ts`;
-its browser component contains no alternate formula. It is an illustrative
-state ledger with explicit allowances, not a performance benchmark or fit guarantee.
+Published pages are listed once, in `publishedUnits` in
+`src/data/model-development.ts`: the hub's reading path and the output check
+both read it. [`coverage-matrix.md`](docs/model-development/coverage-matrix.md)
+tracks every curriculum area, published or planned.
+
+Each interactive figure keeps its arithmetic in a tested module and contains no
+alternate formula: `src/lib/training-memory.ts` for the memory estimator and
+`src/lib/collectives.ts` for the ring stepper, communication planner and
+pipeline schedule. They are illustrative models with stated assumptions, not
+benchmarks or fit guarantees.
 
 ```sh
 npm test                       # Node built-in tests; no additional test framework

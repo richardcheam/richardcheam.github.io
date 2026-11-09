@@ -1,0 +1,106 @@
+---
+// Model development, parallelism decision guide: per-step data-parallel
+// communication of each ZeRO stage under the α–β ring model, with gradient
+// bucketing, against a user-supplied backward time (src/lib/collectives.ts).
+import { stageCommunication, overlapBounds, formatSeconds as s, formatGB as gb } from '../../lib/collectives';
+const defaults = { parameters: 7, bytesPerValue: 2, ranks: 8, alphaMicros: 5, bandwidthGBs: 40, bucketMiB: 25, backward: 1 };
+const toInput = (v: typeof defaults) => ({ parameters: Math.round(v.parameters * 1e9), bytesPerValue: v.bytesPerValue, ranks: v.ranks, alpha: v.alphaMicros * 1e-6, bandwidth: v.bandwidthGBs * 1e9, bucketBytes: v.bucketMiB * 2 ** 20 });
+const names = ['Replicated data parallel', 'ZeRO stage 1', 'ZeRO stage 2', 'ZeRO stage 3'];
+const rows = ([0, 1, 2, 3] as const).map(stage => ({ stage, ...stageCommunication(stage, toInput(defaults)) }));
+const fields = [
+  { key: 'parameters', label: 'Parameters (billions)', value: 7, min: 0.001, max: 2000, step: 0.001 },
+  { key: 'bytesPerValue', label: 'Bytes per communicated value', value: 2, min: 1, max: 8, step: 1 },
+  { key: 'ranks', label: 'Data-parallel ranks', value: 8, min: 1, max: 65536, step: 1 },
+  { key: 'alphaMicros', label: 'Latency per ring step α (µs)', value: 5, min: 0, max: 10000, step: 0.1 },
+  { key: 'bandwidthGBs', label: 'Effective bandwidth per rank (GB/s)', value: 40, min: 0.1, max: 10000, step: 0.1 },
+  { key: 'bucketMiB', label: 'Gradient bucket (MiB)', value: 25, min: 0.01, max: 100000, step: 0.01 },
+  { key: 'backward', label: 'Backward compute time to overlap (s)', value: 1, min: 0, max: 100000, step: 0.01 },
+];
+const kinds = (r: (typeof rows)[number]) => r.collectives.map(c => c.kind).join(' + ');
+---
+<section class="comm-plan blog-diagram" data-comm-planner aria-label="Data-parallel communication planner">
+  <header>
+    <p class="comm-kicker">Derived estimates · idealized ring model · not measured</p>
+    <h3>What does each sharding stage cost the network per step?</h3>
+    <p>Each row moves the gradients, and stage 3 also the parameters, through ring collectives. Compare the time with the backward pass it could hide behind.</p>
+  </header>
+  <fieldset class="comm-controls" disabled>
+    <legend>Model, network and overlap assumptions</legend>
+    {fields.map(f => <label><span>{f.label}</span><input type="number" data-comm-input={f.key} min={f.min} max={f.max} step={f.step} value={f.value} required inputmode={['ranks', 'bytesPerValue'].includes(f.key) ? 'numeric' : 'decimal'} /></label>)}
+  </fieldset>
+  <noscript><p>The default worked example is shown below. Enable JavaScript to change its inputs.</p></noscript>
+  <p class="comm-status" data-comm-status role="status" aria-live="polite" aria-atomic="true">Default: 7 billion parameters in BF16, 8 ranks, α = 5 µs, 40 GB/s, 25 MiB buckets, 1 s of backward compute.</p>
+  <div data-comm-results>
+    <div class="comm-table" tabindex="0" role="region" aria-label="Per-step communication estimates, scroll horizontally if needed">
+      <table>
+        <caption>Per rank, per optimizer step. GB = 10⁹ bytes.</caption>
+        <thead><tr><th scope="col">Policy</th><th scope="col">Collectives</th><th scope="col">Bytes sent</th><th scope="col">Latency term</th><th scope="col">Bandwidth term</th><th scope="col">Total</th><th scope="col">Exposed if it all overlaps</th><th scope="col">Exposed if none overlaps</th></tr></thead>
+        <tbody>{rows.map(r => { const o = overlapBounds({ compute: defaults.backward, communication: r.total }); return <tr data-comm-row={r.stage}>
+          <th scope="row">{names[r.stage]}</th><td data-col="kinds">{kinds(r)}</td><td data-col="bytes">{gb(r.bytesSentPerRank)}</td><td data-col="latency">{s(r.latency)}</td><td data-col="bandwidth">{s(r.bandwidthTerm)}</td><td data-col="total">{s(r.total)}</td><td data-col="best">{s(o.exposedBest)}</td><td data-col="worst">{s(o.exposedWorst)}</td>
+        </tr>; })}</tbody>
+      </table>
+    </div>
+    <p class="comm-note" data-comm-buckets>Each collective is split into {rows[0].buckets.toLocaleString('en-GB')} buckets of at most {defaults.bucketMiB} MiB.</p>
+  </div>
+  <details class="comm-assumptions" open>
+    <summary>Assumptions and what this cannot tell you</summary>
+    <p>Ring collectives on one data-parallel group: all-gather and reduce-scatter take p − 1 steps of n/p bytes, an all-reduce takes twice that. Every step costs α plus its bytes divided by the bandwidth you enter. Reduction arithmetic, tree and hierarchical algorithms, protocol switches, congestion, other jobs on the network and tensor- or pipeline-parallel traffic are all left out. Volumes follow ZeRO §7: 2Ψ for stages 0–2 and 3Ψ for stage 3.</p>
+    <p>The two exposed columns are bounds, not predictions. Whether a collective can overlap backward depends on dependencies and the implementation: a parameter all-gather after the optimizer step cannot hide behind that step's backward pass. The backward time is your input; this page does not estimate compute.</p>
+    <p>Use the result to decide what to measure, for example with nccl-tests on the real network, not to approve a configuration.</p>
+  </details>
+</section>
+
+<script>
+  import { stageCommunication, overlapBounds, formatSeconds as s, formatGB as gb } from '../../lib/collectives';
+  document.querySelectorAll<HTMLElement>('[data-comm-planner]').forEach(root => {
+    const inputs = [...root.querySelectorAll<HTMLInputElement>('[data-comm-input]')];
+    const status = root.querySelector<HTMLElement>('[data-comm-status]')!;
+    const results = root.querySelector<HTMLElement>('[data-comm-results]')!;
+    function update() {
+      try {
+        if (inputs.some(i => !i.checkValidity() || !Number.isFinite(i.valueAsNumber))) throw new RangeError('Enter values within the displayed limits; ranks and bytes per value must be whole numbers. Blank fields are not zero.');
+        const v = Object.fromEntries(inputs.map(i => [i.dataset.commInput!, i.valueAsNumber]));
+        const input = { parameters: Math.round(v.parameters * 1e9), bytesPerValue: v.bytesPerValue, ranks: v.ranks, alpha: v.alphaMicros * 1e-6, bandwidth: v.bandwidthGBs * 1e9, bucketBytes: v.bucketMiB * 2 ** 20 };
+        let buckets = 0;
+        for (const stage of [0, 1, 2, 3] as const) {
+          const r = stageCommunication(stage, input);
+          const o = overlapBounds({ compute: v.backward, communication: r.total });
+          buckets = r.buckets;
+          const row = root.querySelector<HTMLElement>(`[data-comm-row="${stage}"]`)!;
+          const set = (col: string, text: string) => { row.querySelector<HTMLElement>(`[data-col="${col}"]`)!.textContent = text; };
+          set('bytes', gb(r.bytesSentPerRank)); set('latency', s(r.latency)); set('bandwidth', s(r.bandwidthTerm)); set('total', s(r.total)); set('best', s(o.exposedBest)); set('worst', s(o.exposedWorst));
+        }
+        root.querySelector<HTMLElement>('[data-comm-buckets]')!.textContent = v.ranks === 1 ? 'One rank: there is nothing to communicate.' : `Each collective is split into ${buckets.toLocaleString('en-GB')} buckets of at most ${v.bucketMiB} MiB.`;
+        results.hidden = false;
+        status.textContent = `${v.parameters} billion parameters, ${v.ranks} ranks, α = ${v.alphaMicros} µs, ${v.bandwidthGBs} GB/s. Results updated; they are model estimates, not measurements.`;
+      } catch (error) {
+        results.hidden = true;
+        status.textContent = error instanceof Error ? error.message : 'Enter valid finite inputs.';
+      }
+    }
+    root.querySelector<HTMLFieldSetElement>('fieldset')!.disabled = false;
+    inputs.forEach(i => i.addEventListener('input', update));
+  });
+</script>
+
+<style>
+  .comm-plan { margin: 2rem 0; padding: clamp(1rem, 3vw, 1.75rem); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); font-size: .94rem; }
+  .comm-plan h3 { margin: .3rem 0 .7rem; }
+  .comm-kicker { font-size: .75rem; letter-spacing: .045em; color: var(--text-secondary); }
+  .comm-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: 1rem; margin: 1.4rem 0 .8rem; padding: 0; border: 0; min-width: 0; }
+  .comm-controls legend { padding: 0 0 .7rem; font-weight: 600; }
+  .comm-controls label { display: grid; align-content: start; gap: .4rem; font-size: .8rem; }
+  .comm-controls input { width: 100%; min-width: 0; border: 1px solid var(--border-strong); border-radius: 4px; padding: .55rem .65rem; background: var(--bg); color: var(--text); font: inherit; font-size: 1rem; }
+  .comm-controls input:focus-visible, .comm-table:focus-visible, .comm-assumptions summary:focus-visible { outline: 2px solid var(--blog-orientation); outline-offset: 3px; }
+  .comm-status { min-height: 3rem; color: var(--text-secondary); font-size: .82rem; }
+  .comm-table { max-width: 100%; overflow-x: auto; margin: 1rem 0; }
+  .comm-table table { width: 100%; border-collapse: collapse; font-size: .75rem; font-variant-numeric: tabular-nums; }
+  .comm-table caption { text-align: left; margin-bottom: .6rem; font-size: .8rem; color: var(--text-secondary); }
+  .comm-table th, .comm-table td { text-align: right; padding: .6rem .5rem; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  .comm-table th:first-child, .comm-table td[data-col="kinds"] { text-align: left; }
+  .comm-note { font-size: .8rem; color: var(--text-secondary); }
+  .comm-assumptions { border-top: 1px solid var(--border); padding-top: 1rem; font-size: .82rem; }
+  .comm-assumptions summary { cursor: pointer; font-weight: 600; }
+  .comm-assumptions p { line-height: 1.6; }
+  .comm-plan [hidden] { display: none !important; }
+</style>

@@ -63,3 +63,17 @@ Files: add `scripts/check-model-development.mjs`, targeted rendered-output check
 ## Execution record
 
 Tasks 1–2 and local validation are complete. The whole-branch independent review of `8369cd6..e628228` approved draft-PR readiness without defects; live browser QA, real-training behavior and future lessons remain outside that verification. The final publication step is recorded by the resulting draft PR, and remains unchecked here until that external operation succeeds. No merge or deployment is authorized.
+
+## Module 2: collectives and the choice of parallelism
+
+Chosen after re-auditing the first slice: the memory lesson and ZeRO review both name communication as the next dependency, and the handbook (Volume 2, D2–D6) treats it as the main engineering priority.
+
+- [x] Re-verify the first slice in this checkout (tests, build, output check) and run the live browser QA the handoff could not.
+- [x] Fix the mobile overflow found by that QA: build-time table wrapping, with tests.
+- [x] Verify every source against its primary page and version: ZeRO v3 §7, NCCL 2.32.3, Thakur et al. 2005, nccl-tests, PyTorch 2.15 DDP, Megatron-LM v5.
+- [x] Write `src/lib/collectives.ts` test-first: ring costs, crossover, buckets, stage volumes, tensor-parallel bytes, bubble, ring trace, GPipe schedule, overlap bounds, formatting.
+- [x] Build the ring stepper, communication planner and pipeline schedule with no-JS content and validated inputs.
+- [x] Write the collectives lesson, the decision guide and the Megatron-LM review; compute every number with the tested library.
+- [x] Add sources and claims; replace the single hard-coded module with `publishedUnits`; extend validation and the output check to every unit.
+- [x] Run tests, build, output check and live desktop/mobile/keyboard/no-JS QA.
+- [ ] Richard's editorial review; merge only on his authorization.
