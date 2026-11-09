@@ -2,6 +2,7 @@ import { defineConfig } from "astro/config";
 import mdx from "@astrojs/mdx";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
+import rehypeTableWrap from "./src/lib/rehype-table-wrap.mjs";
 
 export default defineConfig({
   site: "https://richardcheam.github.io",
@@ -9,7 +10,7 @@ export default defineConfig({
   integrations: [mdx()],
   markdown: {
     remarkPlugins: [remarkMath],
-    rehypePlugins: [rehypeKatex],
+    rehypePlugins: [rehypeKatex, rehypeTableWrap],
     // Colours come from the site's --code-* tokens (see "Code blocks" in main.scss).
     shikiConfig: { theme: "css-variables" },
   },

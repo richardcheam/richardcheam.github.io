@@ -28,7 +28,7 @@ const MEGA_SHOWN = 3;
 const topics = seriesList
   .map((t) => {
     const posts = megaPosts.filter((p) => p.data.series === t.key).map((p, i) => ({ p, n: i + 1 }));
-    const course = t.key === "foundations";
+    const course = t.key === "foundations" || t.key === "model-development";
     return { ...t, total: posts.length, course, shown: course ? posts.slice(0, MEGA_SHOWN) : posts.slice(-MEGA_SHOWN).reverse() };
   })
   .filter((t) => t.total > 0);
@@ -78,6 +78,7 @@ import SignatureMark from "../components/SignatureMark.astro";
         <nav class="site-nav" aria-label="Primary">
           <a class="site-nav__item" href="/projects/" data-mega-target="projects" aria-haspopup="true" aria-expanded="false">Projects</a>
           <a class="site-nav__item" href="/blog/" data-mega-target="blog" aria-haspopup="true" aria-expanded="false">Blog</a>
+          <a class="site-nav__item" href="/model-development/">Learn</a>
           <a class="site-nav__item" href="/paper-reviews/" data-mega-target="paper-reviews" aria-haspopup="true" aria-expanded="false">Paper Reviews</a>
           <a class="site-nav__item" href="/cv/">About Me</a>
         </nav>

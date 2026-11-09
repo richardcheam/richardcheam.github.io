@@ -1,0 +1,112 @@
+---
+// Model development, collectives lesson: an exact ring all-reduce on 4 ranks
+// (src/lib/collectives.ts ringAllReduceTrace). Rank r starts with chunk c
+// holding (r + 1)(c + 1); the chunk sums are 10, 20, 30, 40. Reduce-scatter
+// takes 3 steps, all-gather 3 more; every step each rank sends one chunk.
+import { ringAllReduceTrace } from "../../lib/collectives";
+const { alt } = Astro.props;
+const P = 4;
+const start = Array.from({ length: P }, (_, r) => Array.from({ length: P }, (_, c) => (r + 1) * (c + 1)));
+const end = ringAllReduceTrace(start).at(-1)!.state;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-ring-allreduce>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 330" role="img" aria-labelledby="ring-ar-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="ring-ar-title">Four ranks in a ring, each holding four chunks, passing one chunk to the next rank at every step until all ranks hold the same sums</title>
+    <g data-draw></g>
+  </svg>
+  <noscript>
+    <p>Without JavaScript, here are the start and the result. Each rank's four chunks before: {start.map((row, r) => `rank ${r}: ${row.join(", ")}`).join("; ")}. After the all-reduce every rank holds {end[0].join(", ")}.</p>
+  </noscript>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { INK, MUTED, JADE, GOLD, TINT } from "../../lib/net-diagram";
+  import { txt, arrow } from "../../lib/plot";
+  import { ringAllReduceTrace } from "../../lib/collectives";
+  import { reduce } from "../../lib/figure-motion";
+  import { animate } from "motion/mini";
+  const P = 4;
+  const START = Array.from({ length: P }, (_, r) => Array.from({ length: P }, (_, c) => (r + 1) * (c + 1)));
+  const SUMS = Array.from({ length: P }, (_, c) => START.reduce((s, row) => s + row[c], 0));
+  const TRACE = ringAllReduceTrace(START);
+  const CELL_X = (c: number) => 250 + c * 92, ROW_Y = (r: number) => 58 + r * 62;
+  document.querySelectorAll<HTMLElement>("[data-ring-allreduce]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    let shown = -1;
+    // On a forward step, fly each sent chunk from its sender's cell to its
+    // receiver's cell while the receiver's number counts to the new value.
+    function flyPackets(sends: { from: number; to: number; chunk: number; value: number }[]) {
+      const layer = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      layer.setAttribute("aria-hidden", "true");
+      sends.forEach((e) => {
+        const x = CELL_X(e.chunk) + 24, y0 = ROW_Y(e.from) + 4, y1 = ROW_Y(e.to) + 4;
+        const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+        g.innerHTML = `<rect x="${x}" y="${y0}" width="32" height="28" rx="6" fill="${GOLD}"/>` + txt(x + 16, y0 + 19, String(e.value), `font-size="12.5" font-weight="700" text-anchor="middle" fill="#fff"`);
+        layer.append(g);
+        animate(g, { transform: ["translate(0px, 0px)", "translate(0px, 0px)", `translate(0px, ${y1 - y0}px)`, `translate(0px, ${y1 - y0}px)`], opacity: [1, 1, 1, 0] }, { duration: 1.1, times: [0, 0.15, 0.8, 1], ease: "easeInOut" }).then(() => g.remove());
+      });
+      $("svg").append(layer);
+      window.setTimeout(() => layer.remove(), 1400);
+    }
+    const sendLines = (k: number) => TRACE[k].sends.map((s) => {
+      const before = (k === 0 ? START : TRACE[k - 1].state)[s.to][s.chunk];
+      return TRACE[k].phase === "reduce-scatter"
+        ? `rank ${s.from} → rank ${s.to}, chunk ${s.chunk}: ${before} + ${s.value} = ${before + s.value}`
+        : `rank ${s.from} → rank ${s.to}, chunk ${s.chunk}: copy ${s.value}`;
+    }).join("\n");
+    const steps = () => [
+      { say: "Four ranks, each holding a 4-chunk tensor of its own gradients. The goal is for every rank to end with the chunk-by-chunk sum. Each rank sends only to the next rank in a ring: 0 → 1 → 2 → 3 → 0.", math: `target sums: ${SUMS.join(", ")}\neach chunk is n/4 bytes; a rank's whole tensor is n bytes` },
+      ...TRACE.slice(0, P - 1).map((t, k) => ({
+        say: k === 0 ? "Reduce-scatter, step 1: every rank sends one chunk to its neighbour, which adds it to its own copy. All four links are busy at once." : `Reduce-scatter, step ${k + 1}: each rank forwards the partial sum it just built, one chunk along.`,
+        math: sendLines(k),
+      })),
+      { say: "After p − 1 = 3 steps each rank owns one fully reduced chunk (gold): rank r holds the sum of chunk r + 1. That is a reduce-scatter. Each rank has sent 3 × n/4 bytes so far.", math: `rank 0 owns chunk 1 = ${SUMS[1]}, rank 1 owns chunk 2 = ${SUMS[2]}, rank 2 owns chunk 3 = ${SUMS[3]}, rank 3 owns chunk 0 = ${SUMS[0]}` },
+      ...TRACE.slice(P - 1).map((t, k) => ({
+        say: k === 0 ? "All-gather, step 1: now each rank sends its finished chunk around the ring, and the receiver simply copies it." : `All-gather, step ${k + 1}: forward the finished chunk received last step.`,
+        math: sendLines(P - 1 + k),
+      })),
+      { say: "Done: every rank holds every sum, after 2(p − 1) = 6 steps. Each rank sent 6 chunks of n/4 bytes, 2(p − 1)/p · n = 1.5n in total, whatever the ring's length. That bandwidth term is why a ring all-reduce scales well.", math: `bytes sent per rank = 2 × (4 − 1)/4 × n = 1.5n\nwith p ranks: 2(p − 1)/p × n, which approaches 2n as p grows` },
+    ];
+    function draw(k: number) {
+      // k −1/0: start; 1..3: reduce-scatter steps; 4: summary; 5..7: all-gather; 8: done.
+      const traceIndex = k <= 0 ? -1 : k <= 3 ? k - 1 : k === 4 ? 2 : k <= 7 ? k - 2 : 5;
+      const state = traceIndex < 0 ? START : TRACE[traceIndex].state;
+      const active = (k >= 1 && k <= 3) || (k >= 5 && k <= 7) ? TRACE[traceIndex] : null;
+      let s = txt(250, 26, "chunk 0", `font-size="11" fill="${MUTED}"`) + txt(342, 26, "chunk 1", `font-size="11" fill="${MUTED}"`) + txt(434, 26, "chunk 2", `font-size="11" fill="${MUTED}"`) + txt(526, 26, "chunk 3", `font-size="11" fill="${MUTED}"`);
+      // Ring on the left.
+      const ringX = 90, ringY = (r: number) => ROW_Y(r) + 18;
+      for (let r = 0; r < P; r++) {
+        s += `<circle cx="${ringX}" cy="${ringY(r)}" r="23" fill="${TINT}" stroke="${INK}"/>` + txt(ringX, ringY(r) + 4, `rank ${r}`, `font-size="10" font-weight="700" text-anchor="middle" fill="${INK}"`);
+        if (r < P - 1) s += arrow(ringX, ringY(r) + 25, ringX, ringY(r + 1) - 25, active ? GOLD : MUTED, active ? 2 : 1.2);
+      }
+      s += `<path d="M${ringX - 24},${ringY(P - 1)} C${ringX - 70},${ringY(P - 1)} ${ringX - 70},${ringY(0)} ${ringX - 24},${ringY(0)}" fill="none" stroke="${active ? GOLD : MUTED}" stroke-width="${active ? 2 : 1.2}"/>` + arrow(ringX - 36, ringY(0) - 1, ringX - 25, ringY(0), active ? GOLD : MUTED, active ? 2 : 1.2);
+      for (let r = 0; r < P; r++) {
+        for (let c = 0; c < P; c++) {
+          const v = state[r][c], done = v === SUMS[c], x = CELL_X(c), y = ROW_Y(r);
+          const sent = active?.sends.find((e) => e.from === r && e.chunk === c), got = active?.sends.find((e) => e.to === r && e.chunk === c);
+          s += `<rect x="${x}" y="${y}" width="80" height="36" rx="5" fill="${done ? "#F4EAD2" : "#fff"}" stroke="${got ? JADE : sent ? GOLD : "#cfd5d4"}" stroke-width="${got || sent ? 2.4 : 1}"/>`;
+          s += txt(x + 40, y + 23, String(v), `font-size="14" font-weight="700" text-anchor="middle" fill="${done ? GOLD : INK}"`);
+        }
+      }
+      // Sends go one row down; rank 3's send wraps round to rank 0 and is labelled instead.
+      if (active) active.sends.forEach((e) => {
+        const x = CELL_X(e.chunk) + 40;
+        s += e.to === 0
+          ? arrow(x, ROW_Y(e.from) + 36, x, ROW_Y(e.from) + 50, GOLD, 1.6) + txt(x + 6, ROW_Y(e.from) + 56, "to rank 0", `font-size="9.5" fill="${GOLD}"`)
+          : arrow(x, ROW_Y(e.from) + 36, x, ROW_Y(e.to) - 2, GOLD, 1.6);
+      });
+      const sentChunks = traceIndex + 1;
+      s += txt(640, 70, "bytes sent", `font-size="11" fill="${MUTED}"`) + txt(640, 90, "by each rank", `font-size="11" fill="${MUTED}"`) + txt(640, 118, `${sentChunks} × n/4`, `font-size="16" font-weight="700" fill="${INK}"`);
+      s += txt(640, 160, k >= 4 ? (k >= 8 ? "all-reduce" : k >= 5 ? "all-gather" : "reduce-scatter") : k >= 1 ? "reduce-scatter" : "start", `font-size="12" font-weight="700" fill="${JADE}"`);
+      s += txt(250, 316, "gold: a chunk that holds its final sum. Outlines: gold sends, green receives.", `font-size="10.5" fill="${MUTED}"`);
+      $("[data-draw]").innerHTML = s;
+      // Launch after the step player has set up its transition (it runs right
+      // after draw), so the packets are not mistaken for shapes to fade in.
+      if (active && k === shown + 1 && !reduce) { const sends = active.sends; queueMicrotask(() => flyPackets(sends)); }
+      shown = k;
+    }
+    stepper(root, steps, draw, { delay: 2.6 });
+  });
+</script>
