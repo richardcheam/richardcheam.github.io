@@ -1,0 +1,75 @@
+[
+  {
+    "id": "MEM-01",
+    "status": "Derived",
+    "claim": "Illustrative Adam state ledger totals 16 bytes per parameter under the stated dtypes and separate master-weight assumption.",
+    "sourceIds": [
+      "zero-config"
+    ],
+    "location": "/blog/model-development-training-memory/",
+    "conditions": "2-byte weights, 2-byte gradients, 4-byte master copy, two 4-byte moments. This is a chosen accounting model, not a universal framework allocation."
+  },
+  {
+    "id": "MEM-02",
+    "status": "Reported",
+    "claim": "The stages partition optimizer state, then gradients, then parameters.",
+    "sourceIds": [
+      "zero-config"
+    ],
+    "location": "/paper-reviews/zero/",
+    "conditions": "Stage definitions; parameter materialization and residency policies require separate accounting."
+  },
+  {
+    "id": "MEM-03",
+    "status": "Derived",
+    "claim": "For 7B parameters across eight balanced shards, the ideal persistent byte totals are 112e9, 38.5e9, 26.25e9, and 14e9.",
+    "sourceIds": [
+      "zero-config"
+    ],
+    "location": "/blog/model-development-training-memory/",
+    "conditions": "The lesson’s fixed Adam policy; no activations, buffers or transient materialization. Unit-tested arithmetic, not measured GPU allocations."
+  },
+  {
+    "id": "MEM-04",
+    "status": "Reported",
+    "claim": "The historical experimental implementation includes a subset of the paper’s proposed optimizations.",
+    "sourceIds": [
+      "zero"
+    ],
+    "location": "/paper-reviews/zero/",
+    "conditions": "Version 3 §10 and Table 3; do not reinterpret as an isolated full-parameter-sharding experiment."
+  },
+  {
+    "id": "MEM-05",
+    "status": "Reported",
+    "claim": "FSDP2 exposes materialization, resharding and mixed-precision policies.",
+    "sourceIds": [
+      "fsdp2",
+      "fsdp2-tutorial"
+    ],
+    "location": "/blog/model-development-training-memory/",
+    "conditions": "Versioned documentation inspected; no implementation executed or performance reproduced."
+  },
+  {
+    "id": "MEM-06",
+    "status": "Hypothesis",
+    "claim": "A later tiny profiling exercise can expose the gap between a persistent floor and a step’s measured peak.",
+    "sourceIds": [
+      "activation-recomputation",
+      "zero-config"
+    ],
+    "location": "/blog/model-development-training-memory/",
+    "conditions": "Proposed bounded experiment only; not performed by Richard or this research."
+  },
+  {
+    "id": "MEM-07",
+    "status": "Unknown",
+    "claim": "The peak memory and throughput of an actual future training run cannot be established by the estimator.",
+    "sourceIds": [
+      "zero-config",
+      "fsdp2"
+    ],
+    "location": "/blog/model-development-training-memory/",
+    "conditions": "Requires actual model, data shapes, hardware, optimizer and framework schedule; arbitrary allowances are not measurements."
+  }
+]

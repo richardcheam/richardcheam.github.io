@@ -33,3 +33,27 @@ npm run preview   # serve dist/
 - Display math needs `$$` on its own lines; inline math uses `$...$`.
 - A new blog category must be added to `src/data/categories.ts`, a new series to `src/data/series.ts`; the build fails otherwise.
 - The blog list, the home page, the mega menu, the feed and the sitemap are generated from the collections; nothing is maintained by hand except `projectLinks` in `src/data/site.ts` and the project cards in `src/page-content/`.
+
+## Model-development field guide
+
+`/model-development/` maps the curriculum and links existing prerequisites with
+advanced lessons in the `model-development` blog series and related paper
+reviews. Start with [the research/publication index](docs/model-development/research-index.md)
+for sources, claim mappings, review status and next questions. Do not add empty
+routes for planned topics. Keep research publication dates separate from article
+dates, and distinguish reported findings from calculated examples and proposed
+experiments.
+
+The training-memory estimator's equations live in `src/lib/training-memory.ts`;
+its browser component contains no alternate formula. It is an illustrative
+state ledger with explicit allowances, not a performance benchmark or fit guarantee.
+
+```sh
+npm test                       # Node built-in tests; no additional test framework
+npm run build                  # Content schemas, MDX/math and static generation
+npm run check:model-development # Run after build: links, evidence, math and outputs
+```
+
+The PR-only `Model development checks` workflow does not deploy. The existing
+`pages.yml` remains responsible for production publication after an authorized
+merge to `master`.

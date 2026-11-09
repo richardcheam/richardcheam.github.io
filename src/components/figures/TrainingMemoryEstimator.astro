@@ -1,0 +1,128 @@
+---
+import { estimateTrainingMemory, toGiB } from '../../lib/training-memory';
+const initial = { parameters: 7e9, devices: 8, activationBytes: 6 * 2 ** 30, workspaceBytes: 2 * 2 ** 30, materializationBytes: 2 ** 30 };
+const rows = estimateTrainingMemory(initial);
+const names = ['Replicated DP', 'ZeRO 1', 'ZeRO 2', 'ZeRO 3'];
+const fields = [
+  { key: 'parameters', label: 'Parameters (billions)', value: 7, min: .001, max: 1000, step: .001 },
+  { key: 'devices', label: 'Data-parallel devices', value: 8, min: 1, max: 1024, step: 1 },
+  { key: 'capacity', label: 'Device capacity (GiB)', value: 24, min: 1, max: 1024, step: 1 },
+  { key: 'activations', label: 'Activations per rank (GiB)', value: 6, min: 0, max: 1024, step: .5 },
+  { key: 'workspace', label: 'Workspace / reserve per rank (GiB)', value: 2, min: 0, max: 1024, step: .5 },
+  { key: 'materialization', label: 'Extra materialization on ZeRO 3 (GiB)', value: 1, min: 0, max: 1024, step: .5 },
+];
+const format = (bytes: number) => toGiB(bytes).toFixed(2);
+---
+<section class="training-memory blog-diagram" data-training-memory aria-label="Training-memory estimator">
+  <header class="memory-head">
+    <p class="memory-kicker">Derived estimates · no measured performance</p>
+    <h3>Where does each rank's memory go?</h3>
+    <p>Compare the same model with four state-ownership policies. Counts are ideal balanced averages, before padding or uneven shards.</p>
+  </header>
+  <fieldset class="memory-controls" disabled>
+    <legend>Model and per-device allowances</legend>
+    {fields.map(f => <label><span>{f.label}</span><input type="number" data-memory-input={f.key} min={f.min} max={f.max} step={f.step} value={f.value} required inputmode={f.key === 'devices' ? 'numeric' : 'decimal'} /></label>)}
+  </fieldset>
+  <noscript><p>The default worked example is shown below. Enable JavaScript to change its inputs.</p></noscript>
+  <p class="memory-status" data-memory-status role="status" aria-live="polite" aria-atomic="true">Default: 7 billion parameters, 8 devices, 24 GiB per device. A value below capacity is not a fit guarantee.</p>
+  <div data-memory-results>
+    <div class="memory-chart" aria-hidden="true">
+      <p class="memory-chart-title">Persistent state only · same horizontal scale</p>
+      {rows.map(r => <div class="memory-chart-row" data-memory-bar={r.stage}>
+        <span>{names[r.stage]}</span>
+        <div class="memory-track">
+          <span class="memory-segment memory-weight" data-segment="weights" style={`width:${100 * r.weights / rows[0].persistent}%`}></span>
+          <span class="memory-segment memory-gradient" data-segment="gradients" style={`width:${100 * r.gradients / rows[0].persistent}%`}></span>
+          <span class="memory-segment memory-optimizer" data-segment="optimizer" style={`width:${100 * r.optimizer / rows[0].persistent}%`}></span>
+        </div>
+        <span data-memory-bar-total>{format(r.persistent)} GiB</span>
+      </div>)}
+      <p class="memory-legend"><span><i class="memory-weight"></i>Weights</span><span><i class="memory-gradient"></i>Gradients</span><span><i class="memory-optimizer"></i>Master copy + Adam moments</span></p>
+    </div>
+    <div class="memory-table-scroll" tabindex="0" role="region" aria-label="Per-rank memory estimates, scroll horizontally if needed">
+      <table>
+        <caption>Per-rank estimates in GiB (1 GiB = 2³⁰ bytes)</caption>
+        <thead><tr><th scope="col">Policy</th><th scope="col">Weights</th><th scope="col">Gradients</th><th scope="col">Optimizer</th><th scope="col">Persistent</th><th scope="col">With allowances</th><th scope="col">Capacity check</th></tr></thead>
+        <tbody>{rows.map(r => <tr data-memory-row={r.stage}>
+          <th scope="row">{names[r.stage]}</th>
+          <td data-col="weights">{format(r.weights)}</td><td data-col="gradients">{format(r.gradients)}</td><td data-col="optimizer">{format(r.optimizer)}</td>
+          <td data-col="persistent">{format(r.persistent)}</td><td data-col="budgeted">{format(r.budgeted)}</td>
+          <td data-col="capacity">{toGiB(r.budgeted) > 24 ? 'Exceeds capacity' : 'Not ruled out'}</td>
+        </tr>)}</tbody>
+      </table>
+    </div>
+  </div>
+  <details class="memory-assumptions" open>
+    <summary>Assumptions and missing terms</summary>
+    <p>Fixed illustrative full-parameter Adam policy: 2 bytes for model weights, 2 for gradients, 4 for master weights, 8 for moments. No tensor/pipeline partitioning, CPU offload, quantized optimizer, adapters, or MoE distinction. Every stored parameter counts.</p>
+    <p>Activations and workspace are user-supplied per-rank allowances; they are not inferred from sequence length. Stage 3 additionally uses your materialization allowance for live full-parameter blocks and prefetch buffers. They are illustrative planning inputs, not measured allocations. Real peaks also depend on wrapping, sharding padding, communication buckets, allocator behavior, kernels and scheduling. Zero allowances deliberately display a state floor, not a complete job.</p>
+    <p>“Not ruled out” only means these stated terms do not exceed capacity. Restore and profile a real training step before deciding that a configuration fits. Values here predict neither throughput nor a supported framework configuration.</p>
+  </details>
+</section>
+
+<script>
+  import { estimateTrainingMemory, toGiB } from '../../lib/training-memory';
+  document.querySelectorAll<HTMLElement>('[data-training-memory]').forEach(root => {
+    const inputs = [...root.querySelectorAll<HTMLInputElement>('[data-memory-input]')];
+    const status = root.querySelector<HTMLElement>('[data-memory-status]')!;
+    const results = root.querySelector<HTMLElement>('[data-memory-results]')!;
+    const fmt = (bytes: number) => toGiB(bytes).toFixed(2);
+    function update() {
+      try {
+        if (inputs.some(input => !input.checkValidity() || !Number.isFinite(input.valueAsNumber))) throw new RangeError('Enter values within the displayed limits; devices must be a whole number. Blank fields are not zero.');
+        const values = Object.fromEntries(inputs.map(input => [input.dataset.memoryInput!, input.valueAsNumber]));
+        const rows = estimateTrainingMemory({ parameters: Math.round(values.parameters * 1e9), devices: values.devices, activationBytes: values.activations * 2 ** 30, workspaceBytes: values.workspace * 2 ** 30, materializationBytes: values.materialization * 2 ** 30 });
+        rows.forEach(r => {
+          const row = root.querySelector<HTMLElement>(`[data-memory-row="${r.stage}"]`)!;
+          for (const key of ['weights', 'gradients', 'optimizer', 'persistent', 'budgeted'] as const) row.querySelector<HTMLElement>(`[data-col="${key}"]`)!.textContent = fmt(r[key]);
+          row.querySelector<HTMLElement>('[data-col="capacity"]')!.textContent = toGiB(r.budgeted) > values.capacity ? 'Exceeds capacity' : 'Not ruled out';
+          const bar = root.querySelector<HTMLElement>(`[data-memory-bar="${r.stage}"]`)!;
+          for (const key of ['weights', 'gradients', 'optimizer'] as const) bar.querySelector<HTMLElement>(`[data-segment="${key}"]`)!.style.width = `${100 * r[key] / rows[0].persistent}%`;
+          bar.querySelector<HTMLElement>('[data-memory-bar-total]')!.textContent = `${fmt(r.persistent)} GiB`;
+        });
+        results.hidden = false;
+        status.textContent = `${values.parameters} billion parameters, ${values.devices} devices, ${values.capacity} GiB per device. Results updated. A value below capacity is not a fit guarantee.`;
+      } catch (error) {
+        results.hidden = true;
+        status.textContent = error instanceof Error ? error.message : 'Enter valid finite inputs.';
+      }
+    }
+    root.querySelector<HTMLFieldSetElement>('fieldset')!.disabled = false;
+    inputs.forEach(input => input.addEventListener('input', update));
+  });
+</script>
+
+<style>
+  .training-memory { margin: 2rem 0; padding: clamp(1rem, 3vw, 1.75rem); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); font-size: .94rem; }
+  .memory-head h3 { margin: .3rem 0 .7rem; }
+  .memory-head p { margin: .5rem 0; }
+  .memory-kicker { font-size: .75rem; letter-spacing: .045em; color: var(--text-secondary); }
+  .memory-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; margin: 1.4rem 0 .8rem; padding: 0; border: 0; }
+  .memory-controls legend { padding: 0 0 .7rem; font-weight: 600; }
+  .memory-controls label { display: grid; align-content: start; gap: .4rem; font-size: .8rem; }
+  .memory-controls input { width: 100%; min-width: 0; border: 1px solid var(--border-strong); border-radius: 4px; padding: .55rem .65rem; background: var(--bg); color: var(--text); font: inherit; font-size: 1rem; }
+  .memory-controls input:focus-visible, .memory-table-scroll:focus-visible, summary:focus-visible { outline: 2px solid var(--blog-orientation); outline-offset: 3px; }
+  .memory-status { min-height: 3rem; color: var(--text-secondary); font-size: .82rem; }
+  .memory-chart { margin: 1.5rem 0; }
+  .memory-chart-title { font-size: .8rem; font-weight: 600; }
+  .memory-chart-row { display: grid; grid-template-columns: 6.5rem minmax(0, 1fr) 6rem; gap: .7rem; align-items: center; margin: .7rem 0; font-size: .72rem; }
+  .memory-track { display: flex; height: 20px; background: var(--bg); }
+  .memory-segment { display: block; height: 100%; }
+  .memory-weight { background: var(--blog-orientation); }
+  .memory-gradient { background: color-mix(in srgb, var(--text) 65%, var(--bg)); }
+  .memory-optimizer { background: color-mix(in srgb, var(--text) 30%, var(--bg)); }
+  .memory-legend { display: flex; flex-wrap: wrap; gap: .5rem 1rem; font-size: .7rem; color: var(--text-secondary); }
+  .memory-legend span { display: flex; gap: .35rem; align-items: center; }
+  .memory-legend i { width: .75rem; height: .75rem; }
+  .memory-table-scroll { max-width: 100%; overflow-x: auto; margin: 1.5rem 0; }
+  table { width: 100%; border-collapse: collapse; font-size: .75rem; font-variant-numeric: tabular-nums; }
+  caption { text-align: left; margin-bottom: .6rem; font-size: .8rem; color: var(--text-secondary); }
+  th, td { text-align: right; padding: .6rem .5rem; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th:first-child { text-align: left; }
+  thead th { font-weight: 600; }
+  .memory-assumptions { border-top: 1px solid var(--border); padding-top: 1rem; font-size: .82rem; }
+  .memory-assumptions summary { cursor: pointer; font-weight: 600; }
+  .memory-assumptions p { line-height: 1.6; }
+  [hidden] { display: none !important; }
+  @media (max-width: 520px) { .memory-controls { grid-template-columns: 1fr; } .memory-chart-row { grid-template-columns: 5rem minmax(0, 1fr) 5rem; gap: .4rem; font-size: .65rem; } }
+</style>

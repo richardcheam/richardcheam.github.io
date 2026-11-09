@@ -21,4 +21,9 @@ export const series = [
     title: "Foundations",
     topic: "Foundations",
   },
+  {
+    key: "model-development",
+    title: "Model development",
+    topic: "Model development",
+  },
 ];

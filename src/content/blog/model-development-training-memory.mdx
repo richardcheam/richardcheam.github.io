@@ -1,0 +1,151 @@
+---
+title: "Training memory: from parameter count to a defensible GPU budget"
+title_key: "Training memory"
+date: 2026-11-09
+category: deep-learning
+read_time: "12 min"
+series_order: 1
+series: model-development
+featured: false
+published: true
+rail: list
+excerpt: "Derive an illustrative Adam memory budget, understand what ZeRO shards, and separate persistent state from the peak that determines whether a training step fits."
+question: "A model's weights fit on the GPU. What else must fit during training, and which memory-saving technique addresses the actual bottleneck?"
+my_work: "An educational derivation with a unit-tested memory estimator and worked decision scenarios. No training run or paper reproduction is claimed."
+result: "Under the explicitly assumed 16-byte Adam state layout, a 7B-parameter model has ideal per-rank persistent-state floors of 112, 38.5, 26.25 and 14 decimal GB for replicated training and ZeRO stages 1, 2 and 3 across eight data-parallel ranks."
+evidence_limit: "These are calculated persistent-state floors, not measured peak memory, throughput or a guarantee that a configuration fits. Dtypes, materialization, activations, buffers and implementation choices change the budget."
+lesson: "Count each state's bytes and ownership first; then budget the tensors that coexist at the peak. Sharding, accumulation and recomputation solve different parts of the problem."
+---
+
+import MemoryEstimator from "../../components/figures/TrainingMemoryEstimator.astro";
+
+A parameter count is a useful first measurement, but an incomplete GPU budget. A seven-billion-parameter model with two-byte weights holds 14 billion bytes of weights. Training also needs gradients, the optimiser's memory of earlier updates, and intermediate tensors for differentiation. Some tensors persist between operations; others appear briefly and determine the peak.
+
+This first lesson in the [model-development field guide](/model-development/) builds an accounting model you can inspect and challenge. By the end, you should be able to derive a per-rank state budget, explain the difference between ZeRO stages, and choose the next measurement before requesting more GPUs. The companion [ZeRO paper review](/paper-reviews/zero/) examines what the original experiments actually establish.
+
+Prerequisites: [backpropagation](/blog/foundations-neurons-backprop/) explains why backward needs saved information; [Adam](/blog/foundations-optimisers/) explains its two moving averages; the [Transformer lesson](/blog/foundations-transformer/) supplies the architecture vocabulary. Here, a **rank** is one distributed training process. Assume one process per GPU.
+
+## Start with an explicit ledger
+
+Let $N$ be the number of trainable scalar parameters. Consider this **illustrative mixed-precision Adam layout**, with no offload and no tensor or pipeline parallelism:
+
+| Persistent state | Bytes per parameter | Why it is present in this example |
+|---|---:|---|
+| Working weights | 2 | Low-precision weights used for computation |
+| Gradients | 2 | Accumulated derivatives for the next update |
+| FP32 master weights | 4 | Higher-precision copy updated by the optimiser |
+| Adam first moment | 4 | Moving average of gradients |
+| Adam second moment | 4 | Moving average of squared gradients |
+| Total | **16** | Sum of the five assumed allocations |
+
+The two Adam moments occupy eight bytes together. The master weights and moments form a twelve-byte optimiser-state group. Replicated weights and gradients contribute the other four bytes:
+
+$$
+M_{\mathrm{replicated}}=N(2+2+4+4+4)=16N\ \text{bytes per rank}.
+$$
+
+This is an assumption to audit, not a universal property of Adam or BF16 training. A framework may keep FP32 parameters without a separate persistent low-precision copy, use FP32 gradients, or allocate temporary casts. Frozen parameters and different optimisers require a different ledger. Count actual trainable tensors and their storage; a model's marketing size is only an approximation.
+
+The [PyTorch FSDP2 tutorial's mixed-precision example](https://docs.pytorch.org/tutorials/intermediate/FSDP_tutorial.html#enabling-mixed-precision) illustrates the distinction: its sharded parameters and optimiser state are FP32, while materialized compute parameters are BF16 and gradient reduction is FP32. Consequently, the sixteen-byte layout here must not be read as that example's exact allocation trace.
+
+<details>
+  <summary>Check before continuing: would two-byte weights imply two bytes per parameter during training?</summary>
+  <p>No. Weight precision describes one row of the ledger. Under our assumptions the other persistent rows add fourteen bytes per trainable parameter, before activations or temporary workspace.</p>
+</details>
+
+## Shard ownership, then do the arithmetic
+
+In ordinary replicated data parallelism, each rank computes on different examples while keeping a full model-state replica. Define $d$ as the **data-parallel sharding group size**, not necessarily the total GPU count in a hybrid job.
+
+The [DeepSpeed ZeRO configuration documentation](https://deepspeed.readthedocs.io/en/latest/zero3.html#deepspeed.runtime.zero.config.DeepSpeedZeroConfig.stage) defines stage 1 as optimiser-state partitioning, stage 2 as adding gradient partitioning, and stage 3 as adding parameter partitioning. Apply those ownership rules to our ledger, assuming perfectly even shards:
+
+| Scheme | Replicated bytes per parameter | Sharded bytes per parameter | Ideal persistent bytes per rank |
+|---|---:|---:|---|
+| Replicated data parallel | 16 | 0 | $16N$ |
+| ZeRO stage 1 | 4 | 12 | $4N+12N/d$ |
+| ZeRO stage 2 | 2 | 14 | $2N+14N/d$ |
+| ZeRO stage 3 | 0 | 16 | $16N/d$ |
+
+For stage 1, the two-byte weights and two-byte gradients remain replicated, so their $4N$ bytes cannot be divided by $d$. Only the optimiser-state group is divided. Stage 2 also divides the gradient allocation, moving two bytes from the replicated column into the sharded column. Stage 3 divides all five rows.
+
+These are **ideal persistent-state floors within the stated layout**. They describe ownership after partitioning; they do not promise that an implementation reaches precisely those allocations at every instant.
+
+<figure class="blog-figure blog-figure--wide">
+  <MemoryEstimator />
+  <figcaption><strong>Calculated, not measured.</strong> Change the parameter count and data-parallel degree to inspect the same ledger under different ownership rules. The bars exclude activations, temporary parameter materialization, communication buffers and allocator overhead.</figcaption>
+</figure>
+
+Two useful checks catch many accounting mistakes. When $d=1$, all four expressions equal $16N$: sharding across one process saves nothing. As $d$ grows, stage 1 approaches $4N$ and stage 2 approaches $2N$. Their replicated terms remain even with an arbitrarily large group. Stage 3 has no such replicated term in this simplified ledger, but computation still needs parameters to be available when used.
+
+## Work a seven-billion-parameter example
+
+Set $N=7\times10^9$ and $d=8$. Use decimal gigabytes, where $1\ \mathrm{GB}=10^9$ bytes:
+
+$$
+\begin{aligned}
+M_0&=16\times7=112\ \mathrm{GB},\\
+M_1&=4\times7+(12\times7)/8=28+10.5=38.5\ \mathrm{GB},\\
+M_2&=2\times7+(14\times7)/8=14+12.25=26.25\ \mathrm{GB},\\
+M_3&=(16\times7)/8=14\ \mathrm{GB}.
+\end{aligned}
+$$
+
+These are **per rank**. Stage 3's 14 GB per rank across eight ranks still totals 112 GB of state. It removes redundant copies rather than making the underlying state disappear.
+
+Binary units change the displayed numbers, not the allocations. Divide the byte count by $2^{30}$ for GiB. The four results are approximately 104.31, 35.86, 24.45 and 13.04 GiB. Always compare capacity and estimates in the same unit.
+
+<details>
+  <summary>Prediction: at sixteen ranks, does stage 2 fall from 26.25 GB to 13.125 GB?</summary>
+  <p>No. Only its sharded term halves: 14 + 98/16 = 20.125 decimal GB per rank. The fourteen-gigabyte working-weight replica survives. Halving the entire previous total would incorrectly shard that replica too.</p>
+</details>
+
+## The GPU must survive the peak
+
+Persistent ownership is only the first part of a capacity decision. At time $t$, define a budget with disjoint allocations:
+
+$$
+M_{\mathrm{peak}}=\max_t\left[
+M_{\mathrm{state}}(t)+M_{\mathrm{activation}}(t)+M_{\mathrm{materialized}}(t)
++M_{\mathrm{buffer}}(t)+M_{\mathrm{workspace}}(t)
+\right].
+$$
+
+Here, materialized memory means additional working parameter storage beyond the state already counted. Buffers include collective communication storage; workspace includes temporary kernel allocations. Allocator reservations and fragmentation can increase the device memory required beyond live tensor bytes. Avoid counting the same buffer in two categories, and avoid summing independently observed maxima as though they necessarily coexist.
+
+The [FSDP2 overview and prefetching discussion](https://docs.pytorch.org/tutorials/intermediate/FSDP_tutorial.html#forward-backward-with-prefetching) describes gathering sharded parameters before computation and reducing/scattering gradients afterward. Prefetching may hold future modules' parameters concurrently with the current module. The practical consequence is that a full-shard state floor leaves out a materialization window; wrapping granularity and scheduling affect that window.
+
+DeepSpeed exposes [prefetch, persistence and live-parameter controls](https://deepspeed.readthedocs.io/en/latest/zero3.html#deepspeed.runtime.zero.config.DeepSpeedZeroConfig.prefetch_bucket_size). These controls are another reason to inspect an actual configuration: stage 3 is not an assertion that every parameter stays partitioned at every moment. Padding, uneven shards and replicated small tensors can also move allocations away from ideal division.
+
+There is no defensible universal percentage to add for all these costs. A generous-looking gap may disappear with a longer sequence, a larger communication bucket, or checkpoint consolidation. Profile the intended step and separately validate initialization, saving and resuming.
+
+## Choose a technique for the term it changes
+
+Suppose the seven-billion-parameter example has eight GPUs with a hypothetical usable capacity of 32 decimal GB each. Stage 1's 38.5 GB state floor already exceeds capacity. Stage 2 leaves $32-26.25=5.75$ GB for everything omitted. That gap makes stage 2 a candidate to test, not a demonstrated fit. Stage 3 leaves 18 GB under this ledger, while introducing a different parameter-communication schedule.
+
+If activations consume the gap, reducing the microbatch or using recomputation addresses a different term from optimiser-state sharding. [Korthikanti et al., §5 and Table 2](https://arxiv.org/html/2205.05198v1#S5) distinguish saving activations from recomputing selected intermediates during backward. Their analysis makes the memory/extra-computation tradeoff explicit; it is not evidence that a fixed saving applies to every attention implementation.
+
+Gradient accumulation lets several microbatches contribute to one update. With $b$ examples per rank per microbatch and $a$ accumulation microsteps, the simple effective batch is $bad$. Reducing $b$ while increasing $a$ can reduce simultaneously live activation storage if each graph is released after backward. It does **not** divide Adam's moments, master weights or persistent gradient storage by $a$. Keeping graph references can defeat the intended activation saving.
+
+| Observed constraint | First hypothesis to test | What the state estimator cannot decide |
+|---|---|---|
+| State floor exceeds capacity | Shard state, change its layout, or use a smaller model | Throughput after the change |
+| Failure grows with sequence length or microbatch | Inspect activations and attention intermediates | Exact kernel-dependent activation bytes |
+| Peak coincides with parameter gathering | Inspect grouping, prefetching and concurrent materialization | The best overlap schedule |
+| More ranks fit but slow the step | Measure collective time and useful compute | Network bandwidth and latency |
+
+Offloading would add host memory and transfer costs to the decision; tensor and pipeline parallelism would change parameter placement and scheduling. They require extended ledgers. Do not substitute total world size for $d$ and assume this calculator models them.
+
+## Propose a bounded measurement
+
+The next step is a small experiment, **not an experiment performed for this lesson**. With suitable hardware already available, use a synthetic Transformer of at most ten million trainable parameters, random input tokens and two GPUs. Cap the exercise at ten minutes total; stop on allocation failure rather than repeatedly increasing resource use. Download no model or dataset.
+
+Record the framework version, optimiser, actual dtypes, parameter count, sequence length, microbatch, sharding policy and device capacity. Include several warm-up updates so lazy optimiser state exists. Then synchronize around measured regions and record allocated and reserved peaks for complete forward/backward/update steps, plus elapsed step time. Reset peak statistics between configurations; retain the same measurement boundaries.
+
+First compare replicated and fully sharded state with identical synthetic workload. Then change only the microbatch. A state-ledger discrepancy motivates inspecting tensor storage; a microbatch-dependent change motivates inspecting activations. Record each hypothesis before the change. A successful tiny run validates the harness, not seven-billion-parameter throughput or convergence.
+
+<details>
+  <summary>Design check: stage 3 has a 14 GB floor on a 16 GB device. Can the planned run be approved from that number?</summary>
+  <p>No. The two-gigabyte gap must cover the largest concurrent materialization, activations, buffers, workspace and allocator behavior. The estimate rules out some configurations; only a complete measured budget can support a fit decision.</p>
+</details>
+
+Return to the [learning roadmap](/model-development/) to place memory accounting before parallelism design. Read the [ZeRO review](/paper-reviews/zero/) next to practice separating a mechanism, its arithmetic, and the experiments offered as evidence.

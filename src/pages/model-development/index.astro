@@ -1,0 +1,95 @@
+---
+import Base from '../../layouts/Base.astro';
+import { modelDevelopmentModules as modules, firstModule } from '../../data/model-development';
+import sources from '../../data/model-development/sources.json';
+const moduleName = (id: string) => modules.find(m => m.id === id)!.title;
+---
+<Base title="Model development" description="A research field guide to foundation-model decisions: architecture, data, training systems, post-training and trustworthy evaluation.">
+  <header class="page-heading learning-head" data-reveal>
+    <p class="learning-kicker">A technical field guide · growing module by module</p>
+    <h1>Model development</h1>
+    <p class="learning-dek">Learn to make the decisions behind a training run.</p>
+    <p>Architecture, data, optimization and infrastructure constrain each other. This guide connects their mechanisms to the evidence needed to choose between them.</p>
+  </header>
+
+  <section class="learning-start" aria-labelledby="learning-start-title">
+    <p class="learning-kicker">First complete module · distributed systems</p>
+    <h2 id="learning-start-title">Where does training memory go?</h2>
+    <p>Start with a concrete decision: whether a model's optimizer, gradients, parameters and live buffers can share a device. Derive the ledger, change its assumptions, then examine the paper behind state sharding.</p>
+    <div class="learning-entry-links">
+      <a class="btn btn--primary" href={firstModule.lesson.href}>Study the lesson →</a>
+      <a class="btn btn--ghost" href={firstModule.review.href}>Read the ZeRO review →</a>
+    </div>
+    <dl class="learning-facts"><div><dt>Prerequisites</dt><dd>Backpropagation, Adam, tensor shapes</dd></div><div><dt>Practice</dt><dd>Memory estimator and worked questions</dd></div><div><dt>Evidence</dt><dd>Source-based analysis; no training reproduction</dd></div></dl>
+  </section>
+
+  <nav class="learning-path" aria-label="Dependency-aware first reading path">
+    <h2>One path through the first module</h2>
+    <ol>
+      <li><a href="/blog/benchmark-denominators/">Define what a comparison measures</a><span>Keep units and resource boundaries explicit.</span></li>
+      <li><a href="/blog/foundations-optimisers/">Understand the optimizer's state</a><span>Reuse the foundations lesson on Adam and schedules.</span></li>
+      <li><a href={firstModule.lesson.href}>{firstModule.lesson.title}</a><span>Work the equations and test the estimator's assumptions.</span></li>
+      <li><a href={firstModule.review.href}>{firstModule.review.title}</a><span>Separate reported evidence from the memory model.</span></li>
+    </ol>
+  </nav>
+
+  <section class="learning-curriculum" aria-labelledby="curriculum-title">
+    <h2 id="curriculum-title">The curriculum</h2>
+    <p>The eight areas below map the research program. Existing posts supply prerequisite reading; the memory module adds the first advanced lesson and paper review. Further advanced lessons will follow source and implementation review.</p>
+    <div class="learning-modules">{modules.map((m, i) => <article class="learning-module" id={`module-${m.id}`}>
+      <p class="learning-module-number">{String(i + 1).padStart(2, '0')} · {m.id === 'systems' ? 'First advanced module available' : 'Prerequisite reading'}</p>
+      <h3>{m.title}</h3><p class="learning-question">{m.question}</p><p>{m.objective}</p>
+      <p class="learning-depends">Learn after: {m.dependsOn.length ? m.dependsOn.map((id, j) => <>{j > 0 && ' · '}<a href={`#module-${id}`}>{moduleName(id)}</a></>) : 'Start here; no advanced module required.'}</p>
+      <ul>{m.foundations.map(link => <li><a href={link.href}>{link.title}</a></li>)}</ul>
+      {m.id === 'systems' && <p><a href={firstModule.lesson.href}>Open the training-memory lesson →</a></p>}
+      <details><summary>Primary reading</summary><ul>{m.sourceIds.map(id => { const s = sources.find(s => s.id === id)!; return <li><a href={s.url}>{s.title}</a></li>; })}</ul></details>
+    </article>)}</div>
+  </section>
+
+  <section class="learning-method" aria-labelledby="learning-method-title">
+    <h2 id="learning-method-title">Learn the concept, inspect the evidence, make a decision</h2>
+    <dl><div><dt>Concept lessons</dt><dd>Mechanisms, derivations and worked examples across laboratories.</dd></div><div><dt>Paper reviews</dt><dd>The specific method, experimental setup, ablations and disclosure limits.</dd></div><div><dt>Decision guides</dt><dd>Controls and small experiments that could justify the next expensive step.</dd></div></dl>
+    <p><strong>Reported</strong> means supported by the cited source. <strong>Derived</strong> means calculated under explicit assumptions. <strong>Hypothesis</strong> means a proposed explanation to test. <strong>Unknown</strong> means the evidence does not establish an answer. Calculators display theoretical estimates, not experimental performance.</p>
+  </section>
+
+  <section class="learning-sources" aria-labelledby="source-title">
+    <h2 id="source-title">Research reading index</h2>
+    <p>Prioritized primary sources for the first module and its next questions. Research dates belong to the underlying work; this guide's source check is dated 9 November 2026. Living documentation can change.</p>
+    <ol>{sources.map(s => <li><a href={s.url}>{s.title}</a><span>{s.organization} · {s.researchDate}</span><details><summary>Reading focus and limits</summary><p>{s.read}</p><p>{s.limits}</p></details></li>)}</ol>
+    <p><a href="https://github.com/richardcheam/richardcheam.github.io/tree/master/docs/model-development/">Research questions and editorial record on GitHub ↗</a></p>
+  </section>
+</Base>
+
+<style>
+  .learning-head { max-width: 72ch; }
+  .learning-kicker { color: var(--text-secondary); font-size: .78rem; letter-spacing: .06em; text-transform: uppercase; }
+  .learning-dek { font-size: clamp(1.2rem, 2.4vw, 1.6rem); line-height: 1.45; }
+  .learning-start { padding: clamp(1.25rem, 3vw, 2rem); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface); margin: 2.5rem 0; }
+  .learning-start h2 { margin: .4rem 0 1rem; }
+  .learning-start > p { max-width: 75ch; }
+  .learning-entry-links { display: flex; flex-wrap: wrap; gap: .75rem; margin: 1.4rem 0; }
+  .learning-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.25rem; margin: 1.5rem 0 0; }
+  dt { font-size: .78rem; font-weight: 600; color: var(--text-secondary); }
+  dd { margin: .3rem 0 0; line-height: 1.5; }
+  .learning-path { padding: 1.5rem 0; border-bottom: 1px solid var(--border); }
+  .learning-path ol { padding-left: 1.5rem; }
+  .learning-path li { margin: 1rem 0; }
+  .learning-path li span { display: block; color: var(--text-secondary); font-size: .88rem; margin-top: .2rem; }
+  .learning-curriculum, .learning-method, .learning-sources { margin: 3.5rem 0; scroll-margin-top: 6rem; }
+  .learning-curriculum > p, .learning-method > p, .learning-sources > p { max-width: 78ch; }
+  .learning-modules { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 2.5rem; margin-top: 2rem; }
+  .learning-module { padding: 1.5rem 0; border-top: 1px solid var(--border); min-width: 0; scroll-margin-top: 6rem; }
+  .learning-module-number, .learning-depends { font-size: .76rem; color: var(--text-secondary); line-height: 1.6; }
+  .learning-module h3 { margin: .5rem 0; font-size: 1.15rem; }
+  .learning-question { font-weight: 600; }
+  .learning-module p, .learning-module li { font-size: .92rem; line-height: 1.65; }
+  .learning-module ul { padding-left: 1.2rem; }
+  summary { cursor: pointer; font-size: .85rem; }
+  .learning-method dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.5rem; margin: 1.5rem 0; }
+  .learning-sources ol { padding-left: 1.3rem; }
+  .learning-sources li { padding: .85rem 0; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+  .learning-sources li > span { display: block; margin: .25rem 0 .4rem; color: var(--text-secondary); font-size: .8rem; }
+  .learning-sources details p { max-width: 78ch; font-size: .85rem; }
+  a:focus-visible, summary:focus-visible { outline: 2px solid var(--blog-orientation); outline-offset: 4px; }
+  @media(max-width: 680px) { .learning-modules, .learning-facts, .learning-method dl { grid-template-columns: 1fr; } }
+</style>
