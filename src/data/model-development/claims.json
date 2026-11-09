@@ -143,7 +143,7 @@
       "pytorch-ddp"
     ],
     "location": "/blog/model-development-collectives/",
-    "conditions": "Assumed α = 5 µs, B = 40 GB/s, 25 MiB buckets, ring algorithm; computed by unit-tested functions, not measured."
+    "conditions": "One microbatch per optimiser step; assumed α = 5 µs, B = 40 GB/s, 25 MiB buckets, ring algorithm; computed by unit-tested functions, not measured."
   },
   {
     "id": "COM-08",
@@ -174,7 +174,7 @@
       "zero"
     ],
     "location": "/blog/model-development-choosing-parallelism/",
-    "conditions": "Supported by the closest measured comparison and by activation splitting; contradicted by the idealized ring model's near tie. Needs the guide's pilot."
+    "conditions": "One sequence per microbatch, so layout A repeats ZeRO-3 collectives for 8 microbatches per GPU (about 101 s modelled against about 110 s of compute). Supported by the closest measured comparison and by activation splitting. Needs the guide's pilot."
   },
   {
     "id": "COM-11",
@@ -196,5 +196,27 @@
     ],
     "location": "/paper-reviews/megatron-ptd-p/",
     "conditions": "Uses the paper's own measured X; excludes failures, restarts and evaluation unless X covers them."
+  },
+  {
+    "id": "COM-13",
+    "status": "Reported",
+    "claim": "FSDP2 reshards parameters after forward and re-all-gathers them in backward by default; keeping unsharded parameters or skipping gradient sync during accumulation trades memory for communication.",
+    "sourceIds": [
+      "fsdp2"
+    ],
+    "location": "/blog/model-development-collectives/",
+    "conditions": "PyTorch 2.15 fully_shard documentation (reshard_after_forward, set_reshard_after_backward, set_requires_gradient_sync); describes options, not their measured cost."
+  },
+  {
+    "id": "COM-14",
+    "status": "Derived",
+    "claim": "With a microbatches per step, stages 0 and 1 synchronise once per step, stage 2 reduce-scatters every microbatch, and stage 3 regathers and reduce-scatters every microbatch: a 70B model with ZeRO-3 on 32 ranks and 8 microbatches models to about 101 s of traffic per step.",
+    "sourceIds": [
+      "zero",
+      "fsdp2",
+      "thakur-2005"
+    ],
+    "location": "/blog/model-development-choosing-parallelism/",
+    "conditions": "One illustrative schedule matching FSDP2's defaults for stage 3; assumed α = 5 µs, B = 40 GB/s, 25 MiB buckets. Schedules that keep unsharded state communicate less and need more memory."
   }
 ]

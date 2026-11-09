@@ -170,3 +170,22 @@ test('time and size formatting rounds decimal halves up despite binary floating 
   assert.equal(formatGB(24.5e9), '24.50 GB');
   assert.throws(() => formatSeconds(NaN), RangeError);
 });
+
+test('gradient accumulation: which collectives repeat per microbatch', () => {
+  const base = { parameters: 70e9, bytesPerValue: 2, ranks: 32, alpha: 5e-6, bandwidth: 40e9, bucketBytes: 25 * 2 ** 20 };
+  const one = (s: 0 | 1 | 2 | 3) => stageCommunication(s, base);
+  const eight = (s: 0 | 1 | 2 | 3) => stageCommunication(s, { ...base, microbatches: 8 });
+  // Stages 0 and 1 accumulate full gradients locally and synchronise once per step.
+  close(eight(0).total, one(0).total);
+  close(eight(1).total, one(1).total);
+  // Stage 3 regathers parameters and reduce-scatters gradients every microbatch.
+  close(eight(3).total, 8 * one(3).total);
+  close(eight(3).total, 101.25, 1e-3);
+  // Stage 2 keeps gradients sharded: a reduce-scatter per microbatch, one all-gather per step.
+  const rs = one(2).total / 2;
+  close(eight(2).total, 8 * rs + rs);
+  assert.equal(eight(3).collectives.find(c => c.kind === 'all-gather')!.perMicrobatch, true);
+  assert.equal(eight(1).collectives.every(c => !c.perMicrobatch), true);
+  assert.throws(() => stageCommunication(3, { ...base, microbatches: 0 }), RangeError);
+  assert.throws(() => stageCommunication(3, { ...base, microbatches: 1.5 }), RangeError);
+});

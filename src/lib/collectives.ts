@@ -82,16 +82,18 @@ export type ZeroStage = 0 | 1 | 2 | 3;
 export function zeroStepVolume(stage: ZeroStage, parameters: number) {
   check([0, 1, 2, 3].includes(stage), 'Stage must be 0, 1, 2 or 3.');
   check(finiteNonnegative(parameters), 'Parameters must be finite and nonnegative.');
-  const collectives: { kind: Collective; what: string; elements: number }[] =
-    stage === 0 ? [{ kind: 'all-reduce', what: 'gradients', elements: 2 * parameters }]
+  // perMicrobatch: whether the collective repeats for every microbatch under
+  // gradient accumulation, in the illustrative schedule described below.
+  const collectives: { kind: Collective; what: string; elements: number; perMicrobatch: boolean }[] =
+    stage === 0 ? [{ kind: 'all-reduce', what: 'gradients', elements: 2 * parameters, perMicrobatch: false }]
     : stage === 3 ? [
-      { kind: 'all-gather', what: 'parameters for forward', elements: parameters },
-      { kind: 'all-gather', what: 'parameters for backward', elements: parameters },
-      { kind: 'reduce-scatter', what: 'gradients', elements: parameters },
+      { kind: 'all-gather', what: 'parameters for forward', elements: parameters, perMicrobatch: true },
+      { kind: 'all-gather', what: 'parameters for backward', elements: parameters, perMicrobatch: true },
+      { kind: 'reduce-scatter', what: 'gradients', elements: parameters, perMicrobatch: true },
     ]
     : [
-      { kind: 'reduce-scatter', what: 'gradients', elements: parameters },
-      { kind: 'all-gather', what: 'updated parameters', elements: parameters },
+      { kind: 'reduce-scatter', what: 'gradients', elements: parameters, perMicrobatch: stage === 2 },
+      { kind: 'all-gather', what: 'updated parameters', elements: parameters, perMicrobatch: false },
     ];
   return { collectives, elements: collectives.reduce((s, c) => s + c.elements, 0) };
 }
@@ -175,11 +177,21 @@ export function overlapBounds({ compute, communication }: { compute: number; com
  * collective's tensor is the full parameter (or gradient) set: Ψ values of
  * `bytesPerValue` bytes. Stage 0 is one all-reduce, so it is counted as two
  * ring phases, matching ZeRO's 2Ψ.
+ *
+ * With `microbatches` > 1 (gradient accumulation), an illustrative schedule:
+ * stages 0 and 1 accumulate full gradients locally and synchronise once per
+ * step; stage 2 keeps gradients sharded, so it reduce-scatters every
+ * microbatch; stage 3 also reshards parameters after use, so it regathers
+ * them and reduce-scatters every microbatch (FSDP2's defaults). Keeping
+ * unsharded parameters or gradients between microbatches avoids repeats at a
+ * memory cost this function does not model.
  */
-export function stageCommunication(stage: ZeroStage, input: LinkModel & { parameters: number; bytesPerValue: number; bucketBytes: number }) {
+export function stageCommunication(stage: ZeroStage, input: LinkModel & { parameters: number; bytesPerValue: number; bucketBytes: number; microbatches?: number }) {
   checkLink(input);
   check(Number.isFinite(input.bytesPerValue) && input.bytesPerValue > 0, 'Bytes per value must be finite and positive.');
   check(Number.isFinite(input.bucketBytes) && input.bucketBytes > 0, 'Bucket size must be finite and positive.');
+  const microbatches = input.microbatches ?? 1;
+  check(Number.isSafeInteger(microbatches) && microbatches >= 1, 'Microbatches must be a whole number of at least 1.');
   const { collectives } = zeroStepVolume(stage, input.parameters);
   const tensorBytes = input.parameters * input.bytesPerValue;
   const buckets = tensorBytes === 0 ? 0 : Math.ceil(tensorBytes / input.bucketBytes);
@@ -187,9 +199,10 @@ export function stageCommunication(stage: ZeroStage, input: LinkModel & { parame
   // Stage 0's all-reduce is listed as 2Ψ elements; every other entry is Ψ.
   for (const c of collectives) {
     const ring = ringCollective(c.kind, { ...input, bytes: tensorBytes });
-    latency += buckets * ring.steps * input.alpha;
-    bandwidthTerm += ring.bandwidthTerm;
-    bytesSentPerRank += ring.bytesSentPerRank;
+    const times = c.perMicrobatch ? microbatches : 1;
+    latency += times * buckets * ring.steps * input.alpha;
+    bandwidthTerm += times * ring.bandwidthTerm;
+    bytesSentPerRank += times * ring.bytesSentPerRank;
   }
   return { collectives, buckets, latency, bandwidthTerm, total: latency + bandwidthTerm, bytesSentPerRank };
 }

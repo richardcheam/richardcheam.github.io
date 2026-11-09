@@ -12,8 +12,8 @@ rail: list
 excerpt: "A step-by-step procedure for splitting a training job across GPUs: fit the state first, add sharding before model parallelism, keep tensor parallelism inside a server, and check what communication stays exposed. Two worked scenarios, a communication planner, a pipeline schedule and a bounded experiment."
 question: "You have a model, a token budget and a fixed number of GPUs. Which combination of data parallelism, ZeRO, tensor and pipeline parallelism should the first pilot run use, and what measurement would change that choice?"
 my_work: "A decision procedure built from the memory and collectives lessons, with two worked scenarios computed by unit-tested functions and a proposed experiment. The scenarios use assumed hardware numbers; nothing was run."
-result: "For a 70-billion-parameter model on 32 GPUs, the idealized ring model rates full ZeRO-3 sharding (about 12.7 s of overlappable traffic per step) as competitive with 8-way tensor parallelism inside each server (about 12 s of non-overlappable traffic). Megatron-LM's measured comparison favoured keeping tensor parallelism inside servers by up to 70%, which is why the model chooses what to measure rather than the layout."
-evidence_limit: "Scenarios use assumed bandwidths, latency, utilisation and capacity. They omit activation memory, congestion, kernel efficiency and topology, which the cited measurement shows can dominate. Treat the procedure as a way to rank pilots, not as a substitute for them."
+result: "For a 70-billion-parameter model on 32 GPUs with one sequence per microbatch, full ZeRO-3 sharding repeats its gathers and reductions for each of 8 microbatches: about 101 s of modelled traffic against about 110 s of compute, versus about 12 s for 8-way tensor parallelism inside each server. Megatron-LM's measured comparison points the same way. The model ranks pilots; it does not replace them."
+evidence_limit: "Scenarios use assumed bandwidths, latency, utilisation, capacity and one illustrative gradient-accumulation schedule. They omit activation memory, congestion, kernel efficiency and topology, which the cited measurement shows can dominate. Treat the procedure as a way to rank pilots, not as a substitute for them."
 lesson: "Decide in order: make the state fit, then the activations, then the communication. Each step has a measurement that would overturn it."
 ---
 
@@ -99,38 +99,39 @@ Both scenarios use assumed numbers, stated where they appear, so you can redo th
 
 ### A seven-billion-parameter model on one server
 
-Eight GPUs in one server, an assumed usable capacity of 80 GB each, BF16 with the memory lesson's 16-byte Adam ledger.
+Eight GPUs in one server, an assumed usable capacity of 80 GB each, BF16 with the memory lesson's 16-byte Adam ledger, and **one microbatch per optimiser step** (no gradient accumulation).
 
 1. **State.** Replicated data parallelism needs $16 \times 7 = 112$ GB per GPU: excluded. ZeRO stage 1 needs 38.5 GB, stage 2 needs 26.25 GB and stage 3 needs 14 GB (*Derived*, from the [memory lesson](/blog/model-development-training-memory/#work-a-seven-billion-parameter-example)).
 2. **Communication.** Stages 1 and 2 move the same 24.5 GB per rank per step as plain data parallelism; stage 3 moves 36.75 GB (planner defaults, at an assumed 40 GB/s: 0.65 s against 0.97 s).
-3. **Choice to pilot.** Stage 2. It leaves $80 - 26.25 = 53.75$ GB for activations, materialised parameters and buffers, and it costs no extra traffic. Stage 3 would buy another 12.25 GB of headroom for 50% more traffic.
+3. **Choice to pilot.** Stage 2. It leaves $80 - 26.25 = 53.75$ GB for activations, materialised parameters and buffers, and it costs no extra traffic. Stage 3 would buy another 12.25 GB of headroom for 50% more traffic. If activations later force accumulation, recompute: with 4 microbatches per step stage 2 moves 61.25 GB (1.63 s) and stage 3 moves 147 GB (3.90 s), because their collectives repeat every microbatch, while stage 1 stays at 24.5 GB.
 4. **What would overturn it.** A measured peak above capacity at the planned sequence length (then try stage 3, or recomputation); or a profile showing the stage-2 parameter all-gather exposed after the optimiser step and costing more than stage 3's extra traffic would.
 
-No model parallelism is needed: everything fits within one GPU's share once the state is sharded.
+Persistent-state accounting does not call for model parallelism here: sharding brings the state well below capacity. Whether the full step fits, with its activations, materialised parameters and temporary peaks, still has to be established by profiling.
 
 ### A seventy-billion-parameter model on four servers
 
-Thirty-two GPUs in four servers of eight, 80 GB each. Assumed: 40 GB/s per GPU between servers, 200 GB/s inside a server, 5 µs per ring step, 25 MiB buckets. A step of $B_{\text{tok}} = 1{,}048{,}576$ tokens at $S = 4096$. Model width $h = 8192$ with 80 layers, BF16.
+Thirty-two GPUs in four servers of eight, 80 GB each. Assumed: 40 GB/s per GPU between servers, 200 GB/s inside a server, 5 µs per ring step, 25 MiB buckets. A step of $B_{\text{tok}} = 1{,}048{,}576$ tokens at $S = 4096$: 256 sequences, one sequence per microbatch ($b = 1$). Layout A therefore runs $256 / 32 = 8$ microbatches per GPU per step; layout B, with 4 data-parallel replicas, runs 64. Model width $h = 8192$ with 80 layers, BF16.
 
 The replicated state, $16 \times 70 = 1{,}120$ GB per GPU, is far out of reach. Compare two layouts that both fit the state (*Derived*, computed with the same tested functions as the planner):
 
 | | A: ZeRO-3 across all 32 | B: tensor-parallel 8 inside each server, ZeRO-1 across 4 |
 |---|---|---|
 | Persistent state per GPU | $16 \times 70 / 32 = 35$ GB | $4n + 12n/4 = 61.25$ GB, with $n = 70/8$ billion per GPU |
-| Data-parallel traffic per step | 406.9 GB per rank, all between servers: 12.66 s | 26.25 GB per rank: 0.68 s |
+| Data-parallel traffic per step | 8 microbatches × 406.9 GB = 3,255 GB per rank, all between servers: 101.2 s (12.66 s per microbatch) | 26.25 GB per rank, once per step: 0.68 s |
 | Tensor-parallel traffic per step | none | 37.6 GB per microbatch, 64 microbatches: 2,405 GB inside servers, 12.0 s |
-| Can that traffic overlap compute? | Mostly, in principle: gathers can be prefetched, gradient reductions overlap backward | Not by default: each all-reduce feeds the next operation |
+| Can that traffic overlap compute? | In principle: gathers can be prefetched, gradient reductions overlap backward | Not by default: each all-reduce feeds the next operation |
+| Could it avoid repeating per microbatch? | Only by keeping unsharded parameters between microbatches: 140 GB in BF16, more than a GPU holds | Already once per step |
 | Activations per GPU | Each GPU holds a whole layer's activations | Split across the 8 tensor-parallel ranks |
 
-For scale, a step is about $6 \times 70 \times 10^{9} \times 1{,}048{,}576 = 4.4 \times 10^{17}$ floating-point operations. At an assumed 40% of 312 TFLOP/s per GPU that is about 110 s of compute. On this arithmetic, layout A's 12.7 s of mostly overlappable traffic looks no worse than layout B's 12 s on the critical path. A paper calculation could talk you into layout A.
+For scale, a step is about $6 \times 70 \times 10^{9} \times 1{,}048{,}576 = 4.4 \times 10^{17}$ floating-point operations. At an assumed 40% of 312 TFLOP/s per GPU that is about 110 s of compute. Layout A's 101 s of data-parallel traffic is nearly as long as the compute it would have to hide behind, and only part of the compute (backward, and forward for prefetched gathers) is available to hide it. Layout B's 12 s of tensor-parallel traffic sits on the critical path, but is about a ninth of the compute. With only one microbatch per step, A's traffic would be 12.7 s and the two layouts would look close; the accumulation schedule is what separates them here.
 
-The measured evidence points the other way. *Reported, [Megatron-LM §5.2](https://arxiv.org/html/2104.04473v5):* for 175-billion and 530-billion-parameter models, PTD-P (tensor, pipeline and data parallelism combined) outperformed ZeRO-3 without model parallelism by 6% and 24% at the first GPU counts tested, and by 70% when the GPU count was doubled at the same batch size, "due to less cross-node communication". Those are different models, batch sizes and software from this scenario, so they do not settle it. They do show what the ring model leaves out: congestion when every GPU sends between servers at once, collectives that do not reach their ideal bandwidth, and overlap that is never perfect.
+The measured evidence points the same way. *Reported, [Megatron-LM §5.2](https://arxiv.org/html/2104.04473v5):* for 175-billion and 530-billion-parameter models, PTD-P (tensor, pipeline and data parallelism combined) outperformed ZeRO-3 without model parallelism by 6% and 24% at the first GPU counts tested, and by 70% when the GPU count was doubled at the same batch size, "due to less cross-node communication". Those are different models, batch sizes and software from this scenario, so they do not settle it. They also show what the ring model leaves out, which would widen the gap rather than close it: congestion when every GPU sends between servers at once, collectives that do not reach their ideal bandwidth, and overlap that is never perfect.
 
-**Choice to pilot.** Layout B, because the closest measured evidence favours it and because it splits activations, which A does not. **What would overturn it:** a profile on your network in which A's inter-server traffic stays hidden behind compute at the planned batch, and A's activations fit. That is a cheap measurement on one or two servers before committing all four.
+**Choice to pilot.** Layout B: its data-parallel traffic does not repeat per microbatch, it splits activations, which A does not, and the closest measured evidence favours it. **What would overturn it:** a profile on your network in which B's tensor-parallel all-reduces turn out far slower than modelled, or a version of A with larger microbatches whose activations fit and whose inter-server traffic stays hidden behind compute. That is a cheap measurement on one or two servers before committing all four.
 
 <details>
-  <summary>Check: halve the batch to 524,288 tokens. Which layout's communication gets relatively worse?</summary>
-  <p>Layout A's. Its data-parallel traffic is per optimiser step, fixed at about 12.7 s, while compute halves to about 55 s, so less time is available to hide it. Layout B's tensor-parallel traffic is per microbatch: halving the batch halves it to about 6 s along with the compute. Small batches favour layouts whose communication scales with the work.</p>
+  <summary>Check: keep the batch at 1,048,576 tokens but put two sequences in each microbatch. What happens to each layout's communication?</summary>
+  <p>Layout A runs 4 microbatches per GPU instead of 8, so its regathers and reduce-scatters halve: about 50.6 s instead of 101.2 s. The price is that each GPU holds twice the activations, so the memory question returns. Layout B's tensor-parallel all-reduces each carry twice the bytes but there are half as many, so its 12 s barely changes (only the latency term falls). In a sharded layout, microbatch size trades communication against activation memory.</p>
 </details>
 
 ## A bounded experiment
@@ -148,6 +149,7 @@ A result that matches the predictions validates the measurement harness and the 
 - **Reported:** ZeRO's stage volumes (ZeRO v3 §7); Megatron's takeaways, bubble formula and ZeRO-3 comparison, with their hardware (Megatron-LM v5); DDP's bucket default (PyTorch 2.15).
 - **Derived:** the procedure's order, the coupling $B_{\text{tok}} = d\,m\,b\,S$, and every number in both scenarios, under assumptions that are illustrative and not measurements of any specific system.
 - **Hypothesis:** that layout B is better for the 70-billion-parameter scenario. It is the better-supported starting point, not a result.
+- **Derived, with a stated schedule:** which collectives repeat per microbatch. The guide follows FSDP2's defaults for stage 3; other schedules keep more unsharded state to communicate less.
 - **Unknown:** activation memory at the scenario's sequence length, real overlap, and network contention. These need the profile and the experiment.
 
 Read the [Megatron-LM review](/paper-reviews/megatron-ptd-p/) for what its comparisons do and do not control, or return to the [model-development roadmap](/model-development/).

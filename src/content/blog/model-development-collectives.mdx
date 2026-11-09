@@ -12,7 +12,7 @@ rail: list
 excerpt: "Every way of splitting a training job across GPUs is paid for in communication. Work through the ring all-reduce step by step, derive its latency and bandwidth terms, and count what data parallelism, ZeRO, tensor parallelism and pipelines each have to move."
 question: "ZeRO stage 3 cut per-GPU state from 112 GB to 14 GB in the memory lesson. What does each GPU now have to send every step, and when does that sending decide the step time?"
 my_work: "An educational derivation with a unit-tested cost model and a step-through ring all-reduce. The collective definitions and communication volumes are taken from the cited sources; every timing is calculated under stated assumptions. No benchmark was run."
-result: "Under an assumed 40 GB/s and 5 µs per ring step, a 7-billion-parameter BF16 model on 8 data-parallel ranks sends 24.5 GB per rank per step with replicated gradients or ZeRO stages 1 and 2 (about 0.65 s), and 36.75 GB with stage 3 (about 0.97 s): the 1.5× of ZeRO's 3Ψ."
+result: "Under an assumed 40 GB/s and 5 µs per ring step, a 7-billion-parameter BF16 model on 8 data-parallel ranks, with one microbatch per step, sends 24.5 GB per rank per step with replicated gradients or ZeRO stages 1 and 2 (about 0.65 s), and 36.75 GB with stage 3 (about 0.97 s): the 1.5× of ZeRO's 3Ψ. With gradient accumulation, stages 2 and 3 repeat collectives every microbatch."
 evidence_limit: "All times come from the α–β ring model with assumed latency and bandwidth. Real collectives use trees and hierarchies, switch protocols by size, share links and overlap with compute. Use the model to decide what to measure, not to predict a step time."
 lesson: "Count bytes and steps before you count seconds. Bandwidth decides big collectives, latency decides small ones, and only the communication that cannot overlap compute lengthens a step."
 ---
@@ -154,14 +154,30 @@ Now return to the memory saving. *Reported, [ZeRO v3 §7](https://arxiv.org/html
 | ZeRO stage 1 or 2 | reduce-scatter of gradients, all-gather of updated parameters | $2\Psi$ |
 | ZeRO stage 3 | all-gather of parameters in forward, again in backward, reduce-scatter of gradients | $3\Psi$ |
 
-ZeRO's $\Psi$ per collective is the ring's $\frac{p-1}{p}\Psi$ rounded up for large $p$. Putting the volumes through the ring model with the worked example's numbers (*Derived*: $\Psi = 7 \times 10^9$, BF16, 8 ranks, 25 MiB buckets, assumed 5 µs and 40 GB/s):
+ZeRO's $\Psi$ per collective is the ring's $\frac{p-1}{p}\Psi$ rounded up for large $p$. These volumes assume **one forward and backward pass per optimiser step**. Putting them through the ring model with the worked example's numbers (*Derived*: $\Psi = 7 \times 10^9$, BF16, 8 ranks, one microbatch per step, 25 MiB buckets, assumed 5 µs and 40 GB/s):
 
 | Policy | Bytes sent per rank | Time per step |
 |---|---:|---:|
 | Replicated, stage 1, stage 2 | 24.5 GB | 0.650 s |
 | Stage 3 | 36.75 GB | 0.975 s |
 
-So the memory lesson's trade, in numbers: stage 3 cut persistent state from 26.25 GB (stage 2) to 14 GB per rank, and costs 12.25 GB more traffic per rank per step. Whether that matters depends on the next section.
+So the memory lesson's trade, in numbers: stage 3 cut persistent state from 26.25 GB (stage 2) to 14 GB per rank, and costs 12.25 GB more traffic per rank per step. Whether that matters depends on the overlap section below, and on how many microbatches make up a step.
+
+### When a step has several microbatches
+
+Real jobs often split a step's batch into $a$ microbatches and accumulate gradients before one optimiser update, to fit activations or reach a target batch. Then the question is which collectives run **once per step** and which run **once per microbatch**. That depends on what each stage is willing to keep in memory between microbatches.
+
+*Reported, [PyTorch 2.15 FSDP2](https://docs.pytorch.org/docs/2.15/distributed.fsdp.fully_shard.html):* with `reshard_after_forward=True`, FSDP "reshards parameters after forward and re-all-gathers in backward"; with `False` it "keeps the unsharded parameters in memory after forward and avoids the all-gather in backward". During accumulation, `set_reshard_after_backward` can "trade off higher memory for reduced communication", and `set_requires_gradient_sync` implements "gradient accumulation *without communication*", accumulating unsynchronised gradients on the unsharded parameters.
+
+So avoiding repeated collectives always means holding something unsharded. This lesson's planner and examples use one illustrative schedule, matching FSDP2's defaults for stage 3 (*Derived*):
+
+| Policy | Once per step | Every microbatch |
+|---|---|---|
+| Replicated, stage 1 | gradient synchronisation (full gradients accumulate locally) | nothing |
+| Stage 2 | all-gather of updated parameters | reduce-scatter of gradients, which keeps them sharded |
+| Stage 3 | nothing | all-gather of parameters twice, reduce-scatter of gradients |
+
+With $a = 4$ microbatches, the 7-billion-parameter example becomes 24.5 GB and 0.65 s per rank per step for replicated and stage 1, 61.25 GB and 1.63 s for stage 2, and 147 GB and 3.90 s for stage 3 (*Derived*, same assumed link). The memory saving of stages 2 and 3 is now paid for in every microbatch. Keeping parameters unsharded between microbatches would remove stage 3's regathers, but only if the full unsharded parameters fit, which is exactly what stage 3 was chosen to avoid.
 
 <details>
   <summary>Check: stages 1 and 2 move the same volume as plain data parallelism. Do they therefore take the same time?</summary>
@@ -170,7 +186,7 @@ So the memory lesson's trade, in numbers: stage 3 cut persistent state from 26.2
 
 ## Tensor and pipeline parallelism move activations
 
-Data parallelism and ZeRO move **parameters and gradients**, once per optimiser step. The two model-parallel strategies move **activations**, and they do it inside the computation.
+Data parallelism and ZeRO move **parameters and gradients**: once per optimiser step, or, for stages 2 and 3 under accumulation, once per microbatch. The two model-parallel strategies move **activations**, and they do it inside the computation.
 
 **Tensor parallelism** splits each layer's weight matrices across $t$ ranks. *Reported, [Megatron-LM (2021) §2.3 and §3.2](https://arxiv.org/html/2104.04473v5):* the Transformer's MLP and self-attention blocks are partitioned so that each needs "only two all-reduce operations in the forward pass" and two in the backward pass, per layer. Each all-reduce carries a $b \times s \times h$ activation tensor:
 
@@ -183,7 +199,7 @@ $$
 
 **Worked example** (*Derived*): $b = 1$, $s = 2048$, $h = 8192$, BF16, $L = 80$. Each all-reduce carries $2048 \times 8192 \times 2 = 32$ MiB, and one microbatch runs $4 \times 80 = 320$ of them. On a tensor-parallel group of $t = 8$, each rank sends $2 \times \frac{7}{8} \times 320 \times 32\ \text{MiB} \approx 18.8$ GB **per microbatch**. At an assumed 40 GB/s that is 0.47 s; at an assumed 300 GB/s, closer to what a fast in-node link offers, 63 ms.
 
-Two things make this traffic different from data parallelism's. It recurs **every microbatch**, not once per optimiser step. And it sits on the **critical path**: the next operation needs the all-reduced activation, so by default there is nothing to hide it behind. This is the arithmetic behind Megatron's first takeaway, that tensor parallelism belongs inside the fast links of one server; the [review](/paper-reviews/megatron-ptd-p/#reported-what-the-paper-measured) quotes it with its conditions.
+Two things make this traffic different from data parallelism's. It recurs **every microbatch** for every stage of the layout. And it sits on the **critical path**: the next operation needs the all-reduced activation, so by default there is nothing to hide it behind. This is the arithmetic behind Megatron's first takeaway, that tensor parallelism belongs inside the fast links of one server; the [review](/paper-reviews/megatron-ptd-p/#reported-what-the-paper-measured) quotes it with its conditions.
 
 **Pipeline parallelism** gives each of $p$ ranks a contiguous block of layers. Between stages it sends one activation tensor forward and one gradient back per microbatch, point to point, which is far less traffic. Its cost is time, not bytes. *Reported, Megatron-LM §2.2.1:* in a schedule that flushes the pipeline every step, the fraction of ideal compute time spent idle in the **bubble** is
 
@@ -217,8 +233,8 @@ This is a bound, not a prediction (*Derived*). Communication and compute compete
 
 ## Evidence and its limits
 
-- **Reported:** the collective definitions and the ReduceScatter-plus-AllGather identity (NCCL 2.32.3 guide); the ring all-gather cost $(p-1)\alpha + \frac{p-1}{p}n\beta$ (Thakur et al. 2005); the bus-bandwidth factors (nccl-tests); DDP's 25 MiB default bucket and possible overlap (PyTorch 2.15); ZeRO's $2\Psi$ and $3\Psi$ volumes (ZeRO v3 §7); four tensor-parallel all-reduces per layer and the $(p-1)/m$ bubble (Megatron-LM v5).
-- **Derived:** every time in this lesson, under assumed values of α and B that are illustrations, not measurements of any particular hardware; the crossover $n^* = p\alpha B$; the bucket trade-off; the overlap bounds.
+- **Reported:** the collective definitions and the ReduceScatter-plus-AllGather identity (NCCL 2.32.3 guide); the ring all-gather cost $(p-1)\alpha + \frac{p-1}{p}n\beta$ (Thakur et al. 2005); the bus-bandwidth factors (nccl-tests); DDP's 25 MiB default bucket and possible overlap (PyTorch 2.15); ZeRO's $2\Psi$ and $3\Psi$ volumes (ZeRO v3 §7); FSDP2's resharding and gradient-sync trade-offs (PyTorch 2.15); four tensor-parallel all-reduces per layer and the $(p-1)/m$ bubble (Megatron-LM v5).
+- **Derived:** the accumulation schedule, which is one illustrative choice among several that trade memory for communication; every time in this lesson, under assumed values of α and B that are illustrations, not measurements of any particular hardware; the crossover $n^* = p\alpha B$; the bucket trade-off; the overlap bounds.
 - **Hypothesis:** that communication is the bottleneck of any particular job. It becomes a finding only with a profile showing exposed communication on the critical path.
 - **Unknown:** how a given cluster's topology, collective algorithm choices and contention change these numbers. The α–β ring is the simplest model that explains why size, rank count and overlap matter; real libraries use trees, hierarchies and size thresholds.
 

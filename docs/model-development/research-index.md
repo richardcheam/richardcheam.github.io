@@ -69,7 +69,7 @@ When a report is corrected, update the record's `reviewedVersion` and verificati
 
 Historical: the untouched baseline built 54 pages; the first slice built 57.
 
-Re-verified on 9 November 2026 in this checkout, not taken from the handoff: `npm test` passes (36 tests), `npm run build` produces 60 pages and `npm run check:model-development` checks 6 pages, 389 internal links and anchors, 8 modules, 20 sources and 19 claims.
+Re-verified on 9 November 2026 in this checkout, not taken from the handoff: `npm test` passes (37 tests), `npm run build` produces 60 pages and `npm run check:model-development` checks 6 pages, 389 internal links and anchors, 8 modules, 20 sources and 19 claims.
 
 The earlier preview limitation no longer applies in this environment: `astro preview` on 127.0.0.1 served the build and Playwright drove a real browser. Done live: every step of the ring stepper; planner and memory-estimator inputs including blank, zero, negative, fractional, extreme and single-rank values; keyboard operation of the pipeline sliders; no horizontal overflow at 375 px on all six module pages; and with JavaScript disabled, the default worked examples, the ring summary and disabled inputs. Not done: screen-reader testing with assistive technology, and real mobile devices rather than an emulated viewport.
 
@@ -77,11 +77,15 @@ The 375 px sweep of all 55 built pages found Markdown tables widening several pa
 
 No dependency or lockfile change. No distributed-training experiment, benchmark, model download, paid API call or deployment occurred.
 
+## Review record
+
+- 9 November 2026, Codex review of `f806972`: (1) communication accounting assumed one forward/backward pass per update; (2) the 7B scenario turned a state estimate into a fit claim. Both accepted. Fixed by modelling gradient accumulation with an explicit schedule (FSDP2 defaults for stage 3, verified in PyTorch 2.15), adding a microbatch input to the planner, stating each scenario's microbatches, recomputing the 70B comparison (layout A: about 101 s of modelled traffic, not 12.7 s) and rewording the fit sentence. Claims COM-13 and COM-14 added.
+
 ## Editorial decisions for review
 
 Collectives module:
 
-5. The decision guide's 70-billion-parameter scenario deliberately shows the idealized ring model rating ZeRO-3 across servers as competitive, then sides with Megatron's measurement. Check that this reads as a lesson about evidence, not as indecision.
+5. After the accumulation fix, the 70-billion-parameter scenario no longer shows a near tie: modelled traffic and Megatron's measurement point the same way. The guide notes that with one microbatch per step the layouts would look close.
 6. All link constants (5 µs, 40 GB/s between servers, 200 GB/s inside) are illustrative assumptions, labelled as such; choose whether to replace them with figures from hardware you have used.
 7. The review title calls the paper "Megatron-LM"; its arXiv title starts "Efficient Large-Scale Language Model Training".
 
