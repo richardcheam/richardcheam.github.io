@@ -613,5 +613,113 @@
     ],
     "location": "/paper-reviews/dpo/",
     "conditions": "§6.2–6.4, Tables 1–2."
+  },
+  {
+    "id": "U1-01",
+    "status": "Derived",
+    "claim": "With illustrative prices ($3/$15 vs $0.15/$0.60 per million tokens), 1,500 input and 300 output tokens, accuracies 92% vs 85% and $0.50 per error, the larger model costs $49 vs $75 per 1,000 requests; a 95% interval at n = 100 is about ±5 points at 92%.",
+    "sourceIds": [
+      "chatbot-arena"
+    ],
+    "location": "/blog/model-development-choosing-a-model/",
+    "conditions": "Illustrative; scripts/course/p19_choosing.py."
+  },
+  {
+    "id": "U2-01",
+    "status": "Derived",
+    "claim": "Constrained decoding with a finite-state machine made 1,000 of 1,000 toy generations valid JSON (0 of 1,000 unconstrained); majority voting raises 50% single-sample accuracy to 58% (k=3) and 67% (k=5) when wrong answers are spread over three alternatives. Self-consistency added 17.9 points on GSM8K.",
+    "sourceIds": [
+      "outlines",
+      "self-consistency"
+    ],
+    "location": "/blog/model-development-prompting-context/",
+    "conditions": "scripts/course/p20_prompting.py; Wang et al. abstract."
+  },
+  {
+    "id": "U3-01",
+    "status": "Derived",
+    "claim": "BM25 on a six-passage toy corpus retrieves 2 of 4 gold passages at rank 1 without stemming and 3 with a plural stemmer, failing on a query with no shared words; 8 steps at 95% succeed 66% of the time, 98% with one verified retry per step.",
+    "sourceIds": [
+      "bm25",
+      "react"
+    ],
+    "location": "/blog/model-development-retrieval-tools/",
+    "conditions": "scripts/course/p21_retrieval.py."
+  },
+  {
+    "id": "U4-01",
+    "status": "Reported",
+    "claim": "LoRA matched or exceeded full fine-tuning of GPT-3 175B on WikiSQL, MNLI and SAMSum with 4.7M trainable parameters, cut training memory from 1.2 TB to 350 GB, and found rank 1 sufficient for query/value adaptation on those tasks; rank-8 LoRA on Llama 3 8B query and value projections trains 3.4M parameters.",
+    "sourceIds": [
+      "lora"
+    ],
+    "location": "/blog/model-development-adapt-or-prompt/",
+    "conditions": "LoRA Table 4, §4.2, §7.2; parameter count and merging checked in scripts/course/p22_adapt.py."
+  },
+  {
+    "id": "R-LORA-01",
+    "status": "Reported",
+    "claim": "In standard low-rank settings LoRA substantially underperformed full fine-tuning on programming and mathematics while forgetting less; full fine-tuning learned perturbations of 10-100x higher rank.",
+    "sourceIds": [
+      "lora-learns-less"
+    ],
+    "location": "/paper-reviews/lora/",
+    "conditions": "Biderman et al. abstract."
+  },
+  {
+    "id": "U5-01",
+    "status": "Derived",
+    "claim": "Llama 3 8B in BF16 on an H100 is bounded at about 209 tokens/s for one sequence (16 GB read per step at 3.35 TB/s); batch 64 at 2,048 tokens of context gives about 6,450 tokens/s at 9.9 ms per step; about 60 sequences of 8,192 tokens fit beside BF16 weights; per-channel INT8 scales cut a small channel's error from 74% to 0.8%; speculative decoding yields 3.36 tokens per step at acceptance 0.8 and 4 drafts.",
+    "sourceIds": [
+      "cs336-2026",
+      "speculative-decoding"
+    ],
+    "location": "/blog/model-development-inference-serving/",
+    "conditions": "Upper bounds ignoring overheads; scripts/course/p23_inference.py; Leviathan et al. Eq. 1."
+  },
+  {
+    "id": "U5-02",
+    "status": "Reported",
+    "claim": "vLLM (PagedAttention) improved throughput 2-4x at the same latency; GPTQ quantized 175B to 3-4 bits in about four GPU hours with negligible accuracy loss; AWQ protects about 1% salient weights by scaling.",
+    "sourceIds": [
+      "vllm",
+      "gptq",
+      "awq"
+    ],
+    "location": "/blog/model-development-inference-serving/",
+    "conditions": "Abstracts."
+  },
+  {
+    "id": "U6-01",
+    "status": "Derived",
+    "claim": "Two systems at 85% and 80% on the same 200 items with 20 vs 10 disagreements give a two-sided exact sign-test p = 0.099; the same proportions over 90 disagreements give p = 0.002. LLM judges reach over 80% agreement with humans with position, verbosity and self-enhancement biases.",
+    "sourceIds": [
+      "mt-bench",
+      "indirect-injection"
+    ],
+    "location": "/blog/model-development-evaluating-applications/",
+    "conditions": "scripts/course/p24_evaluating.py; Zheng et al. and Greshake et al. abstracts."
+  },
+  {
+    "id": "X1-01",
+    "status": "Reported",
+    "claim": "Llama 3 uses a 128K vocabulary (100K tiktoken + 28K non-English) improving English compression from 3.17 to 3.94 characters per token, and GQA with 8 KV heads to reduce KV cache during decoding.",
+    "sourceIds": [
+      "llama3"
+    ],
+    "location": "/blog/model-development-how-it-fits/",
+    "conditions": "§3.2, p. 6–7."
+  },
+  {
+    "id": "X2-01",
+    "status": "Derived",
+    "claim": "A 224 x 224 image is 196 ViT patches; Mimi in Moshi yields 12.5 x 8 = 100 tokens per second, about 31 times the text tokens of the same minute of speech at 150 words per minute and 1.3 tokens per word.",
+    "sourceIds": [
+      "vit",
+      "clip",
+      "llava"
+    ],
+    "location": "/blog/model-development-other-modalities/",
+    "conditions": "Speaking rate illustrative; Mimi figures from this site's Moshi review (Moshi §3.3.1); scripts/course/p26_modalities.py."
   }
 ]

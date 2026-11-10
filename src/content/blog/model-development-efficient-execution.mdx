@@ -37,7 +37,7 @@ For the backward pass FlashAttention stores only the output and the per-row stat
 | Standard attention | 66.6 GFLOPs | 40.3 GB | 41.7 ms |
 | FlashAttention | 75.2 GFLOPs | 4.4 GB | 7.3 ms |
 
-Thirteen percent *more* arithmetic, nine times less memory traffic, 5.7 times faster. The paper proves that standard attention needs $\Theta(Nd + N^2)$ memory accesses and FlashAttention $\Theta(N^2 d^2 / M)$ for on-chip memory of size $M$, which is many times fewer for typical sizes (Theorem 2). In PyTorch, `torch.nn.functional.scaled_dot_product_attention` dispatches to such fused kernels where available; the [small training run](/blog/model-development-small-training-run/) used it.
+Thirteen percent *more* arithmetic, nine times less memory traffic, 5.7 times faster. The paper proves that standard attention needs $\Theta(Nd + N^2)$ memory accesses and FlashAttention $\Theta(N^2 d^2 / M)$ for on-chip memory of size $M$, which is many times fewer for typical sizes (Theorem 2). In PyTorch, `scaled_dot_product_attention` dispatches to such fused kernels where available; the [small training run](/blog/model-development-small-training-run/) used it.
 
 The general lesson reaches beyond attention: when an operation is memory-bound, **fusing** its steps into one kernel that keeps intermediate results on chip can beat a "more efficient" algorithm that moves more data.
 
@@ -52,6 +52,8 @@ Fewer bits per number means less memory, less traffic and faster matrix units. E
 | BF16 | 16 | $3.4 \times 10^{38}$ | 0.0078 |
 | FP8 E4M3 | 8 | 448 | 0.125 |
 | FP8 E5M2 | 8 | 57,344 | 0.25 |
+
+The name E4M3 covers two variants, which is a common source of confusion: the OCP format (PyTorch's `float8_e4m3fn`) reaches 448, while the "fnuz" variant (`float8_e4m3fnuz`), which has no negative zero, reaches 240. Some course notes quote 240; check which variant your hardware and library use before computing scales.
 
 **FP16 and loss scaling.** FP16 has decent precision but a narrow range. Gradients are often tiny: in FP16 anything below about $2^{-24} \approx 6 \times 10^{-8}$ becomes zero. Micikevicius et al. found about 5% of weight-gradient values in that region for one speech model, and much of an object-detection network's activation-gradient histogram below FP16's range ([Micikevicius et al., 2018](https://arxiv.org/abs/1710.03740), §§3.1–3.2). Their fix was **loss scaling**: multiply the loss by a large factor before the backward pass, so gradients are shifted into FP16's range, and divide by the same factor before the update. A gradient of $2^{-25}$ is zero in FP16, but scaled by 1,024 it survives and is recovered exactly. They also kept an FP32 master copy of the weights, so small updates are not lost (§3.1).
 
