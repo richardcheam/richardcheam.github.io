@@ -1,15 +1,5 @@
 [
   {
-    "id": "MEM-01",
-    "status": "Derived",
-    "claim": "Illustrative Adam state ledger totals 16 bytes per parameter under the stated dtypes and separate master-weight assumption.",
-    "sourceIds": [
-      "zero-config"
-    ],
-    "location": "/blog/model-development-training-memory/",
-    "conditions": "2-byte weights, 2-byte gradients, 4-byte master copy, two 4-byte moments. This is a chosen accounting model, not a universal framework allocation."
-  },
-  {
     "id": "MEM-02",
     "status": "Reported",
     "claim": "The stages partition optimizer state, then gradients, then parameters.",
@@ -18,16 +8,6 @@
     ],
     "location": "/paper-reviews/zero/",
     "conditions": "Stage definitions; parameter materialization and residency policies require separate accounting."
-  },
-  {
-    "id": "MEM-03",
-    "status": "Derived",
-    "claim": "For 7B parameters across eight balanced shards, the ideal persistent byte totals are 112e9, 38.5e9, 26.25e9, and 14e9.",
-    "sourceIds": [
-      "zero-config"
-    ],
-    "location": "/blog/model-development-training-memory/",
-    "conditions": "The lesson’s fixed Adam policy; no activations, buffers or transient materialization. Unit-tested arithmetic, not measured GPU allocations."
   },
   {
     "id": "MEM-04",
@@ -40,154 +20,6 @@
     "conditions": "Version 3 §10 and Table 3; do not reinterpret as an isolated full-parameter-sharding experiment."
   },
   {
-    "id": "MEM-05",
-    "status": "Reported",
-    "claim": "FSDP2 exposes materialization, resharding and mixed-precision policies.",
-    "sourceIds": [
-      "fsdp2",
-      "fsdp2-tutorial"
-    ],
-    "location": "/blog/model-development-training-memory/",
-    "conditions": "Versioned documentation inspected; no implementation executed or performance reproduced."
-  },
-  {
-    "id": "MEM-06",
-    "status": "Hypothesis",
-    "claim": "A later tiny profiling exercise can expose the gap between a persistent floor and a step’s measured peak.",
-    "sourceIds": [
-      "activation-recomputation",
-      "zero-config"
-    ],
-    "location": "/blog/model-development-training-memory/",
-    "conditions": "Proposed bounded experiment only; not performed by Richard or this research."
-  },
-  {
-    "id": "MEM-07",
-    "status": "Unknown",
-    "claim": "The peak memory and throughput of an actual future training run cannot be established by the estimator.",
-    "sourceIds": [
-      "zero-config",
-      "fsdp2"
-    ],
-    "location": "/blog/model-development-training-memory/",
-    "conditions": "Requires actual model, data shapes, hardware, optimizer and framework schedule; arbitrary allowances are not measurements."
-  },
-  {
-    "id": "COM-01",
-    "status": "Reported",
-    "claim": "ReduceScatter followed by AllGather is equivalent to AllReduce, and every rank must call a collective with the same count and datatype.",
-    "sourceIds": [
-      "nccl-collectives"
-    ],
-    "location": "/blog/model-development-collectives/",
-    "conditions": "NCCL 2.32.3 semantics. The page states no further ordering rule; the lesson does not claim one."
-  },
-  {
-    "id": "COM-02",
-    "status": "Reported",
-    "claim": "A ring allgather costs (p − 1)α + (p − 1)/p · nβ, and its bandwidth term cannot be reduced further.",
-    "sourceIds": [
-      "thakur-2005"
-    ],
-    "location": "/blog/model-development-collectives/",
-    "conditions": "α + nβ point-to-point model on a switched cluster; reduction arithmetic and contention excluded."
-  },
-  {
-    "id": "COM-03",
-    "status": "Derived",
-    "claim": "A ring all-reduce costs about 2(p − 1)α + 2(p − 1)/p · n/B, and latency equals bandwidth at n* = pαB (6.4 MB for 32 ranks, 5 µs, 40 GB/s).",
-    "sourceIds": [
-      "thakur-2005",
-      "nccl-tests-performance"
-    ],
-    "location": "/blog/model-development-collectives/",
-    "conditions": "Ring algorithm only, assumed α and B, no tree or hierarchical algorithms, no reduction cost."
-  },
-  {
-    "id": "COM-04",
-    "status": "Reported",
-    "claim": "Bus bandwidth scales algorithm bandwidth by 2(n − 1)/n for all-reduce and (n − 1)/n for all-gather and reduce-scatter.",
-    "sourceIds": [
-      "nccl-tests-performance"
-    ],
-    "location": "/blog/model-development-collectives/",
-    "conditions": "nccl-tests reporting convention; the all-reduce factor is a best case for point-to-point algorithms."
-  },
-  {
-    "id": "COM-05",
-    "status": "Reported",
-    "claim": "DistributedDataParallel buckets gradients at 25 MiB by default, and bucket reduction can overlap backward computation.",
-    "sourceIds": [
-      "pytorch-ddp"
-    ],
-    "location": "/blog/model-development-collectives/",
-    "conditions": "PyTorch 2.15.0 documentation; possible overlap, not a measured amount."
-  },
-  {
-    "id": "COM-06",
-    "status": "Reported",
-    "claim": "Standard data parallelism and ZeRO stages 1–2 move 2Ψ per step; stage 3 moves 3Ψ, 1.5× the baseline.",
-    "sourceIds": [
-      "zero"
-    ],
-    "location": "/blog/model-development-collectives/",
-    "conditions": "ZeRO v3 §7 analysis in parameter counts; ignores the ring's (p − 1)/p factor."
-  },
-  {
-    "id": "COM-07",
-    "status": "Derived",
-    "claim": "A 7B BF16 model on 8 ranks sends 24.5 GB per rank per step (0.65 s) without stage 3 and 36.75 GB (0.97 s) with it.",
-    "sourceIds": [
-      "zero",
-      "thakur-2005",
-      "pytorch-ddp"
-    ],
-    "location": "/blog/model-development-collectives/",
-    "conditions": "One microbatch per optimiser step; assumed α = 5 µs, B = 40 GB/s, 25 MiB buckets, ring algorithm; computed by unit-tested functions, not measured."
-  },
-  {
-    "id": "COM-08",
-    "status": "Reported",
-    "claim": "Megatron tensor parallelism needs two all-reduces per layer in forward and two in backward; a flush pipeline idles (p − 1)/m of ideal time, divided by v when interleaved.",
-    "sourceIds": [
-      "megatron-2021"
-    ],
-    "location": "/blog/model-development-collectives/",
-    "conditions": "Megatron-LM v5 §2.2–2.3 and §3.2, for Transformer MLP and self-attention blocks."
-  },
-  {
-    "id": "COM-09",
-    "status": "Reported",
-    "claim": "PTD-P outperformed ZeRO-3 without model parallelism by 6% and 24% (175B and 530B) at the first GPU counts and by 70% at double the GPUs, attributed to less cross-node communication.",
-    "sourceIds": [
-      "megatron-2021"
-    ],
-    "location": "/blog/model-development-choosing-parallelism/",
-    "conditions": "DGX A100 servers; configurations differ in more than one respect; at 530B ZeRO-3 used 640 GPUs because it did not fit on 560."
-  },
-  {
-    "id": "COM-10",
-    "status": "Hypothesis",
-    "claim": "For the guide's 70B, 32-GPU scenario, tensor parallelism inside servers with ZeRO-1 across them is the better first pilot than ZeRO-3 across all GPUs.",
-    "sourceIds": [
-      "megatron-2021",
-      "zero"
-    ],
-    "location": "/blog/model-development-choosing-parallelism/",
-    "conditions": "One sequence per microbatch, so layout A repeats ZeRO-3 collectives for 8 microbatches per GPU (about 101 s modelled against about 110 s of compute). Supported by the closest measured comparison and by activation splitting. Needs the guide's pilot."
-  },
-  {
-    "id": "COM-11",
-    "status": "Unknown",
-    "claim": "How much of each layout's communication overlaps computation, and how much contention changes the ring model, on a given cluster.",
-    "sourceIds": [
-      "pytorch-ddp",
-      "megatron-2021"
-    ],
-    "location": "/blog/model-development-choosing-parallelism/",
-    "conditions": "Requires profiling the intended step on the target network; no public source settles it for another cluster."
-  },
-  {
     "id": "COM-12",
     "status": "Derived",
     "claim": "Megatron's estimate 8TP/(nX) gives about 83 days for 450B tokens, 1T parameters, 3,072 GPUs at 163 TFLOP/s, consistent with the reported 84.",
@@ -198,25 +30,93 @@
     "conditions": "Uses the paper's own measured X; excludes failures, restarts and evaluation unless X covers them."
   },
   {
-    "id": "COM-13",
+    "id": "P1-01",
     "status": "Reported",
-    "claim": "FSDP2 reshards parameters after forward and re-all-gathers them in backward by default; keeping unsharded parameters or skipping gradient sync during accumulation trades memory for communication.",
+    "claim": "Transformers 4.51.3 shifts causal-LM labels inside the loss (pad one -100, drop the first label), upcasts logits to FP32 and averages over non-ignored targets unless num_items_in_batch is given.",
     "sourceIds": [
-      "fsdp2"
+      "transformers-4.51.3-loss"
     ],
-    "location": "/blog/model-development-collectives/",
-    "conditions": "PyTorch 2.15 fully_shard documentation (reshard_after_forward, set_reshard_after_backward, set_requires_gradient_sync); describes options, not their measured cost."
+    "location": "/blog/model-development-one-update/",
+    "conditions": "Release 4.51.3 source; other releases may differ."
   },
   {
-    "id": "COM-14",
-    "status": "Derived",
-    "claim": "With a microbatches per step, stages 0 and 1 synchronise once per step, stage 2 reduce-scatters every microbatch, and stage 3 regathers and reduce-scatters every microbatch: a 70B model with ZeRO-3 on 32 ranks and 8 microbatches models to about 101 s of traffic per step.",
+    "id": "P1-02",
+    "status": "Reported",
+    "claim": "The 4.51.3 Trainer computes num_items_in_batch only when the model accepts loss kwargs (forward has **kwargs or accepts_loss_kwargs) or a compute_loss_func is given; it then counts labels.ne(-100) over all of a step's microbatches on unshifted labels, and with average_tokens_across_devices sums the count over ranks and multiplies the loss by the number of processes.",
     "sourceIds": [
-      "zero",
-      "fsdp2",
-      "thakur-2005"
+      "transformers-4.51.3-loss"
     ],
-    "location": "/blog/model-development-choosing-parallelism/",
-    "conditions": "One illustrative schedule matching FSDP2's defaults for stage 3; assumed α = 5 µs, B = 40 GB/s, 25 MiB buckets. Schedules that keep unsharded state communicate less and need more memory."
+    "location": "/blog/model-development-one-update/",
+    "conditions": "Source inspection of trainer.py (get_batch_samples, compute_loss, __init__) plus an executed run of Trainer 4.51.3 / accelerate 1.6.0 on a one-layer LlamaForCausalLM with two 6-token rows and gradient_accumulation_steps=2: num_items_in_batch was 10 against 8 shifted targets. The overcount is one per row whose first label is not -100, so the ratio varies across steps."
+  },
+  {
+    "id": "P1-03",
+    "status": "Reported",
+    "claim": "PyTorch 2.6 AdamW shrinks parameters by (1 - lr x weight_decay) before the bias-corrected Adam step; clip_grad_norm_ scales all gradients by min(1, max_norm / (total_norm + 1e-6)).",
+    "sourceIds": [
+      "pytorch-2.6-optim"
+    ],
+    "location": "/blog/model-development-one-update/",
+    "conditions": "Release 2.6.0 source, single-tensor path; checked numerically in the lesson script."
+  },
+  {
+    "id": "P1-04",
+    "status": "Reported",
+    "claim": "Decoupled weight decay as published scales the decay by the schedule multiplier η_t but not by the learning rate α.",
+    "sourceIds": [
+      "adamw-paper"
+    ],
+    "location": "/blog/model-development-one-update/",
+    "conditions": "Algorithm 2 of v3 (ICLR 2019)."
+  },
+  {
+    "id": "P1-05",
+    "status": "Reported",
+    "claim": "Llama 3 uses an attention mask preventing attention between documents in the same sequence; it reports limited impact in standard pre-training and importance for continued pre-training on very long sequences.",
+    "sourceIds": [
+      "llama3"
+    ],
+    "location": "/blog/model-development-one-update/",
+    "conditions": "v3 §3.2; qualitative statement, no ablation numbers given in the quoted passage."
+  },
+  {
+    "id": "P1-06",
+    "status": "Derived",
+    "claim": "Normalizing each microbatch's summed loss by the step's total target count, either before backward or by dividing accumulated summed gradients afterwards, reproduces the token-mean gradient; mean-then-divide accumulation optimizes the mean of microbatch means instead (1.5 versus 2 for illustrative losses [1,1,1] and [3]). The equivalence is mathematical, not bitwise.",
+    "sourceIds": [
+      "transformers-4.51.3-loss"
+    ],
+    "location": "/blog/model-development-one-update/",
+    "conditions": "Linearity of the gradient; illustrative losses, checked with autograd in scripts/course/p1_update.py. Floating-point summation order and dropout can make results differ numerically."
+  },
+  {
+    "id": "P1-07",
+    "status": "Derived",
+    "claim": "At AdamW's first step every coordinate with |g| much larger than eps moves by about the learning rate, independent of the gradient's magnitude. Later steps depend on the gradient history: rescaling the whole history by a positive constant leaves the update unchanged (up to eps), rescaling only the current gradient does not (0.1 versus about 0.093 in the scalar example).",
+    "sourceIds": [
+      "pytorch-2.6-optim"
+    ],
+    "location": "/blog/model-development-one-update/",
+    "conditions": "Bias correction with zero-initialized moments; scalar example with lr 0.1, betas (0.9, 0.99) checked against torch.optim.AdamW 2.6.0 in the script."
+  },
+  {
+    "id": "P1-08",
+    "status": "Reported",
+    "claim": "In PyTorch 2.6, clip_grad_norm_ with a NaN gradient entry returns a NaN norm and turns all gradients into NaN; with an Inf entry it returns Inf, zeroes finite entries and leaves NaN at the Inf entry; it raises only with error_if_nonfinite=True.",
+    "sourceIds": [
+      "pytorch-2.6-optim"
+    ],
+    "location": "/blog/model-development-one-update/",
+    "conditions": "Executed on torch 2.6.0, single parameter, max_norm 1.0."
+  },
+  {
+    "id": "P1-09",
+    "status": "Derived",
+    "claim": "A -100 label removes only the direct loss term at that output position; the token's embedding and hidden states still receive gradients through later positions that attend to it.",
+    "sourceIds": [
+      "transformers-4.51.3-loss"
+    ],
+    "location": "/blog/model-development-one-update/",
+    "conditions": "Chain rule; scalar averaging example checked with autograd in the script."
   }
 ]

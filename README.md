@@ -40,21 +40,15 @@ Model development is a blog series, like Foundations: concept lessons and
 decision guides are posts in the `model-development` series, and their paper
 reviews live in the review collection, linked from the posts. The old
 `/model-development/` hub is now a redirect to the series filter on `/blog/`.
-Start with [the research/publication index](docs/model-development/research-index.md)
-for sources, claim mappings, review status and next questions. Do not add empty
-routes for planned topics. Keep research publication dates separate from article
-dates, and distinguish reported findings from calculated examples and proposed
-experiments.
+Start with [the course plan](docs/model-development/course-plan.md): the
+sequence, the quality bar for a finished lesson and the progress log. Do not
+add routes or posts for planned lessons. Keep research publication dates
+separate from article dates, and distinguish reported findings from
+calculated examples and proposed experiments.
 
-Published pages are listed once, in `publishedUnits` in
-`src/data/model-development.ts`, which the output check reads. [`coverage-matrix.md`](docs/model-development/coverage-matrix.md)
-tracks every curriculum area, published or planned.
-
-Each interactive figure keeps its arithmetic in a tested module and contains no
-alternate formula: `src/lib/training-memory.ts` for the memory estimator and
-`src/lib/collectives.ts` for the ring stepper, communication planner and
-pipeline schedule. They are illustrative models with stated assumptions, not
-benchmarks or fit guarantees.
+Each lesson's worked numbers are reproduced by a script in `scripts/course/`.
+Published pages are listed in `publishedUnits` in
+`src/data/model-development.ts`, which the output check reads.
 
 ```sh
 npm test                       # Node built-in tests; no additional test framework

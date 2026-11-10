@@ -60,16 +60,8 @@ for (const u of units) {
 // Every source in the inventory is cited by a module or a claim.
 const cited = new Set([...modules.flatMap(m => m.sourceIds), ...claims.flatMap(c => c.sourceIds)]);
 for (const s of sources) if (!cited.has(s.id)) errors.push(`${s.id}: source is not cited by any module or claim`);
-const lesson = await html('/blog/model-development-training-memory/');
-if (!lesson.includes('data-training-memory') || !lesson.includes('<noscript>')) errors.push('Missing estimator or no-JS fallback');
-if (!lesson.includes('104.31') || !lesson.includes('13.04')) errors.push('Server-rendered worked example missing');
-if (!lesson.includes('class="katex')) errors.push('Lesson math was not rendered');
-// Collectives module: figures present, with content that survives without JavaScript.
-const collectives = await html('/blog/model-development-collectives/');
-if (!collectives.includes('data-ring-allreduce') || !collectives.includes('every rank holds 10, 20, 30, 40')) errors.push('Ring all-reduce figure or its no-JS summary missing');
-const guide = await html('/blog/model-development-choosing-parallelism/');
-if (!guide.includes('data-comm-planner') || !guide.includes('650.0 ms') || !guide.includes('974.9 ms')) errors.push('Communication planner or its server-rendered worked example missing');
-if (!guide.includes('data-pipeline-schedule') || !guide.includes('37.5%')) errors.push('Pipeline schedule or its default readout missing');
-for (const [route, doc] of [['collectives', collectives], ['guide', guide]]) if (!doc.includes('class="katex')) errors.push(`${route}: math was not rendered`);
+const lesson = await html('/blog/model-development-one-update/');
+if (!lesson.includes('class="katex')) errors.push('Lesson P1: math was not rendered');
+for (const n of ['the count is 10 although only 8', '100-fold', '1.5 against 2']) if (!lesson.includes(n)) errors.push(`Lesson P1: worked example missing (${n})`);
 if (errors.length) { console.error(errors.join('\n')); process.exitCode = 1; }
 else console.log(`Checked ${routes.length} pages, ${checkedLinks} internal links/anchors, ${modules.length} modules, ${sources.length} sources and ${claims.length} claims; math, feed, sitemap and OG images present.`);
