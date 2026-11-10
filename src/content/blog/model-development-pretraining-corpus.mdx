@@ -1,0 +1,289 @@
+---
+title: "Building a pre-training corpus: from a web crawl to training text"
+date: 2026-11-10
+category: deep-learning
+read_time: "35 min"
+series_order: 2
+series: model-development
+featured: false
+published: true
+excerpt: "Most of the web is not text you want a model to learn from. Follow a crawl through the stages that turn it into a training corpus: extraction, language identification, heuristic filters, MinHash deduplication, model-based quality filters, benchmark contamination checks and personal-data removal, each as a decision that changes which text the model sees and how often."
+question: "What does each stage of a pre-training data pipeline remove, what does it accidentally remove, and how do you know it helped?"
+my_work: "A concept post built on small worked examples and the FineWeb pipeline; filter and MinHash behaviour checked by running datatrove 0.10.1."
+result: "Each stage is a function from documents to documents that changes the training distribution; MinHash matches pairs with probability 1 − (1 − s⁸)¹⁴; deduplicating too globally can raise the share of junk; model-based filters encode a teacher's preferences."
+evidence_limit: "Toy documents illustrate mechanisms; FineWeb results come from 1.71B-parameter ablation models and the paper's benchmark suite."
+lesson: "A corpus is a sequence of decisions about which text to keep and how often. Every stage should be measured by what it removes, why, and what the trained model does with the result."
+---
+
+import MinHashOrders from "../../components/figures/MinHashOrders.astro";
+import BandingCurve from "../../components/figures/BandingCurve.astro";
+import SnapshotDedup from "../../components/figures/SnapshotDedup.astro";
+
+In the [previous post](/blog/model-development-one-update/) we followed one training update, starting from a batch of tokens that simply arrived. Now we go upstream and ask where those tokens come from. For most open language models the answer is the public web, and the web is a strange thing to learn from: navigation menus, cookie banners, keyword-stuffed shop pages, the same news story mirrored on a thousand sites, pages in hundreds of languages, and somewhere in between, the articles, explanations and conversations we actually want a model to absorb.
+
+A pre-training corpus is what remains after a sequence of decisions about that mess. In this post we walk through those decisions in the order a real pipeline makes them, using [FineWeb](https://arxiv.org/abs/2406.17557) as the running example, because its authors published both the pipeline and the experiments behind each choice. The idea to hold on to throughout is simple: **every stage changes which text the model sees and how often**. A filter that removes spam also removes something else; a deduplication step that removes copies also changes the mixture of what is left. Building a corpus well means knowing what each stage does to that distribution.
+
+## What a data pipeline is for
+
+The training objective from the previous post averages the loss over tokens drawn from the corpus. So the corpus *is* the objective: whatever text is common in it, the model is pushed hardest to predict. A pipeline stage is a function that takes a set of documents and returns a smaller or rewritten set:
+
+1. **Extract** the readable text from each crawled page.
+2. **Identify the language** and keep the ones you want.
+3. **Filter** out low-quality documents with simple rules.
+4. **Remove duplicates**, exact and near.
+5. Optionally, **score quality with a model** and keep the best.
+6. **Remove benchmark text** you will later evaluate on, and **personal data**.
+
+Two habits make a pipeline debuggable. Record, for every stage, how many documents and tokens go in and come out. And keep the removed documents with the reason they were removed: datatrove, the library FineWeb was built with, gives every filter an `exclusion_writer` for exactly this. A stage you cannot inspect is a stage you cannot fix.
+
+At FineWeb's scale the numbers are large: the base-filtered text from 96 Common Crawl snapshots came to roughly **36 trillion** tokens, deduplicating each snapshot left **20 trillion**, and the remaining filters produced the final **15 trillion** (FineWeb, §§3.3–3.7). Less than half of what passed the first filters survived.
+
+## Where the text comes from
+
+[Common Crawl](https://commoncrawl.org/) is a public collection of web snapshots that has been running since 2007; by the time of the FineWeb paper it had produced 100 of them (§2). Each snapshot comes in two formats. **WARC** files hold the raw crawl: the full HTML of every page plus request metadata. **WET** files hold a plain-text version extracted by Common Crawl itself (§3.2).
+
+Provenance should travel with every document. A FineWeb record keeps the page `url`, the snapshot (`dump`), the crawl `date`, the exact WARC `file_path` it came from, the language and its score, and a token count (Appendix A). With those fields you can trace any training document back to the byte range it came from, honour a removal request, or rebuild one snapshot with a fixed filter.
+
+Licensing is a separate question from availability. FineWeb is released under the ODC-By 1.0 licence, and its use is "also subject to CommonCrawl's Terms of Use" (Appendix B). Whether a page could be crawled, whether the compiled dataset may be shared, and what may be done with an individual page's content are different questions, and a pipeline should record the information needed to answer each, not assume one answers the others.
+
+## Extracting the text
+
+A crawled news page might contain these lines:
+
+```text
+Home | News | Sport | Contact
+We use cookies to improve your experience. Accept
+The cat sat on the mat for most of the afternoon.
+Neighbours said it was the warmest day of the year.
+© 2024 Example News. Terms of use
+```
+
+Only the middle two lines are content. A naive conversion from HTML keeps all five, and the model then spends part of its capacity learning to predict menus and footers that appear, almost identically, on millions of pages. An **extractor** uses the HTML structure (the main content block, link density, element types) to keep the article and drop the boilerplate.
+
+FineWeb found that Common Crawl's WET text "retained too much boilerplate and menu text" and instead ran the [trafilatura](https://trafilatura.readthedocs.io/) extractor on the raw WARC files. Two otherwise identical models trained on the two versions, filtered only by language, separated clearly in favour of the custom extraction (§3.2, Fig. 1). The DCLM study measured the same effect independently: on its core benchmark score, extracting with resiliparse or trafilatura scored 24.1 and 24.5, against 20.7 for WET files, and resiliparse ran about eight times faster than trafilatura ([DCLM](https://arxiv.org/abs/2406.11794), §4.2, Table 3).
+
+Extraction is the most expensive stage to redo, because it touches the raw HTML of every page. It is worth getting right first.
+
+## Keeping one language
+
+Next, a classifier guesses each document's language. FineWeb uses a fastText language classifier and keeps a document if English is its top label with a score of at least **0.65** (§3.3). The score is the classifier's probability for that label.
+
+The threshold decides what happens to pages that are not cleanly one language. Running the same filter that FineWeb uses (datatrove 0.10.1, fastText's 176-language model) on three short pages:
+
+| Page | Top label | Score | In an English corpus |
+|---|---|---|---|
+| An English sentence about Angkor Wat | English | 0.998 | kept |
+| The same facts, half Khmer and half English | Khmer | 0.852 | removed |
+| The same facts in Khmer | Khmer | 0.998 | removed |
+
+The mixed page is removed, English half included. That is the right outcome for an English-only corpus, but it shows how language filtering decides coverage: code-switched text, transliterations and pages in languages the classifier knows poorly all depend on this one score. A multilingual corpus needs a classifier and threshold per language, and checks that its low-resource languages survive.
+
+## Heuristic quality filters
+
+After extraction and language identification, many documents are still not prose: product listings, keyword lists, link farms, tables of contents. **Heuristic filters** measure simple statistics of a document and remove it when a statistic falls in a range that is mostly junk.
+
+Take this extracted page:
+
+```text
+Cheap flights Paris
+Cheap flights Rome
+Cheap flights Berlin
+Book now and save on every route this summer!
+Cheap flights Madrid
+```
+
+FineWeb added three rules of its own (§3.6). Apply them to the page:
+
+- **Lines ending in punctuation.** 1 of the 5 lines ends with terminal punctuation, a fraction of 0.2. The rule removes documents below 0.12, so this page **passes**.
+- **Short lines.** 4 of the 5 lines are at most 30 characters, a fraction of 0.8. The rule removes documents above 0.67, so this page **is removed**.
+- **Characters in duplicated lines.** No line repeats exactly, so this rule does not fire.
+
+Running datatrove's `FineWebQualityFilter` on this page removes it with the reason `short_line_ratio`. The current version of that filter also applies a fourth check that the paper does not list: a document is removed if it has more than 0.3 newlines per word. This page has 4 newlines and 21 words, 0.19, so it would pass that one.
+
+How were these thresholds chosen? Not by inspection alone. FineWeb computed over 50 statistics on two versions of one old snapshot, one known from earlier experiments to be higher quality than the other, and looked for statistics whose distributions differed. For each, it picked a threshold in the region where the low-quality version was more frequent; for the punctuation rule, documents below 0.12 were much more common in the low-quality set. It then trained a model with each candidate filter and kept the three that helped the benchmark average most (§3.6, Fig. 8, Appendix E.4).
+
+A filter trades data for quality, and that trade has to be measured. C4's rule that drops every line without terminal punctuation gave the largest single gain on HellaSwag among C4's filters, but removed about **30%** of the tokens; FineWeb did not use it, and its own punctuation rule removes about **10%** (§3.5, §3.6). Together, FineWeb's three rules removed about 22% of the tokens and raised the aggregate benchmark score by about 1% in its ablations.
+
+Everyday picture: a heuristic filter is a bouncer checking for a dress code. It is fast and catches the obvious cases, but it also turns away some perfectly good guests who happen to dress differently. Poetry, lists of instructions and code fail "most lines end in punctuation" for reasons that have nothing to do with quality. FineWeb's own datasheet warns that, as a consequence of its filtering, code is probably not prevalent in the dataset (Appendix A).
+
+## Removing duplicates
+
+The web repeats itself: mirrors, aggregators, syndicated news, templated pages. Repetition matters for two reasons. A document that appears a thousand times is trained on a thousand times, so it carries a thousand times the weight in the loss. And repeated text is more likely to be memorized. FineWeb notes that deduplication has been correlated with better models and with less memorization of training data (§3.4).
+
+**Exact duplicates** are easy: normalize the text (case, whitespace), hash it, and keep one document per hash. **Near-duplicates**, pages that differ by a date, an ad or a few edited words, need a measure of similarity.
+
+### Similarity as overlapping word sequences
+
+Describe each document by the set of its overlapping word sequences of length $n$, called **shingles** or n-grams. Then measure how much two sets overlap with the **Jaccard similarity**:
+
+$$
+J(A, B) = \frac{|A \cap B|}{|A \cup B|} .
+$$
+
+- $A$, $B$: the sets of shingles of the two documents.
+- $|A \cap B|$: how many shingles they share; $|A \cup B|$: how many distinct shingles they have between them.
+- $J = 1$ for identical sets and $0$ for sets with nothing in common.
+
+With pairs of words ($n = 2$), "the cat sat on the mat" has the five pairs *the cat, cat sat, sat on, on the, the mat*, and "the cat sat on a mat" has *the cat, cat sat, sat on, on a, a mat*. They share 3, and there are 7 distinct pairs in total, so $J = 3/7 \approx 0.43$.
+
+The length $n$ matters. FineWeb uses $n = 5$ (§3.4). One changed word breaks every shingle that contains it, up to five of them. On a six-word sentence that is everything: each sentence has only two 5-grams, none shared, so $J = 0$. On a real document it is a small dent. A 100-word document has 96 shingles; change one word in the middle and 5 shingles change in each version, so they share 91 of 101 distinct shingles, $J \approx 0.90$. Long shingles make the measure strict about wording; short ones make unrelated documents look similar, because common phrases are shared by everything.
+
+### MinHash: estimating similarity without comparing every pair
+
+A web snapshot has billions of documents. Comparing every pair is out of the question, and even storing every document's full shingle set is expensive. **MinHash** replaces each document with a short, fixed-length signature whose agreement estimates the Jaccard similarity.
+
+The trick is a random order. Put every possible shingle in a random order, and for each document note its **first** shingle in that order, its minimum. Two documents have the same minimum exactly when the first shingle of their union is one they share. Every shingle of the union is equally likely to come first, so
+
+$$
+P\big(\min A = \min B\big) = \frac{|A \cap B|}{|A \cup B|} = J(A, B).
+$$
+
+In the example, 3 of the 7 pairs are shared, so a random order makes the two minimums agree with probability $3/7$.
+
+<figure class="blog-figure blog-figure--wide">
+  <MinHashOrders alt="Two sentences split into word pairs, which merge into a union of seven pairs, three shared. Random orders rank the seven pairs, and each sentence's lowest-ranked pair is marked; they agree only when rank 1 is a shared pair. A grid of 112 comparisons is then grouped into 14 buckets of 8." />
+  <figcaption><strong>Figure 1. MinHash as a random order.</strong> Each hash function ranks the union of word pairs; a sentence's minhash is its lowest-ranked pair. The two minhashes agree exactly when rank 1 goes to a shared pair, which happens with probability 3/7. Over 112 hash functions, the fraction that agree estimates the similarity.</figcaption>
+</figure>
+
+Everyday picture: two people each hold a hand of cards from the same deck, and someone shuffles a master ranking of the whole deck. Each person shows their best-ranked card. They show the same card only when the best-ranked card among all the cards they hold between them is one they both have.
+
+In practice a hash function stands in for the random order: datatrove hashes each shingle to a 64-bit number, maps it through $a x + b \bmod p$ with random $a$ and $b$ for each of the hash functions, and takes the minimum. Before shingling it lowercases the text, normalizes whitespace and numbers, and removes punctuation, so trivial formatting differences do not count. One minhash is a coin flip; **112** of them give 112 agreements or disagreements whose fraction estimates $J$. Each document is then stored as 112 numbers instead of its full text.
+
+### Buckets: finding candidates without comparing every pair
+
+Estimating $J$ for a pair is cheap, but there are still too many pairs. **Locality-sensitive hashing** solves this by grouping the 112 minhashes into **14 buckets of 8**. Two documents become duplicate candidates if, in at least one bucket, all 8 minhashes agree (§3.4, Appendix E.1). Finding them needs no pairwise comparison: sort documents by each bucket's 8 values and look for exact collisions.
+
+Why does this give a sharp threshold? Work it out for two documents with similarity $s = 0.75$:
+
+- one minhash agrees with probability $s = 0.75$;
+- all 8 in one bucket agree with probability $s^8 = 0.75^8 \approx 0.100$, because the minhashes are independent;
+- none of the 14 buckets agrees with probability $(1 - s^8)^{14} \approx 0.900^{14} \approx 0.228$;
+- so the pair is matched with probability $1 - 0.228 \approx 0.77$.
+
+In general, with $r$ minhashes per bucket and $b$ buckets,
+
+$$
+P(\text{matched}) = 1 - \left(1 - s^{\,r}\right)^{b}, \qquad r = 8,\ b = 14 \text{ in FineWeb}.
+$$
+
+- $s$: the Jaccard similarity of the two documents' shingle sets.
+- $s^r$: the chance a single bucket agrees completely; raising $r$ makes each bucket stricter.
+- $(1 - s^r)^b$: the chance every bucket fails; raising $b$ gives more chances to match.
+
+<figure class="blog-figure blog-figure--wide">
+  <BandingCurve alt="A plot of probability against similarity. Step by step it adds the straight line s, the steep curve s to the eighth, the falling curve one minus s to the eighth all to the fourteenth, and finally the S-shaped match probability, with values read off at s equals 0.75 and markers at 0.5, 0.7 and 0.85." />
+  <figcaption><strong>Figure 2. From one minhash to a match.</strong> Raising the per-hash probability to the eighth power makes a single bucket strict; giving the pair fourteen buckets makes the miss rate small. The result is an S-curve that matches pairs above about 0.75 and ignores pairs below about 0.5.</figcaption>
+</figure>
+
+The S-curve is the point. FineWeb's settings match pairs at 0.7, 0.75, 0.8 and 0.85 similarity with probabilities 56%, 77%, 92% and 98.8% (Appendix E.1), while a pair at 0.5 is matched only about 5% of the time. The steep part lies near $(1/b)^{1/r} = (1/14)^{1/8} \approx 0.72$. RefinedWeb used 9,000 hashes in 450 buckets of 20 for a steeper cut; FineWeb accepted a softer edge in exchange for computing and storing far fewer hashes (Appendix E.1).
+
+Matches are then joined transitively: if A matches C and B matches C, all three form one cluster even if A and B never matched directly. One document per cluster is kept (§3.4).
+
+### How widely to deduplicate
+
+The natural assumption is that more deduplication is always better, so FineWeb first deduplicated **across all 96 snapshots**, newest first. In the oldest snapshots this removed up to 90% of the data, and the whole corpus shrank to 4 trillion tokens. A model trained on it was barely better than one trained on non-deduplicated data (§3.4, Fig. 3).
+
+The surprise was in what survived. In the 2013 snapshot, the 10% of data kept by global deduplication trained a **worse** model than the 90% it had removed (§3.4, Fig. 4). The figure shows how that can happen.
+
+<figure class="blog-figure blog-figure--wide">
+  <SnapshotDedup alt="Three columns of ten page tiles for crawls from 2013, 2018 and 2023. Six good pages appear in every crawl; four appear once, one good and three spam. Deduplicating newest first removes the six recrawled pages from the two older crawls, leaving them mostly spam; a bar shows 50 percent good pages. Deduplicating each crawl separately leaves 70 percent good." />
+  <figcaption><strong>Figure 3. What global deduplication leaves behind.</strong> Good pages tend to be recrawled and republished, so in an old crawl they are exactly the pages that already appear in newer ones. Removing them leaves the old crawl with what nobody kept: in this toy, mostly spam. Deduplicating each crawl on its own keeps the better mixture, at the cost of some repetition across crawls.</figcaption>
+</figure>
+
+Everyday picture: clear out a newspaper archive by throwing away any article that was reprinted in a later edition. The old editions end up holding only what was never worth reprinting: classified ads and corrections.
+
+FineWeb therefore deduplicated **each snapshot independently**, which left 20 trillion tokens and matched the performance of RefinedWeb (§3.4, Fig. 5). Lighter forms of global deduplication on top, by URL or by repeated lines, all made results worse (Appendix E.3). The authors' explanation, offered as a hypothesis, is that most of the benefit comes from removing the huge clusters of hundreds of thousands of copies found in every crawl, while removing small clusters of fewer than about 100 copies, about one per crawl, can hurt (§3.4).
+
+Two lessons carry beyond FineWeb. Deduplication changes the mixture, not just the size, so judge it by what remains. And its effects are hard to measure in small experiments: FineWeb simulates a corpus in which every document is repeated 100 times and shows that a 1-billion-token random sample of it would contain almost no repeats, because copies rarely land in the same small sample (Appendix E.2). It evaluated deduplication with 350 billion training tokens for that reason.
+
+## Model-based quality filters
+
+Heuristics catch the obviously broken. To prefer the genuinely useful, recent pipelines train a **classifier** to score documents and keep the high scorers. The recipe has three steps:
+
+1. Have a strong model, or people, label a sample of documents.
+2. Train a cheap classifier to predict those labels.
+3. Score every document and keep those above a threshold.
+
+FineWeb-Edu is a clear example (§4). Llama-3-70B-Instruct scored 460,000 pages from one snapshot for educational value on an additive 0–5 scale, with a prompt aimed at primary- and grade-school level so that dense technical pages would not dominate. A linear regression head on top of a frozen embedding model was trained on 410,000 of those scores, its outputs were rounded to integers, and documents scoring at least **3** were kept: 1.3 trillion of FineWeb's 15 trillion tokens, about 9%. Scoring all of FineWeb took 6,000 H100 GPU hours. DCLM used a fastText classifier trained to tell instruction-style data (OpenHermes 2.5 and highly rated ELI5 posts) from random web text, and kept the top 10% of documents ([DCLM](https://arxiv.org/abs/2406.11794), §4.4).
+
+Both helped on knowledge and reasoning benchmarks. Training on FineWeb-Edu raised MMLU from 33% to 37% and ARC from 46% to 57% in FineWeb's 350-billion-token ablations (§4).
+
+What does such a classifier encode? Exactly the preferences of whoever produced its labels. The classifier's 82% F1 score measures agreement with Llama 3's judgements, not educational value itself (§4). And the filter changes the topic mixture: FineWeb-Edu has more education and history, and less business, entertainment and travel than FineWeb (§4.1). Models trained on FineWeb-Edu predict Wikipedia and academic text better, while models trained on FineWeb predict broad web and social-media text better (§4.2). A model-based filter is a choice of what the model should be good at, and should be evaluated as one.
+
+## Benchmark contamination
+
+If a benchmark's questions appear in the training data, a model can score well by recall rather than by the skill the benchmark is meant to measure. **Decontamination** searches the corpus for benchmark text and removes it.
+
+The usual tool is the same as for deduplication: overlapping word sequences. Take a benchmark question, "which gas do plants absorb from the air". Its six word triples are *which gas do, gas do plants, do plants absorb, plants absorb from, absorb from the, from the air*. A training page reading "students learn which gas do plants absorb from the air during photosynthesis" contains all 6 of 6: contaminated. A page reading "plants take in carbon dioxide from the air" shares only 1 of 6, *from the air*, and would not be flagged, although it contains the answer.
+
+The length $n$ trades two errors. Short sequences flag common phrases that every text shares; long ones miss paraphrases, translations and reformatted copies. No threshold catches a question restated in different words, so a clean overlap check is weaker evidence than it sounds. Keep held-out evaluation data out of the pipeline from the start, and record what was searched for and how.
+
+The FineWeb paper does not describe removing benchmark text from the corpus. When it measures how well its models fit other text collections, it states that it intentionally skips decontamination (§4.2). Whether to decontaminate a general-purpose corpus, and against which benchmarks, is a decision you have to make yourself.
+
+## Personal information
+
+FineWeb anonymizes email addresses and public IP addresses with regular expressions (§3.7, Appendix A). Running datatrove's `PIIFormatter` on a toy sentence:
+
+```text
+Before: Write to jane.doe@gmail.com or ping 8.8.8.8; my name is Jane Doe.
+After:  Write to email@example.com or ping 22.214.171.124; my name is Jane Doe.
+```
+
+The email and the IP address are replaced with fixed placeholders; the name is untouched, as are phone numbers, street addresses and anything else the patterns do not describe. Pattern-based removal is cheap and predictable, but it is narrow. A corpus that needs stronger privacy protection needs named-entity detection, an audit of what it misses and what it wrongly removes, and lineage from each training document back to its source so that a removal request can be honoured.
+
+## Measuring whether a stage helped
+
+Statistics about the data cannot tell you whether a stage improved the model. FineWeb's method is to train small models that differ only in their data (§3.1):
+
+- the same 1.71-billion-parameter Llama-style model, GPT-2 tokenizer and hyperparameters for every variant;
+- 28 billion tokens for filter experiments and 350 billion for deduplication, because deduplication's effects only appear at larger samples;
+- two models per variant, on different random subsets with different seeds, averaged;
+- benchmarks chosen because they gave a stable signal at this scale: low variance between seeds, steady improvement during training, and scores above chance.
+
+This is expensive, over 70 models and about 80,000 H100 hours in total (§3.1), but it is what turns "this filter looks sensible" into "this filter improved these benchmarks at this scale". Its limits are worth stating too: a 1.7B model trained on 28 billion tokens may not rank datasets the way a 70B model trained on trillions would, and benchmarks that respond well at small scale are a narrow view of what a model should be able to do.
+
+## Failure modes
+
+| Mistake | What happens | How it shows up | Check |
+|---|---|---|---|
+| Filters calibrated on one kind of text | Code, poetry, lists or other languages removed as "low quality" | Model weak on those domains; removed-document samples full of good text | Read samples of each filter's removals, per domain and language |
+| Deduplicating too broadly | Good pages' copies removed, raising the share of junk | Corpus shrinks a lot but benchmarks do not improve | Compare what the removed and kept parts train, as FineWeb did |
+| Judging deduplication on a small sample | Small samples contain few duplicates, so the effect is invisible | No difference at 1B tokens, then a difference at scale | Evaluate deduplication with a large enough training sample |
+| Benchmark text left in the corpus | Scores measure recall, not skill | High scores on one benchmark, weak results on fresh questions | Search for benchmark n-grams before training; keep a private held-out set |
+| No record of removals | A bad stage cannot be found later | Unexplained gaps in coverage | Write every removed document with its stage and reason |
+
+## Where this goes next
+
+The corpus is still text. Before training, it has to become token IDs, and the tokenizer decides how many tokens each language and each kind of text costs, which in turn changes how much of the corpus a fixed compute budget can see. That is the next post. For the experiments behind this pipeline in detail, see the [review of the FineWeb paper](/paper-reviews/fineweb/).
+
+
+## What to remember
+
+- A corpus is a sequence of decisions, and each stage changes which text the model sees and how often. Record what every stage removes, and why.
+- Extracting text from raw HTML instead of using Common Crawl's WET text removes boilerplate and measurably improves models.
+- Language identification with a score threshold decides coverage: mixed-language pages are dropped from single-language corpora.
+- Heuristic filters trade data for quality; their thresholds should be chosen from data and checked by training, and they remove some good text that looks unusual.
+- Near-duplicates are found with shingles and Jaccard similarity. A minhash agrees with probability $J$; 14 buckets of 8 match pairs with probability $1 - (1 - s^8)^{14}$, an S-curve centred near 0.72.
+- More deduplication is not always better: deduplicating across all crawls left old crawls with mostly junk, and FineWeb deduplicates each crawl separately.
+- Model-based filters encode their labeller's preferences and shift the topic mixture.
+- Decontamination by n-gram overlap catches copies, not paraphrases.
+
+
+## Try it yourself
+
+- **Figure 1.** Step to the 112 comparisons: the fraction that agree is close to **3/7 ≈ 0.43**, and no bucket of 8 agrees completely.
+- **Heuristic filter.** A page of 10 lines has 3 ending in punctuation and 8 of at most 30 characters. The punctuation fraction 0.3 passes (it is above 0.12); the short-line fraction 0.8 is above 0.67, so the page is **removed**.
+- **Jaccard.** Sets of shingles with 6 shared and 10 distinct in total: $J =$ **0.6**.
+- **Two edits.** In a 100-word document, two words far apart are changed. With 5-gram shingles each version has 96; 10 differ in each, so they share 86 of 106: $J \approx$ **0.81**, and $1 - (1 - 0.81^8)^{14} \approx$ **0.94**: almost certainly matched.
+- **A dissimilar pair.** At $s = 0.5$, one bucket agrees with probability $1/256$, so the pair is matched with probability about $14/256 \approx$ **5%**.
+- **Scale of a quality filter.** FineWeb-Edu keeps 1.3 of FineWeb's 15 trillion tokens: about **9%**. DCLM kept the top **10%**.
+- **Contamination.** "the capital of France is Paris" against a page containing "the capital of France is a large city": of the question's four word triples, **3** appear in the page.
+
+
+## Sources
+
+- G. Penedo, H. Kydlíček, L. Ben Allal, A. Lozhkov, M. Mitchell, C. Raffel, L. Von Werra and T. Wolf (2024). "The FineWeb Datasets: Decanting the Web for the Finest Text Data at Scale." NeurIPS 2024 Datasets and Benchmarks. arXiv:2406.17557, v2.
+- J. Li, A. Fang, G. Smyrnis, M. Ivgi, M. Jordan et al. (2024). "DataComp-LM: In search of the next generation of training sets for language models." arXiv:2406.11794, v4.
+- A. Z. Broder (1997). "On the resemblance and containment of documents." Compression and Complexity of Sequences.
+- Hugging Face datatrove 0.10.1: `examples/fineweb.py`; `FineWebQualityFilter`, `LanguageFilter`, `MinhashDedupSignature` and `PIIFormatter`.
+- Common Crawl, https://commoncrawl.org/.

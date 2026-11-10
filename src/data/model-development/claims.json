@@ -118,5 +118,117 @@
     ],
     "location": "/blog/model-development-one-update/",
     "conditions": "Chain rule; scalar averaging example checked with autograd in the script."
+  },
+  {
+    "id": "P2-01",
+    "status": "Reported",
+    "claim": "FineWeb's pipeline: trafilatura on WARC, URL blocklist, fastText English >= 0.65, Gopher quality and repetition filters (~36T tokens), per-snapshot MinHash (20T), C4 filters without terminal punctuation, three custom filters, email and public-IP anonymization (15T).",
+    "sourceIds": [
+      "fineweb"
+    ],
+    "location": "/blog/model-development-pretraining-corpus/",
+    "conditions": "Sec 3.2-3.7, pp. 4-8; App. A p. 18."
+  },
+  {
+    "id": "P2-02",
+    "status": "Reported",
+    "claim": "MinHash with 5-grams and 14 buckets of 8 hashes matches pairs at Jaccard 0.7/0.75/0.8/0.85 with probability 56%/77%/92%/98.8%, from 1-(1-s^8)^14.",
+    "sourceIds": [
+      "fineweb"
+    ],
+    "location": "/blog/model-development-pretraining-corpus/",
+    "conditions": "App. E.1 p. 21; reproduced in scripts/course/p2_corpus.py."
+  },
+  {
+    "id": "P2-03",
+    "status": "Derived",
+    "claim": "A minhash under a random order agrees with probability equal to the Jaccard similarity; for the toy pair (3 shared of 7) the simulated agreement is 0.430 versus 3/7.",
+    "sourceIds": [
+      "broder-1997"
+    ],
+    "location": "/blog/model-development-pretraining-corpus/",
+    "conditions": "Probability argument; 100,000-order simulation in the script."
+  },
+  {
+    "id": "P2-04",
+    "status": "Reported",
+    "claim": "Global MinHash across 96 snapshots removed up to 90% of old snapshots, left 4T tokens and barely improved results; in 2013-48 the kept ~31B tokens trained a worse model than the deduplicated removed data; per-snapshot dedup left 20T and matched RefinedWeb. The cluster-size explanation is the authors' hypothesis.",
+    "sourceIds": [
+      "fineweb"
+    ],
+    "location": "/paper-reviews/fineweb/",
+    "conditions": "Sec 3.4 pp. 5-6, Figs 3-5; 350B-token ablations at 1.71B."
+  },
+  {
+    "id": "P2-05",
+    "status": "Reported",
+    "claim": "FineWeb's three custom filters (punctuation-line fraction <= 0.12, duplicated-line characters, short-line fraction >= 0.67) removed ~22% of tokens and raised the aggregate ~1%; C4's terminal-punctuation filter removes ~30%.",
+    "sourceIds": [
+      "fineweb",
+      "datatrove-0.10.1"
+    ],
+    "location": "/blog/model-development-pretraining-corpus/",
+    "conditions": "Sec 3.5-3.6 pp. 6-7. Text gives the duplicated-line threshold as 0.1; Table 2 and datatrove use 0.01. Table 2 lists 0.69 for the short-line row; text and code use 0.67."
+  },
+  {
+    "id": "P2-06",
+    "status": "Reported",
+    "claim": "datatrove 0.10.1 FineWebQualityFilter removes the toy flights page with reason short_line_ratio; it also applies a newline-per-word > 0.3 rule not in the paper; examples/fineweb.py applies all filters before MinHash.",
+    "sourceIds": [
+      "datatrove-0.10.1"
+    ],
+    "location": "/blog/model-development-pretraining-corpus/",
+    "conditions": "Executed in a scratch virtualenv with datatrove 0.10.1 from PyPI."
+  },
+  {
+    "id": "P2-07",
+    "status": "Reported",
+    "claim": "datatrove's LanguageFilter (ft176, threshold 0.65) keeps the English toy page (en 0.998) and removes a half-Khmer, half-English page (km 0.852) and a Khmer page (km 0.998).",
+    "sourceIds": [
+      "datatrove-0.10.1"
+    ],
+    "location": "/blog/model-development-pretraining-corpus/",
+    "conditions": "Executed with fastText lid.176; scores depend on the model file."
+  },
+  {
+    "id": "P2-08",
+    "status": "Reported",
+    "claim": "FineWeb-Edu: Llama-3-70B-Instruct scored 460k pages 0-5; a linear head on Snowflake-arctic-embed-m trained on 410k; threshold 3, F1 82% against Llama labels; 1.3T tokens; MMLU 33->37%, ARC 46->57% at 350B tokens; topic and Paloma-domain shifts.",
+    "sourceIds": [
+      "fineweb"
+    ],
+    "location": "/paper-reviews/fineweb/",
+    "conditions": "Sec 4-4.2 pp. 8-9; App. F.1-F.2 p. 25."
+  },
+  {
+    "id": "P2-09",
+    "status": "Reported",
+    "claim": "DCLM: resiliparse 24.1 and trafilatura 24.5 CORE against 20.7 for WET (1B-1x); resiliparse ~8x faster; DCLM-Baseline keeps the top 10% by a fastText OH-2.5+ELI5 classifier.",
+    "sourceIds": [
+      "dclm"
+    ],
+    "location": "/blog/model-development-pretraining-corpus/",
+    "conditions": "Sec 4.2 Table 3 p. 8; Sec 4.4 Tables 4-5 pp. 8-9."
+  },
+  {
+    "id": "P2-10",
+    "status": "Reported",
+    "claim": "datatrove's PIIFormatter replaces emails and public IPv4 addresses with fixed placeholders and leaves names untouched; FineWeb's PII handling is limited to emails and public IPs.",
+    "sourceIds": [
+      "datatrove-0.10.1",
+      "fineweb"
+    ],
+    "location": "/blog/model-development-pretraining-corpus/",
+    "conditions": "Executed on a toy sentence; FineWeb Sec 3.7 p. 7 and App. A p. 18."
+  },
+  {
+    "id": "P2-11",
+    "status": "Reported",
+    "claim": "The FineWeb paper does not describe benchmark decontamination of the corpus and intentionally skips decontamination in its Paloma analysis.",
+    "sourceIds": [
+      "fineweb"
+    ],
+    "location": "/paper-reviews/fineweb/",
+    "conditions": "Full-text search of v2 for 'contamin'; Sec 4.2 p. 9."
   }
 ]
