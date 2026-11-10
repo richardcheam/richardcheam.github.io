@@ -42,12 +42,12 @@
   {
     "id": "P1-02",
     "status": "Reported",
-    "claim": "The 4.51.3 Trainer counts labels.ne(-100) over all of a step's microbatches on unshifted labels; with average_tokens_across_devices it sums the count over ranks and multiplies the loss by the number of processes.",
+    "claim": "The 4.51.3 Trainer computes num_items_in_batch only when the model accepts loss kwargs (forward has **kwargs or accepts_loss_kwargs) or a compute_loss_func is given; it then counts labels.ne(-100) over all of a step's microbatches on unshifted labels, and with average_tokens_across_devices sums the count over ranks and multiplies the loss by the number of processes.",
     "sourceIds": [
       "transformers-4.51.3-loss"
     ],
     "location": "/blog/model-development-one-update/",
-    "conditions": "Observed in source and in the lesson's script; the off-by-one-per-row effect depends on the first label not being -100."
+    "conditions": "Source inspection of trainer.py (get_batch_samples, compute_loss, __init__) plus an executed run of Trainer 4.51.3 / accelerate 1.6.0 on a one-layer LlamaForCausalLM with two 6-token rows and gradient_accumulation_steps=2: num_items_in_batch was 10 against 8 shifted targets. The overcount is one per row whose first label is not -100, so the ratio varies across steps."
   },
   {
     "id": "P1-03",
@@ -82,21 +82,41 @@
   {
     "id": "P1-06",
     "status": "Derived",
-    "claim": "Normalizing each microbatch's summed loss by the step's total target count reproduces the token-mean gradient exactly; mean-then-divide accumulation optimizes a sequence-weighted objective instead (2.0994 versus 2.1114 in the toy batch).",
+    "claim": "Normalizing each microbatch's summed loss by the step's total target count, either before backward or by dividing accumulated summed gradients afterwards, reproduces the token-mean gradient; mean-then-divide accumulation optimizes the mean of microbatch means instead (1.5 versus 2 for illustrative losses [1,1,1] and [3]). The equivalence is mathematical, not bitwise.",
     "sourceIds": [
       "transformers-4.51.3-loss"
     ],
     "location": "/blog/model-development-one-update/",
-    "conditions": "Linearity of the gradient; toy numbers from scripts/course/p1_update.py."
+    "conditions": "Linearity of the gradient; illustrative losses, checked with autograd in scripts/course/p1_update.py. Floating-point summation order and dropout can make results differ numerically."
   },
   {
     "id": "P1-07",
     "status": "Derived",
-    "claim": "At AdamW's first step every coordinate with |g| much larger than ε moves by about the learning rate, independent of its gradient's magnitude.",
+    "claim": "At AdamW's first step every coordinate with |g| much larger than eps moves by about the learning rate, independent of the gradient's magnitude. Later steps depend on the gradient history: rescaling the whole history by a positive constant leaves the update unchanged (up to eps), rescaling only the current gradient does not (0.1 versus about 0.093 in the scalar example).",
     "sourceIds": [
       "pytorch-2.6-optim"
     ],
     "location": "/blog/model-development-one-update/",
-    "conditions": "Bias correction with zero-initialized moments; checked against torch.optim.AdamW in the script."
+    "conditions": "Bias correction with zero-initialized moments; scalar example with lr 0.1, betas (0.9, 0.99) checked against torch.optim.AdamW 2.6.0 in the script."
+  },
+  {
+    "id": "P1-08",
+    "status": "Reported",
+    "claim": "In PyTorch 2.6, clip_grad_norm_ with a NaN gradient entry returns a NaN norm and turns all gradients into NaN; with an Inf entry it returns Inf, zeroes finite entries and leaves NaN at the Inf entry; it raises only with error_if_nonfinite=True.",
+    "sourceIds": [
+      "pytorch-2.6-optim"
+    ],
+    "location": "/blog/model-development-one-update/",
+    "conditions": "Executed on torch 2.6.0, single parameter, max_norm 1.0."
+  },
+  {
+    "id": "P1-09",
+    "status": "Derived",
+    "claim": "A -100 label removes only the direct loss term at that output position; the token's embedding and hidden states still receive gradients through later positions that attend to it.",
+    "sourceIds": [
+      "transformers-4.51.3-loss"
+    ],
+    "location": "/blog/model-development-one-update/",
+    "conditions": "Chain rule; scalar averaging example checked with autograd in the script."
   }
 ]

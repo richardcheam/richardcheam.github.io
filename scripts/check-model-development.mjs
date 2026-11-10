@@ -62,6 +62,6 @@ const cited = new Set([...modules.flatMap(m => m.sourceIds), ...claims.flatMap(c
 for (const s of sources) if (!cited.has(s.id)) errors.push(`${s.id}: source is not cited by any module or claim`);
 const lesson = await html('/blog/model-development-one-update/');
 if (!lesson.includes('class="katex')) errors.push('Lesson P1: math was not rendered');
-if (!lesson.includes('2.3931') || !lesson.includes('2.0994')) errors.push('Lesson P1: worked numbers missing');
+for (const n of ['the count is 10 although only 8', '100-fold', '1.5 against 2']) if (!lesson.includes(n)) errors.push(`Lesson P1: worked example missing (${n})`);
 if (errors.length) { console.error(errors.join('\n')); process.exitCode = 1; }
 else console.log(`Checked ${routes.length} pages, ${checkedLinks} internal links/anchors, ${modules.length} modules, ${sources.length} sources and ${claims.length} claims; math, feed, sitemap and OG images present.`);
