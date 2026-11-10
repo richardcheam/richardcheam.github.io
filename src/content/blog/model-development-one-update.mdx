@@ -21,7 +21,7 @@ When people talk about training a large language model, the exciting parts seem 
 
 So in this post we follow one update from start to finish, on a batch small enough to check by hand. On the way we will meet several quiet conventions that decide what the model actually learns: which positions count as targets, which positions may see each other, how the loss is averaged, and how AdamW turns a gradient into a step. Get any of them wrong and training still runs. It just optimizes something you did not intend.
 
-If backpropagation, cross-entropy or Adam are new to you, the Foundations posts on [backpropagation](/blog/foundations-neurons-backprop/), [softmax and cross-entropy](/blog/foundations-loss-gradient-descent/), [optimisers](/blog/foundations-optimisers/) and [language models](/blog/foundations-language-models/) cover them. Every number below comes from a short script you can run yourself: [`scripts/course/p1_update.py`](https://github.com/richardcheam/richardcheam.github.io/blob/master/scripts/course/p1_update.py).
+If backpropagation, cross-entropy or Adam are new to you, the Foundations posts on [backpropagation](/blog/foundations-neurons-backprop/), [softmax and cross-entropy](/blog/foundations-loss-gradient-descent/), [optimisers](/blog/foundations-optimisers/) and [language models](/blog/foundations-language-models/) cover them.
 
 ## The objective, before any code
 
