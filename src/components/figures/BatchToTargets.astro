@@ -1,0 +1,82 @@
+---
+// Model development, "One training update": how a packed and a padded row
+// become next-token targets, ignored positions and attention masks, and how
+// the two averaging choices weight the same seven losses. Numbers match
+// scripts/course/p1_update.py (losses 1.293 2.084 2.340 2.393 | 2.393 1.878 2.316;
+// token mean 2.0994, mean of row means 2.1114).
+const { alt } = Astro.props;
+---
+<div class="blog-diagram" role="region" aria-label={alt} data-batch-targets>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 330" role="img" aria-labelledby="bt-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="bt-title">Two rows of tokens with their next-token targets, ignored positions, and the attention pattern of the packed row</title>
+    <g data-draw></g>
+  </svg>
+  <noscript><p>Row 0 packs "&lt;bos&gt; the cat &lt;eos&gt;" and "&lt;bos&gt; cat"; row 1 is "&lt;bos&gt; cat sat &lt;eos&gt;" plus two padding tokens. Seven of the twelve positions have a target. With the document mask, document B's positions attend only to document B.</p></noscript>
+  <button type="button" class="fig-replay" data-replay>Replay</button>
+</div>
+
+<script>
+  import { stepper } from "../../lib/stepper";
+  import { INK, MUTED, JADE, GOLD, NEG, DEAD } from "../../lib/net-diagram";
+  import { txt, arrow } from "../../lib/plot";
+  const ROWS = [["<bos>", "the", "cat", "<eos>", "<bos>", "cat"], ["<bos>", "cat", "sat", "<eos>", "<pad>", "<pad>"]];
+  const DOC = [["A", "A", "A", "A", "B", "B"], ["C", "C", "C", "C", "", ""]];
+  // Next-token targets after the shift; null where the position is ignored.
+  const TGT = [["the", "cat", "<eos>", null, "cat", null], ["cat", "sat", "<eos>", null, null, null]];
+  const WHY = [["", "", "", "boundary", "", "row ends"], ["", "", "", "padding next", "padding", "padding"]];
+  const LOSS = [[1.293, 2.084, 2.34, null, 2.393, null], [2.393, 1.878, 2.316, null, null, null]];
+  const FILL: Record<string, string> = { A: "#E3EFE9", B: "#F4EAD2", C: "#E2EAF3", "": DEAD };
+  const X = (t: number) => 28 + t * 62, ROW_Y = (r: number) => 34 + r * 120;
+  document.querySelectorAll<HTMLElement>("[data-batch-targets]").forEach((root) => {
+    const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
+    const steps = () => [
+      { say: "A batch of two rows, six positions each. Row 0 packs document A and the start of document B into one row; row 1 holds document C and is padded at the end.", math: "input_ids: shape 2 × 6" },
+      { say: "Every position predicts the next token. The targets are the inputs shifted left by one.", math: "target at position t = input at position t + 1" },
+      { say: "Some positions get no target: the last position of each row, positions followed by padding, and A's last token, which would otherwise be asked to predict B's <bos>. Seven of the twelve positions remain.", math: "N = 4 targets in row 0 + 3 in row 1 = 7" },
+      { say: "Now the attention pattern of row 0. With only a causal mask, each position may look at itself and every earlier position, including the other document.", math: "row t may attend to columns s ≤ t" },
+      { say: "Add the document mask: B's two positions can no longer see document A. Same tokens, but B's predictions no longer depend on an unrelated document.", math: "row t may attend to s ≤ t in the same document" },
+      { say: "The loss averages the seven per-token losses, each with weight 1/7: every target token counts the same.", math: "token mean = (1.293 + 2.084 + 2.340 + 2.393 + 2.393 + 1.878 + 2.316) / 7 = 2.0994" },
+      { say: "Averaging inside each row first gives row 0's four tokens weight 1/8 and row 1's three tokens weight 1/6: shorter rows count more. It is a different objective.", math: "mean of row means = (2.0274 + 2.1955) / 2 = 2.1114" },
+    ];
+    function draw(k: number) {
+      let s = "";
+      // Token rows.
+      ROWS.forEach((row, r) => {
+        s += txt(X(0), ROW_Y(r) - 10, `row ${r}`, `font-size="11" fill="${MUTED}"`);
+        row.forEach((tok, t) => {
+          const ignored = k >= 2 && TGT[r][t] === null;
+          s += `<rect x="${X(t)}" y="${ROW_Y(r)}" width="56" height="30" rx="5" fill="${FILL[DOC[r][t]]}" stroke="${INK}" stroke-opacity="0.35"/>` + txt(X(t) + 28, ROW_Y(r) + 19, tok, `font-size="11.5" font-weight="700" text-anchor="middle" fill="${INK}"`);
+          if (k >= 1) {
+            const tgt = k === 1 ? (row[t + 1] ?? "?") : (TGT[r][t] ?? "—");
+            s += arrow(X(t) + 28, ROW_Y(r) + 32, X(t) + 28, ROW_Y(r) + 44, ignored ? "#C8CFCE" : MUTED, 1.2);
+            s += `<rect x="${X(t)}" y="${ROW_Y(r) + 46}" width="56" height="26" rx="5" fill="${ignored ? "#fff" : "#fff"}" stroke="${ignored ? "#D9DEDD" : JADE}" stroke-dasharray="${ignored ? "3 3" : ""}"/>` + txt(X(t) + 28, ROW_Y(r) + 63, tgt, `font-size="11" text-anchor="middle" fill="${ignored ? "#B9C0BF" : INK}"`);
+            if (ignored && WHY[r][t]) s += txt(X(t) + 28, ROW_Y(r) + 84, WHY[r][t], `font-size="9" text-anchor="middle" fill="${NEG}"`);
+          }
+          if (k >= 5 && LOSS[r][t] !== null) {
+            const w = k === 5 ? "1/7" : r === 0 ? "1/8" : "1/6";
+            s += txt(X(t) + 28, ROW_Y(r) + 84, `${LOSS[r][t]!.toFixed(3)} × ${w}`, `font-size="9.5" text-anchor="middle" fill="${k === 6 && r === 1 ? GOLD : JADE}" font-weight="700"`);
+          }
+        });
+      });
+      if (k >= 2) s += txt(X(0), 306, k >= 5 ? (k === 5 ? "token mean: 2.0994" : "mean of row means: 2.1114") : "7 of 12 positions are targets", `font-size="12.5" font-weight="700" fill="${INK}"`);
+      // Attention matrix for row 0.
+      if (k >= 3) {
+        const L = 438, T0 = 34, C = 26;
+        s += txt(L, T0 - 10, k >= 4 ? "row 0 attention, causal + document mask" : "row 0 attention, causal mask only", `font-size="11" font-weight="700" fill="${INK}"`);
+        for (let t = 0; t < 6; t++) {
+          s += txt(L - 6, T0 + 18 + t * C + 6, ROWS[0][t], `font-size="9" text-anchor="end" fill="${MUTED}"`);
+          s += txt(L + 13 + t * C, T0 + 14 + 6 * C + 8, ROWS[0][t].replace(/[<>]/g, ""), `font-size="8.5" text-anchor="middle" fill="${MUTED}"`);
+          for (let c = 0; c < 6; c++) {
+            const causal = c <= t, same = DOC[0][c] === DOC[0][t];
+            const on = causal && (k < 4 || same), cut = k >= 4 && causal && !same;
+            s += `<rect x="${L + c * C}" y="${T0 + 4 + t * C}" width="${C - 2}" height="${C - 2}" rx="3" fill="${on ? (DOC[0][t] === "B" ? GOLD : JADE) : cut ? "#F6DCD5" : "#F3F5F5"}" fill-opacity="${on ? 0.75 : 1}"/>`;
+            if (cut) s += txt(L + c * C + 12, T0 + 4 + t * C + 16, "×", `font-size="12" text-anchor="middle" fill="${NEG}"`);
+          }
+        }
+        s += txt(L, T0 + 14 + 6 * C + 30, "rows: the position looking · columns: what it may see", `font-size="9.5" fill="${MUTED}"`);
+      }
+      $("[data-draw]").innerHTML = s;
+    }
+    stepper(root, steps, draw, { delay: 2.6 });
+  });
+</script>

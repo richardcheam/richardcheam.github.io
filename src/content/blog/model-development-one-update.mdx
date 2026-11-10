@@ -17,6 +17,8 @@ evidence_limit: "The toy model has one trained matrix and a parameter-free atten
 lesson: "A training update is a chain of conventions: which positions are targets, which positions may see each other, how per-token losses are weighted, and how the optimizer turns gradients into steps. Every one of them is part of the objective, so write each down before you scale anything."
 ---
 
+import BatchToTargets from "../../components/figures/BatchToTargets.astro";
+
 When people talk about training a large language model, the exciting parts seem to be elsewhere: the trillions of tokens, the architecture, the thousands of GPUs. But all of that machinery serves one small operation, repeated a few hundred thousand times: take a batch of tokens, measure how wrong the model's predictions are, and nudge the weights. Everything else, from data cleaning to distributed training to fine-tuning, is about feeding that operation or running it faster **without changing what it means**.
 
 So in this post we follow one update from start to finish, on a batch small enough to check by hand. On the way we will meet several quiet conventions that decide what the model actually learns: which positions count as targets, which positions may see each other, how the loss is averaged, and how AdamW turns a gradient into a step. Get any of them wrong and training still runs. It just optimizes something you did not intend.
@@ -100,6 +102,11 @@ Position IDs follow the same logic. Under document masking, position IDs usually
   <summary>Check: row 1 is padded at the end. Why does the padding never affect the non-padded positions' hidden states, even without the "not padding" rule?</summary>
   <p>Because of the causal rule. Padding sits after every real token, so no real position satisfies $s \le t$ for a padded $s$. The "not padding" rule matters for <em>left</em> padding, used when generating from a batch of prompts of different lengths: there the padding comes first and would be visible to every real token.</p>
 </details>
+
+<figure class="blog-figure blog-figure--wide">
+  <BatchToTargets alt="Two rows of six token tiles. Step by step, next-token targets appear under each tile, ignored positions grey out with their reason, a six-by-six grid shows row 0's attention first under a causal mask and then with document B cut off from document A, and finally each target's loss is shown with its averaging weight." />
+  <figcaption><strong>From a batch to targets and masks.</strong> Step through the shift, the ignored positions, the two attention masks for the packed row, and how token-mean and row-mean averaging weight the same seven losses.</figcaption>
+</figure>
 
 ## The loss and its normalization
 
