@@ -1,0 +1,124 @@
+---
+title: "FineWeb: what each stage of a web-data pipeline is worth, and how the paper measures it"
+title_key: "FineWeb"
+published: true
+date: 2026-11-10
+question: "Which processing choices turn Common Crawl into good pre-training data, and how strong is the evidence for each one?"
+excerpt: "FineWeb builds a 15-trillion-token English web corpus by ablating every stage: text extraction, language and heuristic filters, MinHash deduplication and an educational-quality classifier. Its most instructive finding is negative: in its experiments, deduplicating across all crawls barely helped, and in an old crawl the documents that survived were worse than those removed."
+type: paper
+topic: [training, evaluation]
+tags: [Pre-training data, Deduplication, MinHash, Data filtering, Common Crawl, Hugging Face]
+org: "Hugging Face"
+authors: "Guilherme Penedo, Hynek Kydlíček, Loubna Ben Allal, Anton Lozhkov, Margaret Mitchell, Colin Raffel, Leandro Von Werra, Thomas Wolf"
+source_url: "https://arxiv.org/abs/2406.17557v2"
+source_label: "Read FineWeb (v2)"
+source_date: 2024-10-31
+read_time: "14 min"
+featured: false
+math: true
+tldr:
+  - "**What it builds:** FineWeb, 15 trillion tokens from 96 Common Crawl snapshots, and FineWeb-Edu, a 1.3-trillion-token educational subset, with the processing code and every ablation model released (Abstract, p. 1)."
+  - "**The method:** every stage is chosen by training identical 1.71B-parameter models on data processed two ways and comparing a fixed benchmark average (Sec 3.1, p. 3)."
+  - "**The decisive result:** MinHash deduplication across all snapshots barely helped, and in an old snapshot the 10% it kept trained a worse model than the 90% it removed; deduplicating each snapshot separately matched RefinedWeb (Sec 3.4, pp. 5–6; Figs 3–5)."
+  - "**My reading:** the pipeline is well evidenced at one small model scale and one benchmark suite. FineWeb-Edu's gains come from a classifier aimed at school-level knowledge and are measured on school-level benchmarks, so treat it as a targeted mixture, not a universally better corpus."
+links:
+  - label: "Model development series"
+    url: "/blog/?series=model-development#blog-filters"
+  - label: "Post: building a pre-training corpus"
+    url: "/blog/model-development-pretraining-corpus/"
+---
+
+## The problem and what came before
+
+Every open web dataset before FineWeb started from the same raw material, Common Crawl, and ended in a different place, because each made different choices about extraction, filtering and deduplication (Sec 2, pp. 2–3). C4 kept only lines ending in terminal punctuation and deduplicated three-line windows. RefinedWeb extracted text with trafilatura, applied Gopher-style heuristics and ran both fuzzy and exact deduplication. Dolma used Bloom filters at URL, document and paragraph level. Meanwhile the strongest open-weight models, such as Llama 3 and Mixtral, did not release their data or say much about how it was made (Abstract and Sec 1, p. 1).
+
+The difficulty is not knowing the possible stages; it is knowing which settings help. Removing too little leaves boilerplate and spam; removing too much leaves too few tokens for a single pass of pre-training (Sec 2, p. 2). FineWeb's contribution is to treat every choice as an experiment and publish the experiments.
+
+## The method: one pipeline, every stage ablated
+
+The experimental unit is a **data ablation** (Sec 3.1, p. 3). For each pair of choices, train two identical models that differ only in their data:
+
+- a 1.71-billion-parameter Llama-architecture model, 24 layers, GPT-2 tokenizer, sequence length 2,048, about 2 million tokens per batch (Sec 3.1, p. 3; App. D, pp. 20–21);
+- 28 billion training tokens for filtering experiments, 350 billion for deduplication and for confirming cumulative gains;
+- two runs per variant, on different random subsets with different seeds, averaged;
+- an aggregate of CommonSense QA, HellaSwag, OpenBook QA, PIQA, SIQA, WinoGrande, ARC and MMLU, chosen because they showed low variance between seeds, near-monotonic improvement over training and above-chance scores at this scale (Sec 3.1, pp. 3–4).
+
+In total the authors trained over 70 models, about 80,000 H100 GPU hours (Sec 3.1, p. 3). Each section's baseline includes only the decisions made before it, so the pipeline is built greedily, one stage at a time.
+
+The resulting pipeline (Sec 3.7, p. 7; App. A, p. 18):
+
+1. **Extract** text from raw WARC files with trafilatura rather than using Common Crawl's WET text (Sec 3.2, p. 4).
+2. **Base filtering:** a URL blocklist for adult content, a fastText language classifier keeping English with score at least 0.65, and the Gopher (MassiveText) quality and repetition filters at their original thresholds. Applied to 96 snapshots, this leaves about 36 trillion tokens (Sec 3.3, p. 4).
+3. **MinHash deduplication** within each snapshot: 5-gram shingles, 112 hash functions in 14 buckets of 8, transitive clustering, one document kept per cluster. This leaves 20 trillion tokens (Sec 3.4, pp. 5–6).
+4. **C4 filters** except the terminal-punctuation rule (Sec 3.5, p. 6).
+5. **Three new heuristic filters** (Sec 3.6, p. 7), then **PII anonymization** of email and public IP addresses (Sec 3.7, p. 7), giving 15 trillion tokens.
+
+The deduplication settings come with an explicit match probability. A pair of documents whose shingle sets have Jaccard similarity $s$ is matched with probability
+
+$$
+P(\text{matched}) = 1 - \left(1 - s^{8}\right)^{14},
+$$
+
+because one minhash agrees with probability $s$ (under a random ordering of shingles, two documents share their first shingle exactly when that shingle is one they have in common), a bucket of 8 agrees with probability $s^8$, and the pair is missed only if all 14 buckets fail (App. E.1, p. 21). This gives 56%, 77%, 92% and 98.8% at $s$ = 0.7, 0.75, 0.8 and 0.85. RefinedWeb's 450 buckets of 20 give a sharper cut-off at far higher cost (App. E.1, pp. 21–22; Fig. 13). The estimate goes back to Broder (1997); Stanford CS336's [lecture 14](https://cs336.stanford.edu/) develops it with locality-sensitive hashing.
+
+The new heuristic filters are derived from data rather than intuition (Sec 3.6, p. 7). The authors computed over 50 document statistics on a higher- and a lower-quality version of the 2013-48 snapshot, chose thresholds where the lower-quality version dominated the histogram (Fig. 8), giving 16 candidates, and ablated each one (App. E.4, p. 24). Three survived: remove documents where the fraction of lines ending in punctuation is at most 0.12, where characters in duplicated lines make up a large fraction, or where at least 0.67 of lines are shorter than 30 characters. Together they removed about 22% of tokens and raised the aggregate score by about 1% (Sec 3.6, p. 7).
+
+## The decisive experiment: what global deduplication kept
+
+The paper's most instructive result is a failure. The first attempt deduplicated **globally**, across all 96 snapshots, processing the newest snapshot first. In the oldest snapshots this removed up to 90% of the data; the corpus shrank to 4 trillion tokens, and a model trained on 350 billion tokens of it was barely better than one trained without deduplication, far behind RefinedWeb (Sec 3.4, p. 5; Fig. 3).
+
+The follow-up is well designed. Instead of arguing about why, the authors split one old snapshot, 2013-48, into what global deduplication had **kept** (about 31 billion tokens) and what it had **removed** (about 460 billion tokens, deduplicated on their own to 171 billion), and trained the same 1.71B model on each for the same number of tokens (Sec 3.4, p. 5; Fig. 4). The removed data trained the better model, and inspection agreed: the kept data had more ads, keyword lists and badly formatted text. The [corpus post](/blog/model-development-pretraining-corpus/) illustrates the mechanism with a toy.
+
+What this establishes is specific. In Common Crawl, at these settings and this scale, the documents that appear in only one old snapshot were on average worse than those repeated in later ones. It does not establish that repeated documents are good in general: templated pages and boilerplate are repeated too, which is why within-snapshot deduplication still helps. The authors' explanation is offered as a hypothesis: most of the benefit comes from removing very large clusters, with hundreds of thousands of copies, while removing small clusters of fewer than about 100 copies, roughly one per crawl, can hurt (Sec 3.4, pp. 5–6). The experiments are consistent with this but do not test it directly, for example by deduplicating only clusters above a size threshold.
+
+Deduplicating each snapshot independently, with the same parameters, left 20 trillion tokens and matched RefinedWeb (Sec 3.4, pp. 5–6; Fig. 5). Four lighter global methods applied on top, deduplicating by URL, by line, by line with a minimum length, and by three-line spans, each removed between 71% and 85% of tokens and each made results worse (App. E.3, p. 23; Fig. 15). Appendix E.2 adds a caution about measurement: in a simulated corpus where every document is repeated 100 times, a 1-billion-token sample contains almost no repeats, so small ablations cannot see deduplication effects (pp. 22–23). The authors therefore judged deduplication at 350 billion tokens.
+
+## The experiments and what they show
+
+| Stage | Comparison | Training tokens | Reported effect | Where |
+|---|---|---|---|---|
+| Extraction | trafilatura on WARC against WET text | 28B | WARC extraction clearly better | Sec 3.2, p. 4; Fig. 1 |
+| Base filtering | filtered against unfiltered WARC text | 28B | significant uplift | Sec 3.3, p. 4; Fig. 2 |
+| Deduplication | global, per-snapshot, none | 350B | per-snapshot matches RefinedWeb; global barely helps | Sec 3.4, pp. 5–6; Figs 3, 5 |
+| C4 filters | each C4 rule on the 2019-18 snapshot | 28B | terminal punctuation best alone but removes ~30% of tokens; all other rules together remove ~7% and do better | Sec 3.5, p. 6; Fig. 6 |
+| New heuristics | 16 candidates, 3 kept | 28B | ~22% of tokens removed, aggregate up ~1% | Sec 3.6, p. 7; Fig. 7; Table 2, p. 24 |
+| Cumulative | each stage added in turn | 350B | each stage improves the aggregate | Sec 3.7, p. 8; Fig. 9 |
+| Against other datasets | 350B tokens sampled from each | 350B | FineWeb strong; FineWeb-Edu best on the aggregate | Sec 3.7, p. 8; Fig. 10 |
+
+**FineWeb-Edu** (Sec 4, pp. 8–9) applies a learned filter on top. Llama-3-70B-Instruct scored 460,000 pages from one snapshot for educational value on an additive 0–5 scale, with a prompt aimed at primary- to grade-school material (App. F.1, p. 25). A linear regression head on frozen Snowflake-arctic-embed-m embeddings was trained on 410,000 of those scores and validated on 50,000, reaching 82% F1 against the Llama labels at threshold 3. Keeping documents scoring at least 3 gives 1.3 trillion tokens. Scoring all of FineWeb cost 6,000 H100 hours. In the 350-billion-token ablation, MMLU rises from 33% to 37% and ARC from 46% to 57% relative to FineWeb, and FineWeb-Edu reaches Matrix's final MMLU accuracy with almost ten times fewer tokens (Sec 4, p. 9; Fig. 11). Threshold 3 was chosen as the best trade-off between knowledge benchmarks and HellaSwag (Sec 4, p. 8; App. F.2, p. 25).
+
+The analyses after that show what the filter costs. FineWeb-Edu shifts topics towards education and history and away from business, entertainment and travel (Sec 4.1, p. 9). On Paloma's domains, FineWeb models fit broad web and social-media text better, while FineWeb-Edu models fit Wikipedia, academic and programming text better (Sec 4.2, p. 9; Fig. 12).
+
+## What the evidence supports, confounds and leaves open
+
+**Well supported.** Custom extraction beats WET text; DCLM independently finds the same, with resiliparse and trafilatura scoring 24.1 and 24.5 on its core metric against 20.7 for WET files ([DCLM](https://arxiv.org/abs/2406.11794), Sec 4.2, Table 3, p. 8). Per-snapshot deduplication beats global deduplication in this setting, and the 2013-48 experiment explains why with data rather than assertion.
+
+**Confounded or narrow.**
+
+- **One model scale.** Every ablation uses a 1.71B model and at most 350 billion tokens. The authors name this limitation themselves (Sec 6, p. 10). Rankings of datasets can change with scale.
+- **Small differences, two seeds.** Several decisions rest on aggregate differences of about one percentage point, from two runs each, without reported confidence intervals.
+- **Benchmarks selected for signal.** Choosing tasks that respond at small scale is sensible for ablations, but it also defines "quality" as what improves those tasks.
+- **FineWeb-Edu is aligned with its evaluation.** A classifier asked to find grade-school educational content improves MMLU and ARC, school-style knowledge benchmarks. That is a real effect and a targeted one: the threshold was set to limit losses on HellaSwag, and FineWeb-Edu models fit broad web text worse than FineWeb models (Sec 4.2, p. 9).
+- **One training budget per comparison.** Every comparison holds training tokens fixed, at 28 or 350 billion. Aggressive filters look best at small budgets because nothing has to be repeated. FineWeb-Edu's 1.3 trillion tokens cover a 350-billion-token run without repetition, but a run of several trillion tokens would pass over it several times, and the paper does not test whether its advantage survives that. Scaling Data-Constrained Language Models found up to about 4 epochs almost as good as fresh data for its models and data, with rapidly diminishing returns after that, which is a reason to test rather than a limit to assume ([Muennighoff et al., 2023](https://arxiv.org/abs/2305.16264), abstract).
+- **Unequal dataset sizes.** The comparison samples 350 billion tokens from each dataset (Sec 3.7, p. 8), but C4 has 172 billion and CC-100 70 billion, so they must be repeated to reach that budget. The paper does not say how this was handled, and repetition itself affects results.
+- **Threshold derivation.** The heuristic thresholds were found by contrasting two versions of the 2013-48 snapshot that differ by how they were deduplicated; the selected filters were then tested on a different snapshot, 2019-18, which limits but does not remove the risk of learning that particular contrast.
+
+**Left open.** The cluster-size hypothesis is untested directly. The paper does not describe removing benchmark text from the corpus, and it intentionally skips decontamination in its Paloma analysis (Sec 4.2, p. 9). PII handling covers only email and public IP addresses (App. A, p. 18). The datasheet warns that filtering probably made code rare (App. A, p. 19).
+
+A careful reader should also note three places where the paper and the released code differ:
+
+- The text gives the duplicated-line threshold as 0.1, while Table 2 and datatrove's `FineWebQualityFilter` use 0.01 (Sec 3.6, p. 7; Table 2, p. 24).
+- Table 2 lists the short-line threshold that removes 3.73% of tokens as 0.69, while the text and the code use 0.67.
+- The ablations add the C4 and new filters after deduplication, but the released `examples/fineweb.py` applies all filters before MinHash, as the datasheet lists them (App. A, p. 18).
+
+The current datatrove filter also has a fourth rule, newlines per word above 0.3, that the paper does not mention. None of this changes the conclusions, but anyone reproducing the dataset should follow the code and record its version.
+
+## How it changes training decisions
+
+- **Extract from raw HTML** with a precision-oriented extractor, and budget for it: it is the stage most expensive to redo.
+- **Choose filter strictness for the training budget.** Compute how many passes over the filtered data the planned run implies, and re-test a strict filter at a budget close to the real one.
+- **Deduplicate within a crawl or source first.** Before deduplicating across sources or time, check what the removed and kept parts each train; FineWeb's 2013-48 experiment is a template for that check.
+- **Evaluate deduplication at scale.** Small training samples hide repetition (App. E.2, pp. 22–23), so a 28-billion-token ablation can miss a deduplication effect that matters at trillions.
+- **Derive heuristic thresholds from distributions, then ablate them,** and read samples of what each filter removes per domain and language.
+- **Treat a quality classifier as a choice of target.** Decide which capabilities and domains the model needs, choose the labeller and threshold for that, and evaluate coverage of what the filter removes, not only benchmark gains.
+- **Add what FineWeb leaves out** when your use needs it: benchmark decontamination, broader PII detection, and per-language filtering for multilingual data.
