@@ -1,0 +1,130 @@
+---
+title: "Tokenization: what a tokenizer decides before training starts"
+date: 2026-11-11
+category: deep-learning
+read_time: "16 min"
+series_order: 4
+series: model-development
+featured: false
+published: true
+excerpt: "The tokenizer is trained before the model and fixed after it, and it quietly decides how much every sentence costs. Follow text through a real tokenizer, compare BPE with Unigram, measure what the same 1,012 sentences cost in English and Khmer under three tokenizers, and see what goes wrong when tokenizers and text disagree."
+question: "How does text become token IDs, and what does the tokenizer cost in compute, context and multilingual coverage?"
+my_work: "A concept post that builds on the Foundations BPE walkthrough; token counts measured on FLORES-200 devtest with the GPT-2, XLM-R and Qwen2.5 tokenizers in Transformers 4.51.3; Unigram checked against Kudo (2018)."
+result: "On the same 1,012 sentences, Khmer costs 15.2 times as many tokens as English under GPT-2, 6.5 under Qwen2.5 and 1.6 under XLM-R; normalization can change the text itself; a large vocabulary costs parameters."
+evidence_limit: "Token counts are for one parallel corpus and three tokenizers; premiums vary with domain and tokenizer version."
+lesson: "A tokenizer fixes the price of every language and every kind of text. Measure tokens per unit of content in the languages you care about before choosing or training one."
+---
+
+Before a single weight is trained, a decision has already been made about every piece of text the model will ever see: how it is cut into tokens. The [Foundations post on language models](/blog/foundations-language-models/#cutting-text-into-tokens) shows how byte-pair encoding learns its pieces, merge by merge. This post picks up from there and asks what that decision costs.
+
+The answer matters more than it first appears. The model computes per token, its context window is measured in tokens, the training budget from the [previous post](/blog/model-development-data-mixtures/) is counted in tokens, and API prices are charged per token. A tokenizer that needs three times as many tokens for one language as another makes that language three times as expensive in every one of those ways.
+
+## What a tokenizer does
+
+A tokenizer has two jobs: **encode** a string into a list of integers, and **decode** the integers back into the string. Encoding happens in up to four steps:
+
+1. **Normalize** the text: for example, apply a Unicode normalization form, or replace unusual spaces.
+2. **Pre-tokenize**: split the text into chunks that merges may not cross, typically words with their leading space, numbers and punctuation. GPT-2's tokenizer does this with a regular expression, which is why " world" with its space is a single token.
+3. **Apply the model**, BPE or Unigram, inside each chunk.
+4. **Add special tokens**: markers such as end-of-text, or the role markers of a chat template, which never come from ordinary text.
+
+Most of the choices that matter later hide in steps 1, 2 and 4, not in the merge algorithm.
+
+Two cases of step 3 deserve care. **Byte-level** tokenizers (GPT-2, Qwen2.5) start from the 256 possible bytes, so every string can be encoded and decoded exactly. **Byte fallback** gives a character-level or subword tokenizer a way out: a character missing from the vocabulary is spelled with byte tokens instead of an unknown token. LLaMA, for example, used SentencePiece BPE with byte fallback, and split all numbers into individual digits ([LLaMA](https://arxiv.org/abs/2302.13971), §2).
+
+## BPE and Unigram
+
+BPE builds a vocabulary **upwards**: start from characters or bytes and repeatedly add the most frequent adjacent pair. Encoding replays the learned merges in order.
+
+**Unigram**, the other algorithm in the SentencePiece library, works **downwards** ([Kudo, 2018](https://arxiv.org/abs/1804.10959), §3.2):
+
+1. Start from a large seed vocabulary of candidate pieces.
+2. Give each piece a probability, fitted so that the training text is as likely as possible when each sentence is a sequence of independently chosen pieces.
+3. Remove the pieces whose removal costs the least likelihood (keeping the top 80%, for example, and always keeping single characters), and repeat until the vocabulary has the target size.
+
+To encode, Unigram picks the segmentation with the highest product of piece probabilities. With illustrative probabilities `un` 0.1, `happy` 0.05, `unh` 0.01 and `appy` 0.02, the word "unhappy" could be `un + happy`, with probability $0.1 \times 0.05 = 0.005$, or `unh + appy`, with probability $0.01 \times 0.02 = 0.0002$, so `un + happy` wins. Real implementations find the best segmentation efficiently with the Viterbi algorithm rather than listing every split. Because Unigram has probabilities, it can also sample alternative segmentations during training, a regularization trick BPE does not offer directly.
+
+In practice both work well. The consequential decisions are the training data, the vocabulary size and the normalization, not the algorithm.
+
+## What the same text costs
+
+Tokenizers are usually compared by **compression**, bytes or characters per token, and across languages by the **premium**: how many tokens a language needs relative to English for the same content ([Petrov et al., 2023](https://arxiv.org/abs/2305.15425), §3). The fair way to measure it is on a parallel corpus, where every sentence has the same meaning in every language. FLORES-200 provides one. Here are the 1,012 sentences of its devtest set under three tokenizers:
+
+| Language | GPT-2 (50k vocabulary) | XLM-R (250k) | Qwen2.5 (152k) |
+|---|---|---|---|
+| English | 27,044 tokens | 30,661 | 27,621 |
+| French | ×2.0 | ×1.3 | ×1.6 |
+| Chinese | ×3.1 | ×1.0 | ×1.0 |
+| Hindi | ×7.4 | ×1.2 | ×4.4 |
+| Khmer | **×15.2** | ×1.6 | **×6.5** |
+
+Premiums are relative to English under the same tokenizer.
+
+GPT-2's tokenizer was trained mostly on English web text, so Khmer has almost no merges and falls back to about one token per byte: 1.06 bytes per token, where every Khmer character takes 3 bytes. Qwen2.5 was built for a multilingual model and does much better, yet still needs 6.5 times as many tokens for Khmer as for English. XLM-R, whose tokenizer was trained on text in 100 languages (Conneau et al., 2020), comes closest to parity. Petrov et al. found differences of up to 15 times across languages and tokenizers, including tokenizers trained for multilingual use.
+
+These numbers are costs, three times over:
+
+- **Compute.** The model does work per token, so a Khmer sentence costs about 15 times as much to process as its English translation under GPT-2's tokenizer.
+- **Context.** A fixed window holds less content in a high-premium language.
+- **Learning.** Under a fixed token budget, a high-premium language gets less content into training, and each piece of it is split into less meaningful units.
+
+**Try it: predict context capacity.** On average an English FLORES sentence is 26.7 GPT-2 tokens. How many sentences fit in an 8,192-token context window in English? In Khmer under GPT-2, where the same content takes 15.2 times as many tokens? And under Qwen2.5, at 176.6 tokens per Khmer sentence?
+
+**Answer.** English: 8,192 / 26.7 ≈ **307** sentences. Khmer under GPT-2: each sentence is about 406 tokens, so about **20** sentences. Under Qwen2.5: 8,192 / 176.6 ≈ **46**. The same window carries fifteen times less Khmer content under the English-centred tokenizer, and nearly seven times less even under a multilingual one. A retrieval system that fills the context with documents, or a summarizer of long reports, inherits this directly.
+
+## Vocabulary size
+
+A bigger vocabulary means fewer tokens per sentence, but every entry needs a row in the embedding matrix and in the output layer: $V \times d$ parameters each, for vocabulary size $V$ and model width $d$. At width 4,096, a 32,000-entry vocabulary costs 131 million parameters per matrix and a 128,000-entry one 524 million.
+
+For small models this is a large share. Qwen2.5-0.5B has a vocabulary of 151,936 rows at width 896, so its embedding matrix holds 136 million parameters, about 28% of the model's 494 million (the output layer reuses the same matrix). A bigger vocabulary also makes the output softmax more expensive and spreads training data over more rows, so rare tokens are seen less often. Choosing a vocabulary trades sequence length against parameters, compute in the output layer and how well each row is trained.
+
+## When text and tokenizer disagree
+
+Decoding should give back the original string. Checking that on the FLORES sentences turned up three ways it can fail, all from normalization:
+
+- **Qwen2.5 applies Unicode NFC.** A Hindi letter stored as one precomposed code point (U+095B) came back as two (U+091C U+093C). It looks identical and means the same, but the bytes differ.
+- **XLM-R's SentencePiece normalization** turned French non-breaking spaces into ordinary spaces.
+- **XLM-R also turned the zero-width spaces** that Khmer text uses between words into visible spaces.
+
+GPT-2's byte-level tokenizer has no normalizer and round-tripped every sentence exactly. Normalization is often what you want, merging look-alike forms so they share tokens, but it means the text the model sees is not the text you wrote. That matters for anything that compares strings: exact-match evaluation, citation of source spans, code, and invisible characters like those in [Khmer text](/blog/khmer-script-for-tts/#no-spaces-between-words).
+
+Other consequential failures:
+
+- **A mismatched tokenizer.** A model works only with the tokenizer it was trained with. A different one, even a different version, maps text to IDs whose embeddings mean something else, and the output is fluent nonsense or worse.
+- **Token counts in the wrong tokenizer.** Budgets, mixture sizes and context limits are in the model's own tokens; counts from another tokenizer can be off by a large factor, especially outside English.
+- **New special tokens.** Adding tokens, for example for a chat template, adds embedding rows that start untrained. The [fine-tuning post](/blog/model-development-supervised-fine-tuning/) shows how templates use them.
+
+Everyday picture: a tokenizer is like a postage scale with different rates per alphabet. The letter says the same thing in every language, but some senders pay several times more to post it, and the box it has to fit into, the context window, is the same size for everyone.
+
+
+## What to remember
+
+- A tokenizer normalizes, pre-tokenizes, applies BPE or Unigram, and adds special tokens; most consequential choices are in normalization, pre-tokenization and special tokens.
+- BPE grows a vocabulary by merging frequent pairs; Unigram prunes a large one by likelihood and encodes with the most probable segmentation.
+- Measure cost on parallel text: on FLORES-200, Khmer needs 15.2 times as many tokens as English under GPT-2, 6.5 under Qwen2.5 and 1.6 under XLM-R.
+- Every token costs compute, context and training budget, so a tokenizer premium is a price paid three times.
+- A bigger vocabulary shortens sequences but costs $V \times d$ parameters per matrix: 28% of Qwen2.5-0.5B.
+- Normalization can change the text itself; check that encode and decode round-trip on your data.
+
+
+## Try it yourself
+
+- **Bytes per token.** A tokenizer produces 410,586 tokens for 435,162 bytes of text. That is about **1.06 bytes per token**: essentially one token per byte, so the tokenizer has learned almost no pieces for this text.
+- **Unigram.** With `a` 0.2, `b` 0.2 and `ab` 0.05, is "ab" encoded as `ab` or as `a + b`? $0.2 \times 0.2 = 0.04 < 0.05$, so it is **`ab`**: a single piece wins whenever its probability beats the product of the parts.
+- **Vocabulary cost.** Doubling a 64,000-entry vocabulary at width 2,048 adds $64{,}000 \times 2{,}048 \approx$ **131 million** parameters to each untied matrix: the embedding and, if separate, the output layer.
+
+
+## Sources
+
+- T. Kudo (2018). "Subword Regularization: Improving Neural Network Translation Models with Multiple Subword Candidates." ACL 2018. arXiv:1804.10959.
+- T. Kudo and J. Richardson (2018). "SentencePiece: A simple and language independent subword tokenizer and detokenizer for Neural Text Processing." EMNLP 2018. arXiv:1808.06226.
+- A. Petrov, E. La Malfa, P. H. S. Torr and A. Bibi (2023). "Language Model Tokenizers Introduce Unfairness Between Languages." NeurIPS 2023. arXiv:2305.15425.
+- H. Touvron et al. (2023). "LLaMA: Open and Efficient Foundation Language Models." arXiv:2302.13971.
+- A. Conneau, K. Khandelwal, N. Goyal, V. Chaudhary, G. Wenzek, F. Guzmán, E. Grave, M. Ott, L. Zettlemoyer and V. Stoyanov (2020). "Unsupervised Cross-lingual Representation Learning at Scale." ACL 2020. arXiv:1911.02116.
+- NLLB Team (2022). FLORES-200 evaluation benchmark, devtest split.
+
+
+## Further reading
+
+- Stanford CS336, [lecture 1](https://cs336.stanford.edu/): character, byte, word and BPE tokenizers built from scratch, with compression ratios.
+- R. Sennrich, B. Haddow and A. Birch (2016). "Neural Machine Translation of Rare Words with Subword Units." ACL 2016.

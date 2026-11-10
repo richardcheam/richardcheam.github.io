@@ -1,0 +1,129 @@
+---
+title: "Data mixtures and repetition: deciding how often the model sees each source"
+date: 2026-11-11
+category: deep-learning
+read_time: "14 min"
+series_order: 3
+series: model-development
+featured: false
+published: true
+excerpt: "A training corpus is not one dataset but several, and the sampling weights decide how many times the model sees each one. Turn weights into token exposure, see how temperature sampling and epoch caps protect small sources, and learn what is and is not known about repeating data."
+question: "How do sampling weights decide how often each source is seen, and when is repeating data acceptable?"
+my_work: "A concept post with small worked examples; temperature sampling and UniMax checked against the UniMax paper, repetition results against Muennighoff et al. (2023), annealing against Llama 3."
+result: "Exposure is weight times budget divided by source size; flattening the weights protects small sources but repeats them; how much repetition is acceptable is an empirical question with useful published priors."
+evidence_limit: "Worked examples use illustrative source sizes; published findings hold in their stated settings."
+lesson: "Sampling weights are part of the objective: they decide how many times each kind of text is trained on. Compute exposure before training, and measure, not assume, what repetition costs."
+---
+
+The [previous post](/blog/model-development-pretraining-corpus/) built one corpus from the web. Real pre-training draws from several: filtered web text, code, books, papers, mathematics, and text in many languages. They differ enormously in size. There is far more web text than mathematics, and far more English than Khmer. So a second decision sits on top of corpus construction: **how often should the model see each source?**
+
+That decision is made with **sampling weights**, and it is easy to underestimate. The weights decide which kinds of text dominate the loss, and, because small sources run out, how many times some text is repeated. This post turns weights into exposure, shows the standard ways of setting them, and separates what is known about repetition from what has to be measured.
+
+## From weights to exposure
+
+Suppose you will train on a budget of $B$ tokens, and source $s$ contains $n_s$ tokens and is sampled with weight $w_s$, where the weights sum to 1. Then
+
+$$
+\text{tokens seen from } s = w_s B, \qquad \text{passes over } s = \frac{w_s B}{n_s}.
+$$
+
+- $B$: the total number of training tokens.
+- $n_s$: the size of source $s$, in tokens of your tokenizer.
+- $w_s$: the fraction of training tokens drawn from $s$.
+
+Take three illustrative sources and a budget of 100 billion tokens:
+
+| Source | Size | Weight | Tokens seen | Passes |
+|---|---|---|---|---|
+| Web | 400B | 70% | 70B | 0.175 |
+| Code | 50B | 20% | 20B | 0.4 |
+| Books | 5B | 10% | 10B | **2** |
+
+The web is barely sampled, under a fifth of it is ever seen, while the books are read twice. Nothing in the weights says "repeat the books": it follows from asking a small source for a tenth of a large budget. Exposure is the product of three numbers, and changing any one of them, the weight, the budget or the source size, changes it.
+
+The same arithmetic explains why sizes must be counted in the tokens of the tokenizer you will train with: the same text can be 1 billion tokens under one tokenizer and 3 billion under another, especially across languages. That is the subject of the [next post](/blog/model-development-tokenization/).
+
+## Three ways to set weights
+
+**Proportional sampling** sets each weight to the source's share of all tokens, $w_s = n_s / \sum_k n_k$. Every source is then seen the same number of times, here $100 / 455 \approx 0.22$ passes each. It is the natural default, and it gives small sources almost no weight: the books get about 1% of training.
+
+**Uniform sampling** gives every source the same weight. It treats sources as equally important, and it repeats small ones heavily.
+
+**Temperature sampling** interpolates. Raise each proportional share $p_s$ to the power $1/\tau$ and renormalize:
+
+$$
+w_s = \frac{p_s^{1/\tau}}{\sum_k p_k^{1/\tau}} .
+$$
+
+- $\tau = 1$ gives proportional sampling; larger $\tau$ flattens the weights towards uniform, which is reached as $\tau \to \infty$ ([UniMax](https://arxiv.org/abs/2304.09151), §3, Eq. 2).
+- Multilingual models have used values from about 1.4 to 3.3 (UniMax, Table 1).
+
+Temperature sampling is mostly used for languages, and the numbers show why it is delicate. Take a high-resource language with 400 billion tokens, a low-resource one with 4 billion, and a budget of 220 billion:
+
+| Rule | Low-resource weight | Low-resource tokens seen | Passes over it |
+|---|---|---|---|
+| Proportional, $\tau = 1$ | $4/404 \approx 1\%$ | 2.2B | 0.54 |
+| $\tau = 2$: weights $\propto \sqrt{400} : \sqrt{4} = 20 : 2$ | $2/22 \approx 9\%$ | 20B | **5** |
+| Uniform, $\tau \to \infty$ | 50% | 110B | **27.5** |
+
+With $\tau = 2$ the small language gets nine times more exposure than proportional sampling gives it, at the price of being read five times. Uniform sampling would read it 27 times.
+
+**Capping repetition.** UniMax makes the cap explicit: give every source the same share of the budget, except that no source may be repeated more than $N$ times; whatever a capped source cannot use is shared among the rest (UniMax, §3, Algorithm 1). With $N = 4$ in the example, the low-resource language gets $4 \times 4 = 16$ billion tokens, exactly 4 passes, and the remaining 204 billion go to the high-resource language. In UniMax's experiments this beat temperature sampling across the model sizes it tested (UniMax, abstract).
+
+Everyday picture: a library reading list for a year. Proportional sampling has you read whatever the library holds most of; uniform sampling gives the one slim volume of poetry as much time as the entire history section, so you reread it dozens of times. A cap says: read the poetry at most four times and spend the rest of the year elsewhere.
+
+## What repeating data costs
+
+A pass is not free and not worthless. Repeating a source gives the model more gradient steps on text it has already fitted, so each repetition teaches less than fresh text, and heavily repeated text is more likely to be memorized.
+
+How much less? The clearest evidence is [Muennighoff et al. (2023)](https://arxiv.org/abs/2305.16264). With data held fixed and compute increased, they found that up to about **4 passes** changed the final loss negligibly compared with the same amount of fresh data, and that further repetition gave rapidly diminishing returns, approaching zero value around 40 passes in their experiments (abstract and Fig. 1). That result is for their models (up to 9 billion parameters), their data and their measure (validation loss). It is a strong prior for planning, not a law: a high-quality source may be worth repeating more than a mediocre one, and downstream behaviour can respond differently from loss.
+
+Two practical consequences follow:
+
+- **Compute passes for every source before training.** A mixture that looks balanced in percentages can hide one source read twenty times.
+- **Decide whether repetition or more data is cheaper.** Loosening a filter, adding a source or capping passes are all ways to reduce repetition; which is best is an empirical question at your budget.
+
+**Try it: predict the change.** In the three-source example you raise books from 10% to 30% of the 100-billion-token budget, taking the difference from the web. How many passes over the books now, and how much web text is seen?
+
+**Answer.** Books: $0.3 \times 100 / 5 = 6$ passes, up from 2. Web: $0.5 \times 100 = 50$ billion tokens, an eighth of the web. The change triples the repetition of the small source and cuts web exposure by 20 billion tokens. Whether that helps depends on whether a fourth, fifth and sixth reading of the books is worth more than 20 billion new web tokens, which is exactly what a small ablation at this budget can tell you.
+
+## Changing the mixture over time
+
+Weights do not have to be fixed for the whole run. A common pattern is to finish training with a short phase that **upsamples high-quality data** while the learning rate decays to zero, often called **annealing**.
+
+Llama 3 is a well-documented example. Its main mix was roughly 50% general knowledge, 25% mathematics and reasoning, 17% code and 8% multilingual text, chosen with a classifier that downsampled over-represented web categories and with small-model experiments used to predict large-model performance ([Llama 3](https://arxiv.org/abs/2407.21783), §3.1.2). At the end of pre-training it upsampled very high-quality sources (§3.4.3). Annealing on high-quality code and mathematics improved the 8-billion-parameter model on GSM8K and MATH validation sets by 24.0% and 6.4%, but gave negligible gains for the 405-billion-parameter model (§3.1.3). The effect of a mixture change can depend on model scale.
+
+Llama 3 also used annealing as a cheap test of data value: take a half-trained model, anneal it over 40 billion tokens with 30% of the weight on a candidate dataset, and see whether evaluations improve (§3.1.3). That is far cheaper than a full training run per candidate source.
+
+## Choosing weights in practice
+
+Most weights are set by a combination of judgement and small experiments: train small models on a few mixtures, compare them on the evaluations you care about, and pick the best. Two assumptions hide in that procedure, as CS336's data lecture points out: that the small-scale comparison picks the right mixture, and that the best mixture at small scale is still best at large scale. Scale-dependent effects like Llama 3's annealing result are a reason to check the second at least once near the real scale. Methods that optimize mixtures with proxy models or regression exist (see further reading); they automate the search but rest on the same assumptions.
+
+
+## What to remember
+
+- Exposure to a source is weight × budget ÷ source size. Compute it in passes for every source before training.
+- Proportional sampling sees everything equally often but gives small sources little weight; uniform sampling repeats small sources heavily; temperature sampling sits between, with $w_s \propto p_s^{1/\tau}$.
+- UniMax gives sources equal shares but caps how many times any source is repeated.
+- Repetition teaches less than fresh data. In one large study up to about 4 passes changed the loss negligibly and further passes added little; treat that as a prior for your setting, not a limit.
+- Mixtures can change during training: upsampling high-quality data at the end helped Llama 3's smaller model more than its largest.
+
+
+## Try it yourself
+
+- **Temperature.** Two sources of 900B and 100B tokens with $\tau = 2$: the square roots of their shares are in the ratio $\sqrt{0.9} : \sqrt{0.1} = 3 : 1$, so the weights are **75% and 25%**, against 90% and 10% proportionally.
+- **Hidden repetition.** A 5B-token source gets 25% of a 200B budget: **10 passes**, although 25% sounds modest.
+- **UniMax by hand.** Sources of 900B, 100B and 2B tokens, a 300B budget, cap $N = 4$. Start with the smallest: an even share would be 100B, more than its 4 passes (8B), so it gets **8B**. The remaining 292B split evenly is 146B each; the 100B source can take that (1.46 passes), so both remaining sources get **146B**.
+
+
+## Sources
+
+- H. W. Chung, N. Constant, X. Garcia, A. Roberts, Y. Tay, S. Narang and O. Firat (2023). "UniMax: Fairer and More Effective Language Sampling for Large-Scale Multilingual Pretraining." ICLR 2023. arXiv:2304.09151.
+- N. Muennighoff, A. M. Rush, B. Barak, T. Le Scao, A. Piktus, N. Tazi, S. Pyysalo, T. Wolf and C. Raffel (2023). "Scaling Data-Constrained Language Models." NeurIPS 2023. arXiv:2305.16264.
+- Llama Team, AI @ Meta (2024). "The Llama 3 Herd of Models." arXiv:2407.21783. §§3.1.2, 3.1.3, 3.4.3.
+
+
+## Further reading
+
+- Stanford CS336, [lecture 14, "Data II"](https://cs336.stanford.edu/), data mixing: baselines, epoch caps and regression-based mixture search.
+- S. M. Xie et al. (2023). "DoReMi: Optimizing Data Mixtures Speeds Up Language Model Pretraining." arXiv:2305.10429.

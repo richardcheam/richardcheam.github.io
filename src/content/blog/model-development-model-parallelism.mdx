@@ -1,0 +1,96 @@
+---
+title: "Model parallelism: splitting layers, sequences and experts across GPUs"
+date: 2026-11-11
+category: deep-learning
+read_time: "15 min"
+series_order: 11
+series: model-development
+featured: false
+published: true
+excerpt: "When one layer's matrices, one sequence's activations or one model's experts no longer fit or run fast enough on a GPU, the model itself is split. Learn how tensor parallelism splits a matrix multiplication exactly, why pipelines have bubbles and how microbatches shrink them, and what sequence, context and expert parallelism add."
+question: "How are layers, sequences and experts split across GPUs, and what does each split cost?"
+my_work: "A concept post; tensor-parallel MLP splitting executed on two CPU processes against the unsplit layer; pipeline bubble formulas and layout guidance from Narayanan et al. (2021); sequence parallelism from Korthikanti et al. (2022); expert parallelism from the DeepSeek-V3 report."
+result: "Splitting the first MLP matrix by columns and the second by rows needs one all-reduce per sub-layer and reproduces the unsplit output; a pipeline of p stages with m microbatches idles a fraction (p − 1)/m of the time; tensor parallelism belongs within a server, pipeline parallelism across servers."
+evidence_limit: "Toy executed checks on CPU; bubble formulas assume equal stage times; layout guidance is the Megatron-LM authors' for their hardware."
+lesson: "Each way of splitting a model trades a different communication pattern for memory; place the most communication-heavy split on the fastest links."
+---
+
+[Data parallelism](/blog/model-development-data-parallelism/) and [sharding](/blog/model-development-sharding-recomputation/) split the *batch* and the *training state*, but each GPU still runs whole layers on whole sequences. Three situations break that: a layer's matrix multiplications are too slow for one GPU at the batch size you need; a sequence is so long that its activations do not fit; or a mixture-of-experts model has more experts than one GPU can hold. The answer each time is to split the model itself. There are four ways to do it, and they combine.
+
+## Tensor parallelism: splitting a matrix multiplication
+
+The feed-forward network computes $Z = \text{GeLU}(XA)\,B$, with $X$ the token representations, $A$ expanding the width and $B$ projecting back. **Tensor parallelism** splits both matrices across $t$ GPUs ([Shoeybi et al., 2019](https://arxiv.org/abs/1909.08053); [Narayanan et al., 2021](https://arxiv.org/abs/2104.04473), §2.3):
+
+1. Split $A$ **by columns**, $A = [A_1, A_2]$. Each GPU computes $\text{GeLU}(XA_i)$ for its own columns. No communication is needed, because the activation applies to each column independently.
+2. Split $B$ **by rows**, matching. Each GPU computes $\text{GeLU}(XA_i)\,B_i$, a partial result of full width.
+3. **All-reduce** the partial results: their sum is exactly $Z$.
+
+The order matters. Splitting $A$ by rows instead would leave each GPU with part of a sum *inside* the activation, and $\text{GeLU}(u + v) \neq \text{GeLU}(u) + \text{GeLU}(v)$. Running both versions on two processes makes the point: the column-then-row split matches the unsplit layer to within $4 \times 10^{-6}$, while the row split is wrong by up to 2.55.
+
+Attention splits the same way, with each GPU taking whole heads. So each layer needs one all-reduce after attention and one after the MLP in the forward pass, and two more in the backward pass (Narayanan et al., §2.3). Those all-reduces carry activations, $b \times s \times h$ values: for one sequence of 4,096 tokens at width 8,192, about 67 MB in BF16, four times per layer per step. That frequency is why tensor parallelism needs very fast links.
+
+## Pipeline parallelism: splitting the layers
+
+**Pipeline parallelism** gives each of $p$ GPUs a contiguous group of layers, a **stage**. A microbatch flows through stage 1, then 2, and so on, and its gradients flow back. Communication is light, only the activations at stage boundaries, but there is an obvious problem: while stage 1 works on the first microbatch, stages 2 to $p$ wait.
+
+Splitting the batch into $m$ microbatches lets stages work on different microbatches at once, but filling and draining the pipeline still leaves idle time, the **bubble**. With forward and backward times $t_f$ and $t_b$ per microbatch per stage, the bubble lasts $(p-1)(t_f + t_b)$ against useful work of $m(t_f + t_b)$ (Narayanan et al., §2.2.1):
+
+$$
+\text{bubble fraction} = \frac{p - 1}{m}.
+$$
+
+With 4 stages and 4 microbatches the pipeline idles 75% as long as it works; with 64 microbatches, 4.7%. Many microbatches make the bubble small, but in the original GPipe schedule every microbatch's activations stay in memory until its backward pass. The **1F1B** schedule fixes that: after a warm-up, each stage alternates one forward and one backward pass, so at most $p$ microbatches are in flight. **Interleaving** goes further: each GPU holds $v$ smaller, non-contiguous chunks of layers, shrinking the bubble to $\frac{1}{v}\cdot\frac{p-1}{m}$ at the cost of more communication (§2.2.2).
+
+## Sequence and context parallelism
+
+Tensor parallelism splits the matrix multiplications but leaves some operations, the norms and dropout, replicated on every GPU, together with their activations. **Sequence parallelism** splits those operations along the sequence dimension instead. Replacing each all-reduce with a reduce-scatter and an all-gather moves the data between the two layouts with no extra communication ([Korthikanti et al., 2022](https://arxiv.org/abs/2205.05198), §4.2.2).
+
+For very long sequences even that is not enough: the attention itself, every token against every other, has to be split. **Context parallelism** gives each GPU a block of the sequence. Each GPU computes attention for its queries against its own keys and values, then passes its key-value block to the next GPU in a ring while receiving another, until every query has seen every key ([Liu et al., 2023](https://arxiv.org/abs/2310.01889)). The communication overlaps with computation, and memory per GPU falls with the number of GPUs.
+
+## Expert parallelism
+
+In a [mixture-of-experts model](/blog/model-development-decoder-architecture/#mixture-of-experts), different GPUs hold different experts. Each token must travel to the GPUs holding its chosen experts and back: two **all-to-all** exchanges per MoE layer, one to dispatch tokens and one to combine results. DeepSeek-V3 trained with 64-way expert parallelism spanning 8 nodes, combined with 16-way pipeline parallelism and ZeRO-1 data parallelism, and no tensor parallelism at all; it relied on custom all-to-all kernels and on overlapping communication with computation to hide the cost ([DeepSeek-V3](https://arxiv.org/abs/2412.19437), §3.2). Load balance is the operational hazard: if the router sends too many tokens to one expert, its GPU becomes the bottleneck.
+
+## Putting them together
+
+Real runs combine data, tensor, pipeline and sometimes context and expert parallelism, and the product of the degrees equals the number of GPUs. Each has its own communication pattern:
+
+| Split | Communicates | How often |
+|---|---|---|
+| Data (with ZeRO) | gradients, gathered weights | once per step (stage 3: per layer) |
+| Tensor | activations, all-reduce | 4 times per layer per step |
+| Pipeline | activations at stage boundaries | per microbatch, point to point |
+| Context | key-value blocks around a ring | per attention layer |
+| Expert | tokens, all-to-all | 2 per MoE layer, each direction |
+
+Narayanan et al.'s first rule of thumb follows from that table: use tensor parallelism up to the number of GPUs in a server, where links are fastest, and pipeline parallelism to scale across servers (§3.2, Takeaway #1). Data parallelism then multiplies throughput, ideally with as little model parallelism as needed to fit.
+
+Everyday picture: a factory. Data parallelism is several identical factories. Tensor parallelism is several workers sharing one heavy part at the same bench, constantly passing it between them. Pipeline parallelism is an assembly line between halls. You put the bench-sharers in the same room and let the assembly line cross the yard.
+
+**Try it: size a bubble.** A model is split into 16 pipeline stages, and the global batch gives each pipeline 32 microbatches. What fraction of time is lost to the bubble? What if each GPU holds 4 interleaved chunks?
+
+**Answer.** $(16-1)/32 \approx$ **0.47**: nearly half as much idle time as useful work, a poor configuration. With 4 interleaved chunks, $0.47/4 \approx$ **0.12**, at the price of four times as many stage-boundary transfers. The alternatives are more microbatches (a larger global batch, which may not be wanted), fewer stages (more tensor parallelism or sharding instead), or both.
+
+
+## What to remember
+
+- Tensor parallelism splits the first matrix by columns and the second by rows, so the activation applies locally and one all-reduce per sub-layer restores the exact result; it needs the fastest links.
+- A pipeline of $p$ stages with $m$ microbatches idles a fraction $(p-1)/m$; 1F1B bounds in-flight activations; interleaving divides the bubble by the number of chunks.
+- Sequence parallelism splits norm and dropout activations along the sequence at no extra communication; context parallelism splits attention itself in a ring.
+- Expert parallelism moves tokens to experts with all-to-all exchanges, and load balance decides its speed.
+- Put tensor parallelism within a server and pipeline parallelism across servers.
+
+
+## Sources
+
+- D. Narayanan, M. Shoeybi, J. Casper, P. LeGresley, M. Patwary, V. Korthikanti et al. (2021). "Efficient Large-Scale Language Model Training on GPU Clusters Using Megatron-LM." SC 2021. arXiv:2104.04473. §§2.2–2.3, 3.2.
+- M. Shoeybi, M. Patwary, R. Puri, P. LeGresley, J. Casper and B. Catanzaro (2019). "Megatron-LM: Training Multi-Billion Parameter Language Models Using Model Parallelism." arXiv:1909.08053.
+- V. Korthikanti et al. (2022). "Reducing Activation Recomputation in Large Transformer Models." arXiv:2205.05198. §4.2.2.
+- H. Liu, M. Zaharia and P. Abbeel (2023). "Ring Attention with Blockwise Transformers for Near-Infinite Context." arXiv:2310.01889.
+- DeepSeek-AI (2024). "DeepSeek-V3 Technical Report." arXiv:2412.19437. §3.2.
+
+
+## Further reading
+
+- [Megatron-LM paper review](/paper-reviews/megatron-ptd-p/): what the paper's parallelism comparisons control.
+- CMU 15-442, "ML Parallelization (Model and Pipeline Parallelism)" (16 Feb 2026); Stanford CS336, lectures 7–8.

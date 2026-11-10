@@ -1,0 +1,113 @@
+---
+title: "The decoder architecture: the choices that matter and what they cost"
+date: 2026-11-11
+category: deep-learning
+read_time: "15 min"
+series_order: 5
+series: model-development
+featured: false
+published: true
+excerpt: "A modern language model is still a stack of Transformer blocks, but a handful of choices decide how stably it trains, how much it costs to run and how long a context it handles. Count where Llama 3 8B's parameters go, see why grouped-query attention shrinks the KV cache fourfold, and learn what mixture-of-experts changes."
+question: "Which choices in a modern decoder matter, and what does each one cost or buy?"
+my_work: "A concept post building on the Foundations Transformer posts; parameter and KV-cache arithmetic computed from Llama 3's published configuration; choices cross-checked against CS336 lecture 3."
+result: "In Llama 3 8B, 81% of each layer's parameters are in the feed-forward network; grouped-query attention with 8 KV heads cuts the KV cache from 512 to 128 KiB per token; mixture-of-experts decouples total from active parameters."
+evidence_limit: "Arithmetic from published configurations; design choices summarized from model reports and lecture notes, not re-run ablations."
+lesson: "Most architecture choices trade training stability, inference memory or compute against each other. Count parameters and KV-cache bytes before choosing."
+---
+
+If you open the configuration of almost any open language model released in the last few years, you will find the same skeleton: a stack of decoder blocks, each with attention and a feed-forward network, wrapped in residual connections. The [Foundations post on the Transformer](/blog/foundations-transformer/) builds that skeleton and counts GPT-2's parameters by hand. What changed since GPT-2 is a short list of choices that make models train more stably, run more cheaply and handle longer text.
+
+[Llama 3](https://arxiv.org/abs/2407.21783)'s report says it plainly: its architecture "does not deviate significantly" from earlier Llama models, and its gains come mainly from data and scale (§3.2). So this post is not a tour of novelties. It answers a practical question: for each choice, what does it buy and what does it cost? We use Llama 3 8B's published configuration as the running example: 32 layers, width 4,096, feed-forward width 14,336, 32 query heads, 8 key-value heads, a 128,000-token vocabulary, SwiGLU activations and rotary positions (Table 3).
+
+## The block
+
+Each block applies, to the running representation $x$ of every token:
+
+$$
+x \leftarrow x + \text{Attention}(\text{Norm}(x)), \qquad x \leftarrow x + \text{FFN}(\text{Norm}(x)).
+$$
+
+The norm sits **before** each sub-layer, inside the branch, and the residual path from input to output is never normalized. That is **pre-norm**, and almost all modern language models use it, because it keeps a clean path for gradients through the whole stack and tolerates larger learning rates than the original post-norm arrangement (CS336 lecture 3; the [normalisation post](/blog/foundations-normalisation/#pre-norm-and-post-norm) shows why). Most also use **RMSNorm**, which drops the mean subtraction of layer norm and is cheaper, with no reported loss in quality. Some recent models add extra norms (for example, on queries and keys) to stabilize training further; they are refinements of the same idea.
+
+## Where the parameters are
+
+Counting a block shows where the model's capacity actually lives. With width $d = 4{,}096$:
+
+- **Attention.** The query and output projections are $d \times d$ each. Keys and values are smaller: with 8 key-value heads of dimension 128, each is $d \times 1{,}024$. Together: about **41.9 million** parameters.
+- **Feed-forward network.** SwiGLU uses three matrices, a gate, an up-projection and a down-projection, of $d \times 14{,}336$ each: about **176.2 million**.
+
+So **81%** of each layer is feed-forward network. Over 32 layers that is 6.98 billion parameters; the input embedding and the separate output layer add $128{,}000 \times 4{,}096 \approx 524$ million each, for a total of about **8.03 billion**, which is where the name comes from.
+
+**SwiGLU** multiplies two projections of the input, one passed through a smooth activation, before projecting back down: $\text{FFN}(x) = W_{\text{down}}\big(\text{SiLU}(W_{\text{gate}}x) \odot W_{\text{up}}x\big)$. Its three matrices would cost 50% more than the classic two-matrix network at the same hidden width, so the usual convention shrinks the hidden width from $4d$ to $\tfrac{8}{3}d$ to keep the parameter count the same: $2 \cdot d \cdot 4d = 3 \cdot d \cdot \tfrac{8}{3}d$ (CS336 lecture 3). Llama 3 uses $3.5d$, a slightly larger feed-forward network than that convention. Gated activations are used because they train to better quality at equal size; the evidence is empirical, and the paper that popularized them offers no explanation beyond, in its own words, "divine benevolence" ([Shazeer, 2020](https://arxiv.org/abs/2002.05202), §4).
+
+## Grouped-query attention and the KV cache
+
+When a model generates text, each new token attends to all previous ones. Recomputing every previous key and value at every step would be wasteful, so they are stored in the **KV cache** (introduced in the [attention post](/blog/foundations-attention/#the-kv-cache-briefly)). Its size per token is
+
+$$
+\text{bytes per token} = 2 \times L \times h_{kv} \times d_{\text{head}} \times \text{bytes per number},
+$$
+
+- $2$: one key and one value;
+- $L$: layers; $h_{kv}$: key-value heads; $d_{\text{head}}$: the dimension of each head.
+
+With full multi-head attention, every one of the 32 query heads has its own key and value head. **Grouped-query attention** (GQA) lets groups of query heads share one key-value head; Llama 3 uses 8 key-value heads "to improve inference speed and to reduce the size of key-value caches during decoding" (§3.2). In BF16, 2 bytes per number:
+
+| | Key-value heads | KV cache per token | 8,192 tokens | 16 sequences of 8,192 |
+|---|---|---|---|---|
+| Multi-head | 32 | 512 KiB | 4 GiB | 64 GiB |
+| Grouped-query | 8 | **128 KiB** | **1 GiB** | **16 GiB** |
+
+That fourfold saving is decisive for serving. During generation each step does little arithmetic per byte of KV cache it reads, so speed is limited by memory traffic, and the number of sequences that fit on a GPU is limited by cache size (CS336 lecture 3). Grouped-query attention buys both. Its original paper found that it achieves quality close to full multi-head attention with speed close to the most aggressive variant, a single key-value head ([Ainslie et al., 2023](https://arxiv.org/abs/2305.13245), abstract). The [inference post](/blog/model-development-inference-serving/) builds on exactly this calculation.
+
+## Positions and long context
+
+Modern decoders use **rotary position embeddings** (RoPE): each query and key is rotated by an angle proportional to its position, so the score between two tokens depends only on their distance. If every position turns a pair of coordinates by 60°, a query at position 2 and a key at position 5 differ by 180°, and so do positions 10 and 13: same distance, same rotation, same score. The [Transformer post](/blog/foundations-transformer/#rotary-position-embeddings) has an interactive version.
+
+Each pair of dimensions rotates at its own speed, from fast to slow, set by a **base** hyperparameter. With the common base of 10,000 and head dimension 128, the slowest pair completes a turn only every 54,410 positions. Llama 3 raised the base to **500,000** to support longer contexts (§3.2), so its slowest pair turns once every 2.6 million positions. The intuition is that slower rotations keep distant positions distinguishable over long ranges. Extending context after pre-training usually combines a change like this with continued training on long sequences; the base alone does not make a model use long context well.
+
+## Mixture of experts
+
+A **mixture-of-experts** (MoE) layer replaces the single feed-forward network with many smaller ones, the experts, and a router that sends each token to a few of them. With 8 experts of 1 billion parameters each and two experts per token, the layer holds 8 billion parameters but each token uses only 2 billion of them.
+
+This decouples the two quantities a dense model ties together: **total parameters**, which hold knowledge and set memory, and **active parameters**, which set compute per token. DeepSeek-V3 is an extreme example: 671 billion parameters in total, 37 billion active per token, about 5.5% ([DeepSeek-V3](https://arxiv.org/abs/2412.19437), abstract), with 256 routed experts plus one shared expert and 8 routed experts chosen per token (§4.2).
+
+The costs are real. All experts must sit in memory even though few are used per token; the router must spread tokens evenly or some experts are overloaded and others never learn; and splitting experts across GPUs adds communication (see the [model-parallelism post](/blog/model-development-model-parallelism/)). MoE is worth it when compute per token is the binding constraint and memory and engineering are available.
+
+## Rules of thumb, and what they are
+
+Some choices are conventions with modest evidence rather than laws (CS336 lecture 3):
+
+- feed-forward width about $4d$, or $\tfrac{8}{3}d$ for gated units;
+- head dimension times number of heads equals $d$;
+- an aspect ratio, width divided by layers, in a broad range of roughly 100 to 200, often chosen for hardware efficiency (Llama 3 8B: 4,096 / 32 = 128).
+
+Defaults like these are reasonable starting points. What matters more is checking the consequences: parameters, compute per token, KV-cache size, and whether the shapes divide evenly across the GPUs you will use.
+
+**Try it: size a model.** A 1-billion-class configuration has 16 layers, width 2,048, feed-forward width 8,192 (SwiGLU), 32 query heads, 8 key-value heads and a 128,000-token vocabulary shared between input and output. Estimate its parameter count and its KV cache per token in BF16.
+
+**Answer.** Head dimension: 2,048 / 32 = 64. Per layer, attention is $2 \times 2{,}048^2$ for queries and outputs plus $2 \times 2{,}048 \times (8 \times 64)$ for keys and values, about 10.5 million; the feed-forward network is $3 \times 2{,}048 \times 8{,}192 \approx 50.3$ million. Sixteen layers: about 0.97 billion. The shared embedding adds $128{,}000 \times 2{,}048 \approx 262$ million, so the total is about **1.24 billion**. More than a fifth of this "1B" model is vocabulary, the effect seen in the [tokenization post](/blog/model-development-tokenization/#vocabulary-size). The KV cache is $2 \times 16 \times 8 \times 64 \times 2 = 32{,}768$ bytes, **32 KiB per token**: a quarter of Llama 3 8B's.
+
+
+## What to remember
+
+- Modern decoders are pre-norm Transformers with RMSNorm, SwiGLU, rotary positions and grouped-query attention; most gains since GPT-2 came from data and scale, not architecture.
+- Most parameters are in the feed-forward networks: 81% of each Llama 3 8B layer.
+- KV cache per token is $2 \times L \times h_{kv} \times d_{\text{head}} \times$ bytes; grouped-query attention cut Llama 3 8B's from 512 to 128 KiB.
+- The RoPE base sets how slowly the slowest positions rotate; raising it is one ingredient of long context, not the whole recipe.
+- Mixture-of-experts separates total parameters (memory, knowledge) from active parameters (compute per token), at the cost of memory, balancing and communication.
+
+
+## Sources
+
+- Llama Team, AI @ Meta (2024). "The Llama 3 Herd of Models." arXiv:2407.21783. §3.2, Table 3.
+- J. Ainslie, J. Lee-Thorp, M. de Jong, Y. Zemlyanskiy, F. Lebrón and S. Sanghai (2023). "GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints." EMNLP 2023. arXiv:2305.13245.
+- N. Shazeer (2020). "GLU Variants Improve Transformer." arXiv:2002.05202.
+- DeepSeek-AI (2024). "DeepSeek-V3 Technical Report." arXiv:2412.19437. Abstract, §4.2.
+- Stanford CS336, [lecture 3, "Architectures, hyperparameters"](https://cs336.stanford.edu/) (slides): pre-norm, RMSNorm, gated activations, rules of thumb, GQA and arithmetic intensity.
+
+
+## Further reading
+
+- Stanford CS336, lecture 4: attention alternatives and mixture of experts.
+- J. Su et al. (2021). "RoFormer: Enhanced Transformer with Rotary Position Embedding." arXiv:2104.09864.

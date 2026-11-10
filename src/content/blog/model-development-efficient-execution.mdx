@@ -1,0 +1,94 @@
+---
+title: "Efficient execution: IO-aware attention, mixed precision and FP8"
+date: 2026-11-11
+category: deep-learning
+read_time: "14 min"
+series_order: 12
+series: model-development
+featured: false
+published: true
+excerpt: "Two ideas make modern training fast without changing what it computes: move less data, and use fewer bits. See how FlashAttention computes exact attention without ever storing the full score matrix, why BF16 replaced FP16, what loss scaling was for, and what FP8 training needs to work."
+question: "Why do IO-aware attention, mixed precision and FP8 speed training, and what do they assume?"
+my_work: "A concept post; tiled attention with an online softmax implemented and checked against ordinary attention; number-format behaviour checked in PyTorch 2.6; FP8 scaling compared with one scale and per-block scales; results quoted from the FlashAttention, mixed-precision and DeepSeek-V3 papers."
+result: "Tiled attention matches ordinary attention to 5 × 10⁻⁷ without materializing the score matrix; FlashAttention does 13% more arithmetic but moves 9 times less memory and runs 5.7 times faster in its paper's benchmark; FP8 needs fine-grained scaling to survive outliers."
+evidence_limit: "Speed figures are the papers' own benchmarks on their hardware; the executed checks verify correctness on CPU, not speed."
+lesson: "Speed comes from reducing memory traffic and bits per number while keeping the computation exact or within training noise; each trick has an assumption to check."
+---
+
+The [GPU post](/blog/model-development-gpu-memory-compute/#compute-bound-or-memory-bound) ended with a diagnosis: much of training is limited not by arithmetic but by moving data between memory and the compute units. This post covers the two most important responses. The first changes *how* an operation is scheduled so it moves less data, without changing its result; the second uses fewer bits per number. Both are now default in serious training, and both come with assumptions worth knowing.
+
+## Attention without the score matrix
+
+Standard attention computes, for each head, the score matrix $S = QK^{\top}/\sqrt{d}$ of size $N \times N$ for a sequence of $N$ tokens, writes it to GPU memory, reads it back to apply softmax, writes the probabilities, and reads them again to multiply by $V$. For long sequences that matrix is huge and the operation is memory-bound: the arithmetic is cheap, the round trips through memory are not. It is also the $5as^2b$ term that dominated activation memory in the [GPU post](/blog/model-development-gpu-memory-compute/#activations).
+
+**FlashAttention** computes exactly the same result without ever storing $S$ ([Dao et al., 2022](https://arxiv.org/abs/2205.14135), §3.1). It loads blocks of queries, keys and values into the GPU's small, fast on-chip memory, computes their part of the attention there, and accumulates the output. The difficulty is softmax: normalizing a row needs the maximum and the sum over *all* its scores, but the blocks arrive one at a time.
+
+The trick is an **online softmax**: keep a running maximum $m$ and running sum $\ell$, and rescale what has been accumulated whenever a larger maximum appears. Take one query whose scores against four keys are $(1, 3, 2, 0)$, with values $(10, 20, 30, 40)$, processed in two blocks:
+
+- **Block 1**, scores $(1, 3)$: the maximum is 3. The weights are $e^{1-3} = 0.135$ and $e^{0} = 1$, so $\ell = 1.135$, and the weighted sum of values is $0.135 \times 10 + 1 \times 20 = 21.35$. Output so far: $21.35 / 1.135 \approx 18.81$.
+- **Block 2**, scores $(2, 0)$: the maximum stays 3, so nothing needs rescaling. Add $e^{-1} = 0.368$ and $e^{-3} = 0.050$: $\ell = 1.553$, and the weighted sum becomes $21.35 + 0.368 \times 30 + 0.050 \times 40 = 34.38$. Output: $34.38 / 1.553 \approx 22.14$.
+
+That is exactly the full softmax-weighted average, 22.14. If a later block had a larger maximum, the running sums would be multiplied by $e^{m_{\text{old}} - m_{\text{new}}}$ first. The same procedure on random $256 \times 64$ matrices in blocks of 32 keys agrees with ordinary attention to within $5 \times 10^{-7}$, and the $256 \times 256$ score matrix never exists at once.
+
+For the backward pass FlashAttention stores only the output and the per-row statistics $m$ and $\ell$, and recomputes the scores block by block, the [recomputation](/blog/model-development-sharding-recomputation/#activations-store-or-recompute) idea applied inside one operation. The paper's benchmark for GPT-2 medium's attention on an A100 shows the trade clearly (Fig. 2):
+
+| | Arithmetic | Memory traffic | Runtime |
+|---|---|---|---|
+| Standard attention | 66.6 GFLOPs | 40.3 GB | 41.7 ms |
+| FlashAttention | 75.2 GFLOPs | 4.4 GB | 7.3 ms |
+
+Thirteen percent *more* arithmetic, nine times less memory traffic, 5.7 times faster. The paper proves that standard attention needs $\Theta(Nd + N^2)$ memory accesses and FlashAttention $\Theta(N^2 d^2 / M)$ for on-chip memory of size $M$, which is many times fewer for typical sizes (Theorem 2). In PyTorch, `torch.nn.functional.scaled_dot_product_attention` dispatches to such fused kernels where available; the [small training run](/blog/model-development-small-training-run/) used it.
+
+The general lesson reaches beyond attention: when an operation is memory-bound, **fusing** its steps into one kernel that keeps intermediate results on chip can beat a "more efficient" algorithm that moves more data.
+
+## Lower precision
+
+Fewer bits per number means less memory, less traffic and faster matrix units. Each format trades **range** (the largest and smallest representable magnitudes) against **precision** (how finely values are spaced):
+
+| Format | Bits | Largest value | Spacing just above 1 |
+|---|---|---|---|
+| FP32 | 32 | $3.4 \times 10^{38}$ | $1.2 \times 10^{-7}$ |
+| FP16 | 16 | 65,504 | 0.00098 |
+| BF16 | 16 | $3.4 \times 10^{38}$ | 0.0078 |
+| FP8 E4M3 | 8 | 448 | 0.125 |
+| FP8 E5M2 | 8 | 57,344 | 0.25 |
+
+**FP16 and loss scaling.** FP16 has decent precision but a narrow range. Gradients are often tiny: in FP16 anything below about $2^{-24} \approx 6 \times 10^{-8}$ becomes zero. Micikevicius et al. found about 5% of weight-gradient values in that region for one speech model, and much of an object-detection network's activation-gradient histogram below FP16's range ([Micikevicius et al., 2018](https://arxiv.org/abs/1710.03740), §§3.1–3.2). Their fix was **loss scaling**: multiply the loss by a large factor before the backward pass, so gradients are shifted into FP16's range, and divide by the same factor before the update. A gradient of $2^{-25}$ is zero in FP16, but scaled by 1,024 it survives and is recovered exactly. They also kept an FP32 master copy of the weights, so small updates are not lost (§3.1).
+
+**BF16** has the same range as FP32, with less precision. Gradients do not underflow, so loss scaling is unnecessary, and BF16 has largely replaced FP16 for training. Its coarse precision is why accumulation still happens in FP32: as the [small training run](/blog/model-development-small-training-run/#5-precision) showed, $1 + 0.001$ is exactly 1 in BF16. In practice, matrix multiplications take BF16 inputs and accumulate in FP32; optimizer state and often master weights stay in FP32.
+
+## FP8 and the outlier problem
+
+FP8 halves memory and traffic again and doubles matrix throughput on hardware that supports it, but its range is tiny: E4M3, the more precise variant, tops out at 448. To use it, each tensor is divided by a **scale** chosen so its largest value fits, converted to FP8, and multiplied back after the matrix multiplication.
+
+A single scale per tensor breaks when the tensor contains outliers, which activations often do. Take 1,024 values of typical size 0.001 plus one of 100. Scaling so that 100 maps to 448 squeezes the small values into FP8's coarsest region: converting them flushes **16%** of them to zero and leaves a median relative error of **14%**. Giving each block of 128 values its own scale isolates the outlier to its block, and the median error elsewhere falls to **2.1%**.
+
+That is the approach DeepSeek-V3 used to train in FP8: scales per $1 \times 128$ tile of activations and per $128 \times 128$ block of weights, E4M3 for all tensors, and higher-precision accumulation for the matrix products. Compared with BF16 training, its loss differed by less than 0.25% relative ([DeepSeek-V3](https://arxiv.org/abs/2412.19437), §3.3). The assumptions to check in any FP8 recipe are where the scales are computed, which operations stay in higher precision (accumulation, normalization, softmax, optimizer state), and whether the loss tracks a BF16 baseline over a long run, because small biases compound.
+
+Everyday picture: one ruler for a whole drawing that includes a skyscraper and an ant. Marked to fit the skyscraper, the ruler cannot measure the ant at all. Give each corner of the drawing its own ruler and both can be measured.
+
+**Try it: will it underflow?** A gradient of $3 \times 10^{-9}$ is computed in FP16. Does it survive? With a loss scale of 4,096? In BF16?
+
+**Answer.** In FP16 it is below about $6 \times 10^{-8}$ and becomes **zero**. Scaled by 4,096 it becomes about $1.2 \times 10^{-5}$, which FP16 represents (as a subnormal, with reduced precision), so it **survives** and is divided back after the backward pass. In BF16, with FP32's range, it **survives** without any scaling, though only to about two or three significant digits.
+
+
+## What to remember
+
+- Memory-bound operations get faster by moving less data. FlashAttention computes exact attention in blocks with an online softmax, never storing the $N \times N$ scores, and recomputes them in the backward pass.
+- Fusing steps into one kernel can beat an algorithm with fewer FLOPs but more memory traffic.
+- FP16 needs loss scaling because small gradients underflow; BF16 has FP32's range and does not, but its coarse precision means updates and accumulations stay in FP32.
+- FP8 has very little range; it works with fine-grained scaling (per tile or block) and higher-precision accumulation, and must be checked against a BF16 baseline.
+
+
+## Sources
+
+- T. Dao, D. Y. Fu, S. Ermon, A. Rudra and C. Ré (2022). "FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness." NeurIPS 2022. arXiv:2205.14135. §3, Fig. 2, Theorem 2.
+- P. Micikevicius, S. Narang, J. Alben, G. Diamos, E. Elsen, D. Garcia, B. Ginsburg, M. Houston, O. Kuchaiev, G. Venkatesh and H. Wu (2018). "Mixed Precision Training." ICLR 2018. arXiv:1710.03740. §3.
+- DeepSeek-AI (2024). "DeepSeek-V3 Technical Report." arXiv:2412.19437. §3.3.
+
+
+## Further reading
+
+- [FlashAttention paper review](/paper-reviews/flashattention/).
+- Stanford CS336, [lectures 5 and 6](https://cs336.stanford.edu/): GPUs, kernels and Triton.
+- P. Micikevicius et al. (2022). "FP8 Formats for Deep Learning." arXiv:2209.05433.

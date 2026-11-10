@@ -1,0 +1,110 @@
+---
+title: "Data parallelism: one update computed on many GPUs"
+date: 2026-11-11
+category: deep-learning
+read_time: "13 min"
+series_order: 9
+series: model-development
+featured: false
+published: true
+excerpt: "The simplest way to use many GPUs is to give each a copy of the model and a different slice of the batch, then average the gradients. Learn what has to stay identical for that to compute the same update as one big GPU, why averaging per-GPU losses quietly changes the objective, and what the gradient all-reduce costs."
+question: "How is one training update computed on many GPUs without changing its meaning?"
+my_work: "A concept post; the normalization trap demonstrated with two-process PyTorch DDP on CPU (gloo backend) against a single-process reference; DDP behaviour checked in the PyTorch 2.6 source."
+result: "Data parallelism reproduces the single-GPU update only if every rank starts from the same weights, sees disjoint data, and normalizes by the global target count; averaging per-rank means gives the mean of rank means instead."
+evidence_limit: "The normalization check uses a toy model on CPU; communication times use an illustrative bandwidth."
+lesson: "Write down the global batch and the global normalizer before distributing a run, and check that the distributed gradient matches a single-process reference."
+---
+
+The [first post](/blog/model-development-one-update/) defined one training update precisely: which tokens are targets, how their losses are averaged, how the gradient becomes a step. Everything in this track keeps that update the same while spreading its work across GPUs. The [previous post](/blog/model-development-gpu-memory-compute/) showed why we need to: a large run would take years on one GPU.
+
+**Data parallelism** is the first and most common answer. Every GPU holds a full copy of the model. Each processes a different slice of the batch, computes gradients for its slice, and then all GPUs average their gradients so every copy applies the same update. If done correctly, the result is the update one enormous GPU would compute on the whole batch.
+
+## What must stay identical
+
+The guarantee rests on three conditions:
+
+1. **Same starting weights.** PyTorch's `DistributedDataParallel` (DDP) copies rank 0's parameters and buffers to every process when it is constructed, and afterwards never broadcasts parameters again: it relies on every rank applying the same update (PyTorch 2.6 source).
+2. **Disjoint data.** Each rank must see a different slice of the global batch, usually arranged by a sampler that shards the dataset by rank. Two ranks reading the same examples silently doubles their weight.
+3. **The same objective.** The averaged gradient must be the gradient of the loss you intended. This is the condition people get wrong.
+
+**Batch sizes** multiply. Each GPU processes a **microbatch** at a time, may accumulate several microbatches before synchronizing, and there are as many copies as GPUs:
+
+$$
+\text{global batch} = \text{microbatch} \times \text{accumulation steps} \times \text{data-parallel ranks}.
+$$
+
+With 4 sequences per microbatch, 8 accumulation steps and 64 ranks, the global batch is 2,048 sequences, about 8.4 million tokens at length 4,096. That is the batch the optimizer sees, and the one learning rates and schedules must be tuned for.
+
+## The normalization trap
+
+DDP **averages** gradients across ranks. If each rank computes the usual mean loss over its own targets, the result is the average of per-rank means, which is not the mean over all tokens when ranks hold different numbers of targets.
+
+Use the numbers from the first post. Rank 0 holds three target tokens with losses 1, 1 and 1; rank 1 holds one target with loss 3.
+
+- Each rank's mean: rank 0 gives 1, rank 1 gives 3. DDP's average: $(1 + 3)/2 = 2$.
+- The token mean over the whole batch: $(1 + 1 + 1 + 3)/4 = 1.5$.
+
+Rank 1's single token gets three times the weight of each of rank 0's. This is the same mistake as mean-then-divide gradient accumulation, now across GPUs.
+
+The fix mirrors the accumulation fix. Count targets on every rank, add the counts across ranks with an all-reduce, and divide each rank's **summed** loss by the global count. Because DDP then divides the summed gradients by the number of ranks, multiply by the number of ranks to undo it:
+
+```python
+n_local = (labels != -100).sum()
+n_global = n_local.clone()
+dist.all_reduce(n_global)                     # total target tokens across ranks
+loss = F.cross_entropy(logits.view(-1, V), labels.view(-1),
+                       ignore_index=-100, reduction="sum") * world_size / n_global
+loss.backward()                               # DDP averages: gradients = global token mean
+```
+
+Running two DDP processes on CPU with the example above confirms it: with per-rank means, the averaged gradient equals the gradient of the mean of rank means; with the global count, it matches a single process computing the token mean over the whole batch to within $3 \times 10^{-8}$. Hugging Face's Trainer has an option for this, `average_tokens_across_devices`, which gathers the token count across ranks and scales the loss by the number of processes, as described in the [first post](/blog/model-development-one-update/#gradient-accumulation-must-keep-the-same-objective).
+
+Packing sequences to a fixed length makes target counts nearly equal and hides the problem; variable-length data, fine-tuning with masked prompts and the last ragged batch of an epoch expose it.
+
+**Try it: diagnose a mismatch.** A colleague's two-GPU run gives a different loss curve from a one-GPU run with the same global batch, data order and seed. Training packs documents into fixed-length rows, but masks padding at the end of each epoch's last batch. Which part of the curve differs, and why?
+
+**Answer.** Mostly nothing, then a blip at the end of each epoch. With packed rows every rank has nearly the same number of targets, so per-rank means and the token mean almost coincide. In the last batch one rank may hold a short, padded slice with few targets; averaging per-rank means gives those few tokens extra weight, as in the 1-versus-3 example. Normalizing by the global count removes the blip.
+
+## What communication costs
+
+Averaging gradients is an **all-reduce**: every rank contributes a gradient tensor and every rank ends with the sum (or average). The usual ring algorithm passes chunks around a ring of GPUs; each rank sends and receives about
+
+$$
+2\,\frac{n-1}{n} \times \text{gradient bytes}
+$$
+
+for $n$ ranks, almost independent of $n$ (Thakur et al., 2005). For a 7-billion-parameter model with BF16 gradients (14 GB) on 8 GPUs, each GPU sends about 24.5 GB per step. At an illustrative 100 GB/s per GPU that is about a quarter of a second, every step.
+
+Two techniques hide most of it:
+
+- **Overlap.** Gradients for the last layers are ready long before the first layers finish their backward pass. DDP groups parameters into **buckets** (25 MiB by default in PyTorch 2.6) and starts all-reducing a bucket as soon as all its gradients exist, while the backward pass continues.
+- **Synchronize once per step.** With gradient accumulation, there is no need to all-reduce after every microbatch. DDP's `no_sync()` context skips synchronization for the inner microbatches; gradients accumulate locally and are all-reduced once, on the last.
+
+Whether communication can be hidden depends on the ratio of compute to communication: a large model with large microbatches has plenty of backward-pass time to overlap with; a small microbatch on a slow network does not.
+
+## Where data parallelism stops
+
+Data parallelism scales throughput but not memory: every GPU still holds the full model, its gradients and its optimizer state, the 112 GB of a 7-billion-parameter model in the previous post. It also grows the global batch with the number of GPUs, and beyond some size larger batches stop reducing the number of steps needed, so extra GPUs stop paying off. The [next post](/blog/model-development-sharding-recomputation/) removes the memory limit by sharding the state across the data-parallel ranks.
+
+
+## What to remember
+
+- Data parallelism replicates the model, splits the batch, and all-reduces gradients so every copy takes the same step.
+- Global batch = microbatch × accumulation steps × ranks; tune learning rates for the global batch.
+- DDP averages gradients. Averaging per-rank mean losses gives the mean of rank means; divide summed losses by the all-reduced global target count (times the number of ranks) to keep the token mean.
+- A ring all-reduce sends about twice the gradient size per GPU; buckets overlap it with the backward pass, and `no_sync()` avoids it on accumulation microbatches.
+- Data parallelism does not reduce per-GPU memory.
+
+
+## Sources
+
+- PyTorch 2.6, `torch.nn.parallel.DistributedDataParallel` (source and documentation): initial state synchronization from rank 0, gradient averaging, 25 MiB default buckets, `no_sync()`.
+- R. Thakur, R. Rabenseifner and W. Gropp (2005). "Optimization of Collective Communication Operations in MPICH." International Journal of High Performance Computing Applications 19(1).
+- S. Li et al. (2020). "PyTorch Distributed: Experiences on Accelerating Data Parallel Training." VLDB 2020. arXiv:2006.15704.
+
+
+## Further reading
+
+- Stanford CS336, [lectures 7 and 8, "Parallelism"](https://cs336.stanford.edu/).
+- CMU 15-442, "ML Parallelization (Data Parallelism and Zero Redundancy)" (11 Feb 2026).
+- S. McCandlish, J. Kaplan, D. Amodei et al. (2018). "An Empirical Model of Large-Batch Training." arXiv:1812.06162.

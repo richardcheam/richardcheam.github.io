@@ -1,0 +1,73 @@
+---
+title: "FlashAttention: exact attention made fast by counting memory traffic"
+title_key: "FlashAttention"
+published: true
+date: 2026-11-11
+question: "Can exact attention be made substantially faster and more memory-efficient by changing only how it moves data, and how well does the paper show it?"
+excerpt: "FlashAttention computes ordinary softmax attention in blocks that stay in on-chip memory, never writing the N × N score matrix. The paper backs this with an IO-complexity analysis and a lower bound, then shows end-to-end speedups whose size depends heavily on the baseline implementation."
+type: paper
+topic: [kernels, attention, training]
+tags: [FlashAttention, IO-aware, Attention, GPU kernels, Stanford]
+org: "Stanford University and University at Buffalo"
+authors: "Tri Dao, Daniel Y. Fu, Stefano Ermon, Atri Rudra, Christopher Ré"
+source_url: "https://arxiv.org/abs/2205.14135"
+source_label: "Read FlashAttention"
+source_date: 2022-05-27
+read_time: "9 min"
+featured: false
+math: true
+tldr:
+  - "**Claim:** an IO-aware, exact attention algorithm that uses tiling to cut reads and writes between GPU memory and on-chip SRAM is faster and uses memory linear in sequence length (Abstract, p. 1)."
+  - "**Method:** tiling with an online softmax, recomputation in the backward pass, and a proof that it needs Θ(N²d²/M) memory accesses against Θ(Nd + N²) for standard attention, with a matching lower bound (Sec 3, pp. 4–6)."
+  - "**Decisive evidence:** for GPT-2 medium's attention, 13% more FLOPs but 9 times less memory traffic and 5.7 times less runtime (Fig. 2, p. 6)."
+  - "**My reading:** the mechanism and the analysis are solid and have aged well; the end-to-end numbers measure a 2022 kernel against 2022 implementations and are best read as 'memory traffic, not FLOPs, set attention's speed'."
+links:
+  - label: "Post: efficient execution"
+    url: "/blog/model-development-efficient-execution/"
+---
+
+## The problem and what came before
+
+Attention's cost grows with the square of the sequence length $N$, and by 2022 many methods approximated it, with sparse or low-rank structure, to reduce its FLOPs. The paper's opening observation is that many of these "do not display wall-clock speedup against standard attention" (Sec 1, p. 1). The reason, it argues, is that attention on a GPU is limited by memory traffic, not arithmetic: standard implementations write the $N \times N$ score matrix to high-bandwidth memory (HBM), read it back for softmax, write the probabilities and read them again. Reducing FLOPs does not help an operation that is waiting for memory.
+
+## The method
+
+The algorithm (Sec 3.1, Algorithm 1, pp. 4–5) splits $Q$, $K$ and $V$ into blocks sized to fit in on-chip SRAM. For each block of keys and values, it loads the block, computes scores against a block of queries on chip, and updates the output for those queries. Softmax normalization is handled with running statistics: for each query, the maximum score $m$ seen so far and the running sum $\ell$ of exponentials, with previously accumulated output rescaled by $e^{m_{\text{old}} - m_{\text{new}}}$ when the maximum grows. The result is exact softmax attention, up to floating-point rounding. The [efficient-execution post](/blog/model-development-efficient-execution/#attention-without-the-score-matrix) works the rescaling through on four scores.
+
+The backward pass needs the attention probabilities. Instead of storing them, FlashAttention stores only the output and the statistics $(m, \ell)$ and recomputes the probabilities block by block during backward (Sec 3.1, p. 5; App. B). This adds FLOPs but removes the $O(N^2)$ memory.
+
+**The IO analysis** is what makes the paper more than a fast kernel. With head dimension $d$ and SRAM of size $M$ (with $d \le M \le Nd$), standard attention needs $\Theta(Nd + N^2)$ HBM accesses and FlashAttention $\Theta(N^2 d^2 / M)$ (Theorem 2, p. 6). For typical $d$ of 64 to 128 and SRAM of about 100 KB, $d^2/M$ is well below 1, so FlashAttention needs many times fewer accesses. A lower bound shows no exact attention algorithm can asymptotically do better over all SRAM sizes (Proposition 3, p. 6). The paper also extends the method to block-sparse attention (Sec 3.3).
+
+## The decisive evidence
+
+The most informative result is the smallest. For GPT-2 medium's attention (sequence 1,024, head dimension 64, 16 heads, batch 64) on an A100 (Fig. 2, p. 6):
+
+| | GFLOPs | HBM reads and writes | Runtime |
+|---|---|---|---|
+| Standard attention | 66.6 | 40.3 GB | 41.7 ms |
+| FlashAttention | 75.2 | 4.4 GB | 7.3 ms |
+
+FlashAttention does more arithmetic, because of recomputation, yet runs 5.7 times faster, tracking the 9-fold reduction in memory traffic. That single comparison supports the paper's thesis directly. The figure's middle panel shows runtime falling with block size until the operation becomes compute-bound, again as the IO analysis predicts.
+
+End to end (Sec 4.1):
+
+- **BERT-large** to MLPerf's target accuracy: 17.4 ± 1.4 minutes against 20.0 ± 1.5 for NVIDIA's MLPerf 1.1 record implementation, about 15% faster, over 10 runs on 8 A100s (Table 1, p. 7).
+- **GPT-2** on OpenWebText, at equal perplexity: GPT-2 small in 2.7 days against 4.7 for Megatron-LM and 9.5 for Hugging Face; GPT-2 medium in 6.9 days against 11.5 and 21.0 (Table 2, p. 8). That is 3.0–3.5 times faster than Hugging Face and 1.7 times faster than Megatron-LM.
+- **Longer context:** GPT-2 small trained with 4 times the context in 3.6 days, still faster than Megatron-LM at 1K, and 0.7 better in perplexity (Table 4, p. 8).
+
+## What the evidence supports, confounds and leaves open
+
+**Supported.** Exact attention can be made several times faster and linear in memory by scheduling alone. The kernel-level measurement (Fig. 2) isolates that claim cleanly: same computation, same hardware, traffic and time measured. The IO analysis explains why, and the lower bound says the approach is close to the limit.
+
+**Confounded by the baseline.** End-to-end speedups depend on what is being replaced. Against Hugging Face's 2022 GPT-2, FlashAttention is 3–3.5 times faster; against Megatron-LM, already heavily optimized, 1.7 times. The text also states "1.8× over Megatron" in one summary (Sec 4, p. 7) while the table gives 1.74 and 1.67, a small inconsistency worth noticing. Part of each end-to-end gain comes from fusing other operations into the kernel and from larger batches that the memory savings allow, not only from attention's IO.
+
+**Context-dependent.** The constants depend on the GPU's SRAM size, HBM bandwidth and head dimension. Later GPUs and later versions of the kernel changed the absolute numbers considerably; a 2022 A100 measurement says little about speed on today's hardware, though the reasoning carries over.
+
+**Left open.** Numerical behaviour: the algorithm is exact in real arithmetic, but block-wise accumulation changes the order of floating-point operations, so outputs are not bitwise identical to a standard implementation; the paper does not study this. The longer-context quality gains (Path-X, long-document classification) show what becomes possible, not that longer context always helps.
+
+## How it changes decisions
+
+- Use a fused, IO-aware attention kernel by default for training and long-context inference; in PyTorch, `scaled_dot_product_attention` selects one where available.
+- When an operation is slow, measure memory traffic and arithmetic intensity before reducing FLOPs; approximations that save FLOPs may not save time.
+- Treat activation memory for attention as linear in sequence length when such kernels are used, which changes [recomputation and parallelism choices](/blog/model-development-sharding-recomputation/).
+- Re-benchmark on your own hardware and baseline rather than transferring a published speedup.

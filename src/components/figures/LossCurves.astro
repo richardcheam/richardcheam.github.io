@@ -1,0 +1,57 @@
+---
+// Model development, "A complete small training run": validation loss of five
+// real CPU runs of a 1.07M-parameter decoder on Tiny Shakespeare, the baseline's
+// smoothed training loss, and gradient norms with and without clipping. Data from
+// scripts/course/p6_train.py via src/data/model-development/p6-curves.json.
+// Rendered at build time; no script.
+import data from "../../data/model-development/p6-curves.json";
+import { INK, MUTED, JADE, GOLD, NEG } from "../../lib/net-diagram";
+const { alt } = Astro.props;
+const runs = data.runs as Record<string, { val: number[][]; train: number[][]; grad_norm: number[][] }>;
+const STYLE: Record<string, { label: string; col: string; dash?: string }> = {
+  baseline: { label: "baseline (peak 3e-3)", col: JADE },
+  no_warmup: { label: "no warmup", col: GOLD },
+  lr_high: { label: "peak 3e-2", col: "#3E6E9E" },
+  lr_very_high: { label: "peak 1e-1", col: NEG },
+  lr_very_high_no_clip: { label: "peak 1e-1, no clipping", col: NEG, dash: "5 4" },
+};
+// Panel geometry.
+const W = 760, H = 360;
+const A = { l: 52, t: 24, w: 420, h: 270, x0: 0, x1: 600, y0: 3.6, y1: 8 };
+const G = { l: 540, t: 24, w: 200, h: 120, x0: 0, x1: 600, y0: 0, y1: 16 };
+const X = (b: typeof A, v: number) => b.l + ((v - b.x0) / (b.x1 - b.x0)) * b.w;
+const Y = (b: typeof A, v: number) => b.t + b.h - ((Math.min(Math.max(v, b.y0), b.y1) - b.y0) / (b.y1 - b.y0)) * b.h;
+const path = (b: typeof A, pts: number[][]) => pts.map(([x, y], i) => `${i ? "L" : "M"}${X(b, x).toFixed(1)},${Y(b, y).toFixed(1)}`).join(" ");
+const yTicks = [4, 5, 6, 7, 8];
+const xTicks = [0, 100, 200, 300, 400, 500, 600];
+const final = (k: string) => runs[k].val[runs[k].val.length - 1][1];
+---
+<div class="blog-diagram" role="region" aria-label={alt}>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox={`0 0 ${W} ${H}`} role="img" aria-labelledby="lc-title" class="blog-diagram-svg" font-family="Inter, sans-serif">
+    <title id="lc-title">Validation loss of five training runs and gradient norms with and without clipping</title>
+    {yTicks.map((v) => <g><line x1={A.l} x2={A.l + A.w} y1={Y(A, v)} y2={Y(A, v)} stroke="#eef0f0" /><text x={A.l - 8} y={Y(A, v) + 4} font-size="10.5" text-anchor="end" fill={MUTED}>{v}</text></g>)}
+    {xTicks.map((v) => <text x={X(A, v)} y={A.t + A.h + 16} font-size="10.5" text-anchor="middle" fill={MUTED}>{v}</text>)}
+    <line x1={A.l} x2={A.l + A.w} y1={Y(A, data.meta.ln_V)} y2={Y(A, data.meta.ln_V)} stroke={MUTED} stroke-dasharray="2 4" />
+    <text x={A.l + A.w} y={Y(A, data.meta.ln_V) - 5} font-size="10" text-anchor="end" fill={MUTED}>ln 2048 = 7.62: a uniform guess</text>
+    <text x={A.l + A.w / 2} y={A.t + A.h + 34} font-size="11" text-anchor="middle" fill={MUTED}>training step (2,048 tokens each)</text>
+    <text x="14" y={A.t + A.h / 2} font-size="11" text-anchor="middle" fill={MUTED} transform={`rotate(-90 14 ${A.t + A.h / 2})`}>loss (nats per token)</text>
+    <path d={path(A, runs.baseline.train)} fill="none" stroke={JADE} stroke-width="1.4" stroke-opacity="0.55" stroke-dasharray="3 3" />
+    {Object.entries(STYLE).map(([k, s]) => <path d={path(A, runs[k].val)} fill="none" stroke={s.col} stroke-width={k === "baseline" ? 2.6 : 1.8} stroke-dasharray={s.dash ?? ""} />)}
+    {Object.entries(STYLE).map(([k, s], i) => (
+      <g>
+        <line x1={G.l} x2={G.l + 22} y1={190 + i * 22} y2={190 + i * 22} stroke={s.col} stroke-width="2.2" stroke-dasharray={s.dash ?? ""} />
+        <text x={G.l + 30} y={194 + i * 22} font-size="11" fill={INK}>{s.label}</text>
+        <text x={W - 8} y={194 + i * 22} font-size="11" text-anchor="end" font-weight="700" fill={s.col}>{final(k).toFixed(2)}</text>
+      </g>
+    ))}
+    <line x1={G.l} x2={G.l + 22} y1={300} y2={300} stroke={JADE} stroke-width="1.4" stroke-opacity="0.55" stroke-dasharray="3 3" />
+    <text x={G.l + 30} y={304} font-size="11" fill={INK}>baseline training loss (smoothed)</text>
+    <text x={W - 8} y={176} font-size="10.5" text-anchor="end" fill={MUTED}>final validation loss</text>
+    <text x={G.l} y={G.t - 8} font-size="11" font-weight="700" fill={INK}>gradient norm, max per 5 steps</text>
+    {[0, 8, 16].map((v) => <g><line x1={G.l} x2={G.l + G.w} y1={Y(G, v)} y2={Y(G, v)} stroke="#eef0f0" /><text x={G.l - 6} y={Y(G, v) + 4} font-size="10" text-anchor="end" fill={MUTED}>{v}</text></g>)}
+    <path d={path(G, runs.lr_very_high_no_clip.grad_norm)} fill="none" stroke={NEG} stroke-width="1.2" stroke-dasharray="5 4" />
+    <path d={path(G, runs.baseline.grad_norm)} fill="none" stroke={JADE} stroke-width="1.4" />
+    <line x1={G.l} x2={G.l + G.w} y1={Y(G, 1)} y2={Y(G, 1)} stroke={MUTED} stroke-dasharray="2 3" />
+    <text x={G.l + G.w} y={Y(G, 1) - 4} font-size="9.5" text-anchor="end" fill={MUTED}>clip threshold 1</text>
+  </svg>
+</div>
