@@ -336,5 +336,31 @@
     "verifiedOn": "2026-11-10",
     "status": "cited in P2 for MinHash",
     "limits": "Origin of the estimator; the banding scheme and parameters used are FineWeb's."
+  },
+  {
+    "id": "muennighoff-2023",
+    "title": "Scaling Data-Constrained Language Models",
+    "organization": "Hugging Face, Harvard, University of Turku",
+    "researchDate": "2023-05-25",
+    "reviewedVersion": "arXiv v4 (26 Oct 2023); abstract and Fig. 1 read",
+    "url": "https://arxiv.org/abs/2305.16264v4",
+    "read": "Abstract; Fig. 1 (return on compute when repeating)",
+    "priority": 5,
+    "verifiedOn": "2026-11-10",
+    "status": "used in P2 (budget activity) and the FineWeb review",
+    "limits": "Loss-based; models up to 9B and 900B tokens; one data distribution."
+  },
+  {
+    "id": "cs336-2026",
+    "title": "Stanford CS336: Language Modeling from Scratch (Spring 2026)",
+    "organization": "Stanford University (P. Liang, T. Hashimoto)",
+    "researchDate": "Spring 2026",
+    "reviewedVersion": "Lecture files at github.com/stanford-cs336/lectures commit de53a9f: lecture_01.py and lecture_13.py (structure), lecture_14.py (filtering, deduplication, data_mixing read in full). Videos not watched.",
+    "url": "https://cs336.stanford.edu/",
+    "read": "Lecture 14 'Data II'; lecture 13 'Data I' structure; lecture 1 tokenization structure",
+    "priority": 2,
+    "verifiedOn": "2026-11-10",
+    "status": "primary teaching backbone; used in P2 and planned for P3",
+    "limits": "Lecture notes, not peer-reviewed; cite original papers for evidence."
   }
 ]

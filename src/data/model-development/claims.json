@@ -137,17 +137,17 @@
       "fineweb"
     ],
     "location": "/blog/model-development-pretraining-corpus/",
-    "conditions": "App. E.1 p. 21; reproduced in scripts/course/p2_corpus.py."
+    "conditions": "App. E.1 p. 21; reproduced in scripts/course/p2_corpus.py. The post states the 0.75 and 0.85 values operationally; the formula is in the review."
   },
   {
     "id": "P2-03",
     "status": "Derived",
-    "claim": "A minhash under a random order agrees with probability equal to the Jaccard similarity; for the toy pair (3 shared of 7) the simulated agreement is 0.430 versus 3/7.",
+    "claim": "MinHash signatures are built so that the fraction of agreeing positions estimates the Jaccard similarity of two documents' shingle sets.",
     "sourceIds": [
       "broder-1997"
     ],
     "location": "/blog/model-development-pretraining-corpus/",
-    "conditions": "Probability argument; 100,000-order simulation in the script."
+    "conditions": "Stated operationally in the post (derivation moved to further reading); Broder 1997."
   },
   {
     "id": "P2-04",
@@ -173,12 +173,12 @@
   {
     "id": "P2-06",
     "status": "Reported",
-    "claim": "datatrove 0.10.1 FineWebQualityFilter removes the toy flights page with reason short_line_ratio; it also applies a newline-per-word > 0.3 rule not in the paper; examples/fineweb.py applies all filters before MinHash.",
+    "claim": "datatrove 0.10.1 FineWebQualityFilter removes the toy flights page with reason short_line_ratio; the current filter also applies a newline-per-word > 0.3 rule not in the paper; examples/fineweb.py applies all filters before MinHash.",
     "sourceIds": [
       "datatrove-0.10.1"
     ],
-    "location": "/blog/model-development-pretraining-corpus/",
-    "conditions": "Executed in a scratch virtualenv with datatrove 0.10.1 from PyPI."
+    "location": "/paper-reviews/fineweb/",
+    "conditions": "Executed in a scratch virtualenv with datatrove 0.10.1 from PyPI. The post shows only the short_line_ratio result; the discrepancies are in the review."
   },
   {
     "id": "P2-07",
@@ -230,5 +230,35 @@
     ],
     "location": "/paper-reviews/fineweb/",
     "conditions": "Full-text search of v2 for 'contamin'; Sec 4.2 p. 9."
+  },
+  {
+    "id": "P2-12",
+    "status": "Reported",
+    "claim": "With constrained data and a fixed compute budget, training with up to 4 epochs of repeated data gives negligible loss changes compared with unique data; with more repetition the value of added compute decays towards zero.",
+    "sourceIds": [
+      "muennighoff-2023"
+    ],
+    "location": "/blog/model-development-pretraining-corpus/",
+    "conditions": "Abstract and Fig. 1, p. 1, arXiv v4; models up to 9B parameters and 900B tokens. Used in the post's budget activity and the review's budget confound."
+  },
+  {
+    "id": "P2-13",
+    "status": "Reported",
+    "claim": "CS336 lecture 14 states there is no single optimal filtering threshold (longer training wants more, lower-quality data; shorter training wants less, higher-quality data) and shows a product description repeated 61,036 times in C4.",
+    "sourceIds": [
+      "cs336-2026"
+    ],
+    "location": "/blog/model-development-pretraining-corpus/",
+    "conditions": "lecture_14.py at stanford-cs336/lectures de53a9f, functions filtering() and deduplication(); lecture file read, video not watched."
+  },
+  {
+    "id": "P2-14",
+    "status": "Derived",
+    "claim": "Contamination is exposure to evaluation items, their answers or solutions, or close derivatives; learning general facts that a benchmark also tests is not contamination. Word-overlap search catches copies but cannot separate general knowledge from reworded items (1/6 shared 3-grams for both in the toy).",
+    "sourceIds": [
+      "fineweb"
+    ],
+    "location": "/blog/model-development-pretraining-corpus/",
+    "conditions": "Definition per the series' writing guide; toy overlap counts in scripts/course/p2_corpus.py. FineWeb (Sec 4.2) is cited only for not describing decontamination."
   }
 ]

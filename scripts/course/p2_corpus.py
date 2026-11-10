@@ -4,9 +4,6 @@ Run: python3 scripts/course/p2_corpus.py
 Pure Python. If datatrove 0.10.1 is importable, the toy documents are also run
 through its real FineWebQualityFilter, MinHash shingling and PIIFormatter.
 """
-import hashlib
-import math
-import random
 
 TERMINAL = (".", "!", "?", '"', "'")  # the subset of datatrove's TERMINAL_PUNCTUATION the toy needs
 
@@ -59,32 +56,6 @@ edit1 = doc.copy(); edit1[50] = "CHANGED"
 s0, s1 = shingles(" ".join(doc), 5), shingles(" ".join(edit1), 5)
 print(f" 100 words, one changed: {len(s0)} shingles each, shared {len(s0 & s1)}, union {len(s0 | s1)}, J = {jaccard(s0, s1):.3f}")
 assert (len(s0), len(s0 & s1), len(s0 | s1)) == (96, 91, 101)
-edit2 = edit1.copy(); edit2[20] = "ALSO"
-s2 = shingles(" ".join(edit2), 5)
-J2 = jaccard(s0, s2)
-print(f" two words changed far apart: shared {len(s0 & s2)}, union {len(s0 | s2)}, J = {J2:.3f}")
-assert (len(s0 & s2), len(s0 | s2)) == (86, 106)
-
-# -- MinHash: the minimum under a random order lands in both sets with probability J --
-section("MinHash estimate")
-rng = random.Random(0)
-sa, sb = shingles(A, 2), shingles(B, 2)
-union = sorted(sa | sb)
-trials, agree = 100_000, 0
-for _ in range(trials):
-    order = union[:]; rng.shuffle(order)
-    rank = {s: i for i, s in enumerate(order)}
-    agree += min(sa, key=rank.get) == min(sb, key=rank.get)
-print(f" random orders where both minima agree: {agree / trials:.3f} (J = 3/7 = {3 / 7:.3f})")
-assert abs(agree / trials - 3 / 7) < 0.01
-# With 112 hash functions the fraction of agreeing minhashes estimates J.
-P = (1 << 61) - 1
-params = [(rng.randrange(1, P), rng.randrange(0, P)) for _ in range(112)]
-h = lambda s: int.from_bytes(hashlib.sha1(s.encode()).digest()[:8], "little") % P  # 64-bit shingle hash, as datatrove
-sig = lambda S: [min((a * h(x) + b) % P for x in S) for a, b in params]
-est = sum(x == y for x, y in zip(sig(s0), sig(s1))) / 112
-print(f" 112 hashes on the 100-word pair: {est:.2f} agree (J = {jaccard(s0, s1):.2f})")
-
 # -- Banding: 14 buckets of 8 hashes ------------------------------------------------
 section("probability of being matched, 14 buckets x 8 hashes")
 
@@ -96,10 +67,10 @@ def p_match(s, r=8, b=14):
 s = 0.75
 print(f" s = 0.75: one bucket {s ** 8:.3f}, no bucket {(1 - s ** 8) ** 14:.3f}, matched {p_match(s):.3f}")
 assert round(p_match(0.75), 2) == 0.77
-for s in (0.5, 0.7, 0.8, 0.85, 0.9, round(J2, 3)):
+for s in (0.5, 0.6, 0.7, 0.8, 0.85, 0.9):
     print(f" s = {s}: {p_match(s):.4f}")
 assert round(p_match(0.7), 2) == 0.56 and round(p_match(0.8), 2) == 0.92 and round(p_match(0.85), 3) == 0.988
-print(f" steepest near (1/14)^(1/8) = {(1 / 14) ** (1 / 8):.2f}")
+assert p_match(0.5) < 0.06 and round(p_match(0.6), 2) == 0.21 and round(p_match(0.85), 2) == 0.99
 
 # -- Global versus per-snapshot deduplication, toy ----------------------------------
 section("global versus per-snapshot dedup (illustrative)")
@@ -121,16 +92,28 @@ share = lambda ps: sum(p[2] for p in ps) / len(ps)
 print(f" global: {len(glob)} pages, good share {share(glob):.0%};  per snapshot: {len(per)} pages, good share {share(per):.0%}")
 assert len(oldest) == 4 and sum(p[2] for p in oldest) == 1 and share(glob) == 0.5 and share(per) == 0.7
 
-# -- Contamination by word n-gram overlap --------------------------------------------
-section("benchmark overlap, word 3-grams")
-Q = "which gas do plants absorb from the air"
-D1 = "students learn which gas do plants absorb from the air during photosynthesis"
-D2 = "plants take in carbon dioxide from the air"
+# -- Contamination: general knowledge versus the item and its derivatives -----------
+section("benchmark overlap, word 3-grams of the question")
+norm = lambda t: " ".join("".join(c for c in t.lower() if c.isalnum() or c.isspace()).split())
+Q = norm("Which gas do plants absorb from the air?")
+PAGES = {
+    "textbook (general knowledge)": "Plants take in carbon dioxide from the air and release oxygen.",
+    "quiz copy (item and answer)": "Quiz: Which gas do plants absorb from the air? (A) oxygen (B) carbon dioxide (C) nitrogen (D) helium. Answer: B",
+    "reworded item (derivative)": "What gas from the air do plants take in? (A) oxygen (B) carbon dioxide (C) nitrogen (D) helium",
+}
 q3 = shingles(Q, 3)
-for d in (D1, D2):
-    hit = len(q3 & shingles(d, 3))
-    print(f" {hit}/{len(q3)} of the question's 3-grams appear in: {d!r}")
-assert len(q3) == 6 and len(q3 & shingles(D1, 3)) == 6 and len(q3 & shingles(D2, 3)) == 1
+hits = {k: len(q3 & shingles(norm(v), 3)) for k, v in PAGES.items()}
+for k, v in hits.items():
+    print(f" {v}/{len(q3)} shared: {k}")
+assert len(q3) == 6 and list(hits.values()) == [1, 6, 1]
+
+# -- Token exposure under a fixed budget --------------------------------------------
+section("passes over the filtered data")
+for budget in (100, 1000):
+    for kept in (90, 30, 300):
+        print(f" budget {budget}B, {kept}B kept: {budget / kept:.1f} passes")
+assert round(100 / 90, 1) == 1.1 and round(100 / 30, 1) == 3.3 and round(1000 / 30) == 33 and round(1000 / 90) == 11
+assert 200 / 50 == 4 and 1000 / 50 == 20 and jaccard(set(range(6)) | {"a", "b"}, set(range(6)) | {"c", "d"}) == 0.6
 
 # -- Scale --------------------------------------------------------------------------
 section("FineWeb token counts (paper)")

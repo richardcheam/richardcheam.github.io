@@ -65,6 +65,6 @@ if (!lesson.includes('class="katex')) errors.push('Lesson P1: math was not rende
 for (const n of ['the count is 10 although only 8', '100-fold', '1.5 against 2']) if (!lesson.includes(n)) errors.push(`Lesson P1: worked example missing (${n})`);
 const corpus = await html('/blog/model-development-pretraining-corpus/');
 if (!corpus.includes('class="katex')) errors.push('Lesson P2: math was not rendered');
-for (const n of ['short_line_ratio', '56%, 77%, 92% and 98.8%', 'they share 91 of 101']) if (!corpus.includes(n)) errors.push(`Lesson P2: worked example missing (${n})`);
+for (const n of ['short_line_ratio', 'share 91 of 101', 'learning it is the point of pre-training', 'Try it: predict token exposure']) if (!corpus.includes(n)) errors.push(`Lesson P2: worked example missing (${n})`);
 if (errors.length) { console.error(errors.join('\n')); process.exitCode = 1; }
 else console.log(`Checked ${routes.length} pages, ${checkedLinks} internal links/anchors, ${modules.length} modules, ${sources.length} sources and ${claims.length} claims; math, feed, sitemap and OG images present.`);

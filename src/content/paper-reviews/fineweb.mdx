@@ -28,8 +28,6 @@ links:
     url: "/blog/model-development-pretraining-corpus/"
 ---
 
-import SnapshotDedup from "../../components/figures/SnapshotDedup.astro";
-
 ## The problem and what came before
 
 Every open web dataset before FineWeb started from the same raw material, Common Crawl, and ended in a different place, because each made different choices about extraction, filtering and deduplication (Sec 2, pp. 2–3). C4 kept only lines ending in terminal punctuation and deduplicated three-line windows. RefinedWeb extracted text with trafilatura, applied Gopher-style heuristics and ran both fuzzy and exact deduplication. Dolma used Bloom filters at URL, document and paragraph level. Meanwhile the strongest open-weight models, such as Llama 3 and Mixtral, did not release their data or say much about how it was made (Abstract and Sec 1, p. 1).
@@ -61,26 +59,19 @@ $$
 P(\text{matched}) = 1 - \left(1 - s^{8}\right)^{14},
 $$
 
-because one minhash agrees with probability $s$, a bucket of 8 agrees with probability $s^8$, and the pair is missed only if all 14 buckets fail (App. E.1, p. 21). This gives 56%, 77%, 92% and 98.8% at $s$ = 0.7, 0.75, 0.8 and 0.85. RefinedWeb's 450 buckets of 20 give a sharper cut-off at far higher cost (App. E.1, pp. 21–22; Fig. 13). The derivation, with figures, is in the [post on building a pre-training corpus](/blog/model-development-pretraining-corpus/).
+because one minhash agrees with probability $s$ (under a random ordering of shingles, two documents share their first shingle exactly when that shingle is one they have in common), a bucket of 8 agrees with probability $s^8$, and the pair is missed only if all 14 buckets fail (App. E.1, p. 21). This gives 56%, 77%, 92% and 98.8% at $s$ = 0.7, 0.75, 0.8 and 0.85. RefinedWeb's 450 buckets of 20 give a sharper cut-off at far higher cost (App. E.1, pp. 21–22; Fig. 13). The estimate goes back to Broder (1997); Stanford CS336's [lecture 14](https://cs336.stanford.edu/) develops it with locality-sensitive hashing.
 
 The new heuristic filters are derived from data rather than intuition (Sec 3.6, p. 7). The authors computed over 50 document statistics on a higher- and a lower-quality version of the 2013-48 snapshot, chose thresholds where the lower-quality version dominated the histogram (Fig. 8), giving 16 candidates, and ablated each one (App. E.4, p. 24). Three survived: remove documents where the fraction of lines ending in punctuation is at most 0.12, where characters in duplicated lines make up a large fraction, or where at least 0.67 of lines are shorter than 30 characters. Together they removed about 22% of tokens and raised the aggregate score by about 1% (Sec 3.6, p. 7).
 
-## Worked example: why deduplicating more made things worse
+## The decisive experiment: what global deduplication kept
 
 The paper's most instructive result is a failure. The first attempt deduplicated **globally**, across all 96 snapshots, processing the newest snapshot first. In the oldest snapshots this removed up to 90% of the data; the corpus shrank to 4 trillion tokens, and a model trained on 350 billion tokens of it was barely better than one trained without deduplication, far behind RefinedWeb (Sec 3.4, p. 5; Fig. 3).
 
-To see why, the authors took the 2013-48 snapshot and trained on two slices of it: the roughly 31 billion tokens that global deduplication had **kept**, and 171 billion tokens obtained by deduplicating the roughly 460 billion tokens it had **removed** on their own. The removed data trained the better model (Sec 3.4, p. 5; Fig. 4). Inspection agreed: the kept data had more ads, keyword lists and badly formatted text.
+The follow-up is well designed. Instead of arguing about why, the authors split one old snapshot, 2013-48, into what global deduplication had **kept** (about 31 billion tokens) and what it had **removed** (about 460 billion tokens, deduplicated on their own to 171 billion), and trained the same 1.71B model on each for the same number of tokens (Sec 3.4, p. 5; Fig. 4). The removed data trained the better model, and inspection agreed: the kept data had more ads, keyword lists and badly formatted text. The [corpus post](/blog/model-development-pretraining-corpus/) illustrates the mechanism with a toy.
 
-The figure below reproduces the mechanism with toy numbers.
+What this establishes is specific. In Common Crawl, at these settings and this scale, the documents that appear in only one old snapshot were on average worse than those repeated in later ones. It does not establish that repeated documents are good in general: templated pages and boilerplate are repeated too, which is why within-snapshot deduplication still helps. The authors' explanation is offered as a hypothesis: most of the benefit comes from removing very large clusters, with hundreds of thousands of copies, while removing small clusters of fewer than about 100 copies, roughly one per crawl, can hurt (Sec 3.4, pp. 5–6). The experiments are consistent with this but do not test it directly, for example by deduplicating only clusters above a size threshold.
 
-<figure class="blog-figure blog-figure--wide">
-  <SnapshotDedup alt="Three columns of ten page tiles for crawls from 2013, 2018 and 2023. Six good pages appear in every crawl; four appear once, one good and three spam. Deduplicating newest first removes the six recrawled pages from the two older crawls, leaving them mostly spam; a bar shows 50 percent good pages. Deduplicating each crawl separately leaves 70 percent good." />
-  <figcaption><strong>Figure 1. Global deduplication empties old crawls of their best pages.</strong> Pages that are recrawled and republished tend to be good ones, so in an old crawl they are exactly the pages already seen in newer crawls. What global deduplication leaves in the old crawl is what appeared only once. Illustrative numbers.</figcaption>
-</figure>
-
-Deduplicating each snapshot independently, with the same parameters, left 20 trillion tokens and matched RefinedWeb (Sec 3.4, pp. 5–6; Fig. 5). Four lighter global methods applied on top, deduplicating by URL, by line, by line with a minimum length, and by three-line spans, each removed between 71% and 85% of tokens and each made results worse (App. E.3, p. 23; Fig. 15).
-
-The authors' explanation is offered as a hypothesis: most of deduplication's benefit comes from removing the very large clusters, with hundreds of thousands of copies, that every crawl contains, while removing small clusters of fewer than about 100 copies, roughly one per crawl, can hurt (Sec 3.4, pp. 5–6). The experiments are consistent with this but do not test it directly, for example by deduplicating only clusters above a size threshold.
+Deduplicating each snapshot independently, with the same parameters, left 20 trillion tokens and matched RefinedWeb (Sec 3.4, pp. 5–6; Fig. 5). Four lighter global methods applied on top, deduplicating by URL, by line, by line with a minimum length, and by three-line spans, each removed between 71% and 85% of tokens and each made results worse (App. E.3, p. 23; Fig. 15). Appendix E.2 adds a caution about measurement: in a simulated corpus where every document is repeated 100 times, a 1-billion-token sample contains almost no repeats, so small ablations cannot see deduplication effects (pp. 22–23). The authors therefore judged deduplication at 350 billion tokens.
 
 ## The experiments and what they show
 
@@ -108,6 +99,7 @@ The analyses after that show what the filter costs. FineWeb-Edu shifts topics to
 - **Small differences, two seeds.** Several decisions rest on aggregate differences of about one percentage point, from two runs each, without reported confidence intervals.
 - **Benchmarks selected for signal.** Choosing tasks that respond at small scale is sensible for ablations, but it also defines "quality" as what improves those tasks.
 - **FineWeb-Edu is aligned with its evaluation.** A classifier asked to find grade-school educational content improves MMLU and ARC, school-style knowledge benchmarks. That is a real effect and a targeted one: the threshold was set to limit losses on HellaSwag, and FineWeb-Edu models fit broad web text worse than FineWeb models (Sec 4.2, p. 9).
+- **One training budget per comparison.** Every comparison holds training tokens fixed, at 28 or 350 billion. Aggressive filters look best at small budgets because nothing has to be repeated. FineWeb-Edu's 1.3 trillion tokens cover a 350-billion-token run without repetition, but a run of several trillion tokens would pass over it several times, and the paper does not test whether its advantage survives that. Scaling Data-Constrained Language Models finds up to about 4 epochs almost as good as fresh data in its setting, with rapidly diminishing returns after that ([Muennighoff et al., 2023](https://arxiv.org/abs/2305.16264), abstract).
 - **Unequal dataset sizes.** The comparison samples 350 billion tokens from each dataset (Sec 3.7, p. 8), but C4 has 172 billion and CC-100 70 billion, so they must be repeated to reach that budget. The paper does not say how this was handled, and repetition itself affects results.
 - **Threshold derivation.** The heuristic thresholds were found by contrasting two versions of the 2013-48 snapshot that differ by how they were deduplicated; the selected filters were then tested on a different snapshot, 2019-18, which limits but does not remove the risk of learning that particular contrast.
 
@@ -124,6 +116,7 @@ The current datatrove filter also has a fourth rule, newlines per word above 0.3
 ## How it changes training decisions
 
 - **Extract from raw HTML** with a precision-oriented extractor, and budget for it: it is the stage most expensive to redo.
+- **Choose filter strictness for the training budget.** Compute how many passes over the filtered data the planned run implies, and re-test a strict filter at a budget close to the real one.
 - **Deduplicate within a crawl or source first.** Before deduplicating across sources or time, check what the removed and kept parts each train; FineWeb's 2013-48 experiment is a template for that check.
 - **Evaluate deduplication at scale.** Small training samples hide repetition (App. E.2, pp. 22–23), so a 28-billion-token ablation can miss a deduplication effect that matters at trillions.
 - **Derive heuristic thresholds from distributions, then ablate them,** and read samples of what each filter removes per domain and language.

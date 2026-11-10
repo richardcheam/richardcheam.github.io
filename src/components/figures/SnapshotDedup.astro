@@ -1,9 +1,9 @@
 ---
-// Model development, FineWeb: why deduplicating across all crawls left the
-// oldest crawl with worse text (FineWeb §3.4, Fig. 4) and why per-crawl
-// deduplication kept a better mixture. Illustrative toy: three crawls of 10
-// pages, 6 stable good pages recrawled every time, 4 seen once (1 good, 3
-// spam). Global: 18 pages, 50% good; per crawl: 30 pages, 70% good. Matches
+// Model development, "Building a pre-training corpus": how deduplicating
+// across crawls changes the mixture, in a toy where the pages repeated across
+// crawls are good (as FineWeb found for its 2013 snapshot, §3.4, Fig. 4; not a
+// general rule). Three crawls of 10 pages, 6 repeated good pages, 4 seen once
+// (1 good, 3 spam). Global: 18 pages, 50% good; per crawl: 30 pages, 70% good. Matches
 // scripts/course/p2_corpus.py.
 const { alt } = Astro.props;
 ---
@@ -12,7 +12,7 @@ const { alt } = Astro.props;
     <title id="sd-title">Three crawls of ten pages deduplicated globally, newest first, and then each crawl on its own</title>
     <g data-draw></g>
   </svg>
-  <noscript><p>Three crawls each hold the same six good pages plus four pages seen only once: one good and three spam. Deduplicating across all crawls, newest first, removes the six recrawled pages from the two older crawls, so each older crawl keeps one good page and three spam pages: 18 pages remain, half of them good. Deduplicating each crawl on its own removes nothing here: 30 pages remain, 70% good, with each stable page repeated three times.</p></noscript>
+  <noscript><p>A toy: three crawls each hold the same six good pages plus four pages seen only once: one good and three spam. Deduplicating across all crawls, newest first, removes the six recrawled pages from the two older crawls, so each older crawl keeps one good page and three spam pages: 18 pages remain, half of them good. Deduplicating each crawl on its own removes nothing here: 30 pages remain, 70% good, with each stable page repeated three times.</p></noscript>
   <button type="button" class="fig-replay" data-replay>Replay</button>
 </div>
 
@@ -33,12 +33,12 @@ const { alt } = Astro.props;
   document.querySelectorAll<HTMLElement>("[data-snapshot-dedup]").forEach((root) => {
     const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!;
     const steps = () => [
-      { say: "Three crawls of the web, ten pages each. The same six good pages are recrawled every time. Four pages appear only once: one good, three spam.", math: "each crawl: 6 recrawled good + 1 new good + 3 spam" },
+      { say: "A toy: three crawls of ten pages each. In this toy, the six pages repeated in every crawl are good, and of the four pages seen only once, one is good and three are spam.", math: "each crawl: 6 recrawled good + 1 new good + 3 spam" },
       { say: "Deduplicate across all crawls, newest first. The 2023 crawl is processed first, so it keeps all ten pages.", math: "2023: keep 10" },
       { say: "In 2018 the six recrawled pages were already kept from 2023, so they are removed. Only the four pages seen once survive.", math: "2018: keep 4" },
-      { say: "The same happens to 2013. What survives in the old crawl is what nobody recrawled or republished, and here that is mostly spam.", math: "2013: keep 1 good + 3 spam" },
-      { say: "Across all crawls, 18 pages remain, and only half of them are good. Removing duplicates did not remove spam; it removed the good pages' extra copies and so raised spam's share.", math: "global: 9 good of 18 = 50%" },
-      { say: "Deduplicate each crawl on its own instead. Nothing is removed in this toy, because no crawl repeats a page within itself. The good pages now appear three times each, but the mixture is better.", math: "per crawl: 21 good of 30 = 70%" },
+      { say: "The same happens to 2013. What survives in the old crawl is what appeared only once, and in this toy that is mostly spam.", math: "2013: keep 1 good + 3 spam" },
+      { say: "Across all crawls, 18 pages remain, and only half of them are good. Here deduplication removed the good pages' extra copies, so spam's share rose. With different data, where the repeated pages were junk, the same step would have helped.", math: "global: 9 good of 18 = 50%" },
+      { say: "Deduplicate each crawl on its own instead. Nothing is removed in this toy, because no crawl repeats a page within itself. The repeated pages now appear three times each, and in this toy the mixture is better.", math: "per crawl: 21 good of 30 = 70%" },
     ];
     function removed(c: number, p: Page, k: number) { return k >= 1 && k <= 4 && p.stable && ((c === 1 && k >= 2) || (c === 0 && k >= 3)); }
     function draw(k: number) {
