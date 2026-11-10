@@ -34,7 +34,7 @@ Post-training needs the model, probability and optimization foundations (B1 and 
 
 ## Essential sequence
 
-Eighteen topics. Substantial, but each is one post (some short), plus a paper review where a paper's evidence deserves its own treatment.
+Topics are questions, not post slots: a substantial question may be split across posts, and overlapping explanations combined into one. Each published post still answers one clear question. Paper reviews are added where a paper's evidence deserves its own treatment.
 
 ### Build
 
@@ -42,6 +42,7 @@ Eighteen topics. Substantial, but each is one post (some short), plus a paper re
 |---|---|---|---|---|---|
 | B1 | One training update | What happens between a batch of token IDs and a changed weight, and which conventions change the objective? | A1, A6 | Foundations: backprop, losses, optimisers, language models | Published (`/blog/model-development-one-update/`) |
 | B2 | Building a pre-training corpus | How does each processing stage change the training distribution, and is it worth what it removes under a fixed budget? | A2, A6 | B1 (for the objective); otherwise none | In review (PR #6), with the FineWeb review |
+| B2b | Data mixtures, sampling and repetition | How do sampling weights decide how often each source is seen, and when is repeating data acceptable? | A2, A6 | B2 | Planned |
 | B3 | Tokenization | How is text turned into token IDs, and what does the tokenizer cost in compute, context and fairness across languages? | A1, A2 | Foundations: language models | Next |
 | B4 | The decoder architecture as a set of choices | Which choices in a modern decoder (normalization, activation, positions, attention heads, MoE) matter, and why? | A2 | Foundations: attention, Transformer | Planned |
 | B5 | A complete small training run | What does it take to train a small language model end to end, and how do you know it is working? | A1, A2, A6 | B1, B3, B4 | Planned |
@@ -92,7 +93,7 @@ Specialist material that serves readers implementing one subsystem. Write an opt
 | Topic | Question | Needs | Good external starting points |
 |---|---|---|---|
 | MinHash and locality-sensitive hashing | Why does minhash agreement estimate Jaccard similarity, and how do buckets set the threshold? | B2 | CS336 lecture 14 (`jaccard_minhash`, `locality_sensitive_hashing`); Broder (1997); FineWeb App. E.1 |
-| Data mixtures and repetition | How should sources be weighted, and how much repetition is acceptable? | B2, B5 | CS336 lecture 14 (`data_mixing`); Muennighoff et al. (2023); DoReMi |
+| Advanced mixture optimization | How can mixture weights be optimized with proxy models or regression, and do they transfer across scale? | B2b, B5 | CS336 lecture 14 (`data_mixing`: RegMix and related); DoReMi |
 | Optimizer and schedule details | Warmup, cosine versus warmup-stable-decay, critical batch size, loss spikes | B5 | OLMo 2 report |
 | Collective communication | Ring and tree all-reduce cost models | S1 | CMU 15-442 "ML Parallelization (Data Parallelism and Zero Redundancy)" (11 Feb 2026); NCCL documentation |
 | Pipeline schedules | GPipe, 1F1B, interleaving and bubbles | S2 | Megatron-LM review; CMU 15-442 "ML Parallelization (Model and Pipeline Parallelism)" (16 Feb 2026) |
@@ -144,4 +145,5 @@ The first version taught only systems topics (training memory, collectives, a pa
 3. **B5 A complete small training run.** Deep: the full loop on a model trainable on free or local compute, with a loss curve, evaluation loss, learning-rate schedule and the three most common failures. Resources: CS336 assignment 1; OLMo 2 report for stability.
 4. **U1 Choosing and prompting a model**, early, so the Use track is reachable without the training sequence.
 
-Data-processing subtopics (mixtures, synthetic data, multilingual filtering) stay in the optional list unless a reader need arises.
+Basic mixtures, sampling and repetition are essential (B2b); advanced mixture optimization, synthetic pre-training data and multilingual filtering stay optional unless a reader need arises.
+- **2026-11-10, corrections before expanding.** B2: the budget activity no longer implies a universal four-pass limit; the Muennighoff et al. result is stated in its setting (models up to 9B, their data, final loss), and a pass count is presented as exposure only, not as a decision rule. FineWeb review excerpt now matches its qualified body. Plan: topics are questions, not post slots; basic mixtures, sampling and repetition made essential (B2b), advanced mixture optimization optional.
