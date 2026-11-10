@@ -8,8 +8,8 @@ const readJson = async file => JSON.parse(await readFile(file, 'utf8'));
 const sources = await readJson('src/data/model-development/sources.json');
 const claims = await readJson('src/data/model-development/claims.json');
 const errors = validateResearchIndex({ modules, sources, claims, units });
-// The hub plus every published unit; a new unit is checked as soon as it is listed.
-const routes = ['/model-development/', ...units.map(u => u.href)];
+// Every published unit; a new unit is checked as soon as it is listed.
+const routes = units.map(u => u.href);
 const origin = 'https://richardcheam.github.io';
 // These existing absolute menu URLs belong to separately hosted project repos;
 // they deliberately do not have files in this portfolio's dist directory.
@@ -45,7 +45,11 @@ for (const route of routes) {
     } catch { errors.push(`${route}: missing internal target ${target.pathname}${target.hash}`); }
   }
 }
+// The old hub only forwards to the blog series; nothing links to it any more.
+const hub = await readFile('dist/model-development/index.html', 'utf8');
+if (!hub.includes('url=/blog/?series=model-development') || !hub.includes('noindex')) errors.push('/model-development/ must redirect to the blog series');
 const sitemap = await readFile('dist/sitemap.xml', 'utf8');
+if (sitemap.includes(`${origin}/model-development/<`)) errors.push('/model-development/ redirect must stay out of the sitemap');
 for (const route of routes) if (!sitemap.includes(origin + route)) errors.push(`${route}: missing from sitemap`);
 const feed = await readFile('dist/feed.xml', 'utf8');
 for (const u of units) {

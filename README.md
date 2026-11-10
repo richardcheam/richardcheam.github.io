@@ -34,19 +34,20 @@ npm run preview   # serve dist/
 - A new blog category must be added to `src/data/categories.ts`, a new series to `src/data/series.ts`; the build fails otherwise.
 - The blog list, the home page, the mega menu, the feed and the sitemap are generated from the collections; nothing is maintained by hand except `projectLinks` in `src/data/site.ts` and the project cards in `src/page-content/`.
 
-## Model-development field guide
+## Model-development series
 
-`/model-development/` maps the curriculum and links existing prerequisites with
-advanced lessons in the `model-development` blog series and related paper
-reviews. Start with [the research/publication index](docs/model-development/research-index.md)
+Model development is a blog series, like Foundations: concept lessons and
+decision guides are posts in the `model-development` series, and their paper
+reviews live in the review collection, linked from the posts. The old
+`/model-development/` hub is now a redirect to the series filter on `/blog/`.
+Start with [the research/publication index](docs/model-development/research-index.md)
 for sources, claim mappings, review status and next questions. Do not add empty
 routes for planned topics. Keep research publication dates separate from article
 dates, and distinguish reported findings from calculated examples and proposed
 experiments.
 
 Published pages are listed once, in `publishedUnits` in
-`src/data/model-development.ts`: the hub's reading path and the output check
-both read it. [`coverage-matrix.md`](docs/model-development/coverage-matrix.md)
+`src/data/model-development.ts`, which the output check reads. [`coverage-matrix.md`](docs/model-development/coverage-matrix.md)
 tracks every curriculum area, published or planned.
 
 Each interactive figure keeps its arithmetic in a tested module and contains no

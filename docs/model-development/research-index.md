@@ -4,17 +4,17 @@ Status date: 9 November 2026. Base repository revision: `8369cd62c698f358cbe77d0
 
 ## Scope and patterns
 
-The public hub is `/model-development/`. Concept lessons and decision guides use the existing blog collection and `model-development` series. Paper reviews use the existing review collection. Reusable computational figures live beside the existing Astro figures, with pure mathematical functions under `src/lib/`. Existing foundational explanations are linked rather than duplicated. No new collection, backend, account system, analytics, progress storage or framework is introduced.
+Since 9 November 2026 the material is published as a plain blog series, like Foundations: the separate hub, nav item and course pages were dropped to keep the site to one pattern, and `/model-development/` redirects to `/blog/?series=model-development`. Concept lessons and decision guides use the existing blog collection and `model-development` series. Paper reviews use the existing review collection. Reusable computational figures live beside the existing Astro figures, with pure mathematical functions under `src/lib/`. Existing foundational explanations are linked rather than duplicated. No new collection, backend, account system, analytics, progress storage or framework is introduced.
 
 The source inventory is [`src/data/model-development/sources.json`](../../src/data/model-development/sources.json); claim mappings are [`claims.json`](../../src/data/model-development/claims.json). These records distinguish original research dates, inspected versions and source-verification dates. `Reported`, `Derived`, `Hypothesis` and `Unknown` are evidence statuses, not confidence scores. Unit-tested arithmetic is not a reproduced distributed-training experiment.
 
 ## Published units
 
-The list the hub and the output check read is `publishedUnits` in `src/data/model-development.ts`; adding a finished page there puts it in the reading path, the module card and every rendered-output check.
+The output check reads `publishedUnits` in `src/data/model-development.ts`; list every finished page there so its links, math, claims and figures are checked. Readers find the pages through the blog series.
 
 | Artifact | Location | Review status |
 |---|---|---|
-| Curriculum and reading hub | `/model-development/` | Implemented; editorial review pending |
+| Former hub | `/model-development/` | Redirect to the blog series; kept out of the sitemap |
 | Concept/decision lesson | `/blog/model-development-training-memory/` | Implemented; editorial review pending |
 | Paper review | `/paper-reviews/zero/` | Reviewed version identified; editorial review pending |
 | Memory estimator | `src/components/figures/TrainingMemoryEstimator.astro` | Numerical model tested; browser QA blocked by preview infrastructure |
