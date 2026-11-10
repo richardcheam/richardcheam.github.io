@@ -25,16 +25,17 @@ An outline, a placeholder page, an interactive figure or a passing build is not 
 
 ## Audit of the existing material (9 November 2026)
 
-| Page | What it teaches well | Gaps against this course | Decision |
-|---|---|---|---|
-| Training memory (lesson) | Byte-level ledger for mixed-precision Adam; ZeRO stages; persistent state versus peak | Starts from memory rather than from the update; no activation accounting; not tied to a consistent configuration | Keep; revise as D4 (sharded state) once D1–D3 exist, re-using the reference configuration |
-| Collectives (lesson) | Collective semantics, ring α–β model, buckets, ZeRO volumes, accumulation schedules | Mixes DP, ZeRO, TP and PP in one page; TP/PP shapes thin | Keep core as D2; move TP/PP material to D5/D6 when written |
-| Choosing a parallelism layout (guide) | Decision order, two scenarios, bubble coupling to batch | Depends on lessons not yet written; scenarios use their own shapes | Keep as the capstone D10; rework onto the reference configuration last |
-| ZeRO review | Ownership argument versus evidence; version boundaries | Thin on the paper's own derivations and ZeRO-R | Revise to the six-part review format when D4 is revised |
-| Megatron-LM review | Comparison controls, scatter/gather, time estimate | Missing a walkthrough of the tensor-parallel partition | Revise to the six-part format with D5 |
-| Foundations series (15 posts) | Prerequisites: backprop, losses, optimisers, normalisation, attention, Transformer, language models | Introductory depth by design | Link as prerequisites; do not duplicate |
+The first version of this series taught only systems topics: a training-memory lesson, a collectives lesson and a parallelism decision guide, with interactive calculators. They started from memory and communication rather than from the update they distribute, and did not follow the sequence below. **On 10 November 2026 those three posts, their four figures and their two calculation libraries were removed** (recoverable from git history before commit `9fc3f83`'s successor). The distributed strand rewrites these topics in order, on the reference configuration.
 
-Nothing currently teaches pre-training or post-training. Interactive calculators exist and are not being extended in this phase.
+Kept:
+
+| Page | Role now |
+|---|---|
+| ZeRO review (`/paper-reviews/zero/`) | Review for D4; to be revised to the six-part format when D4 is written |
+| Megatron-LM review (`/paper-reviews/megatron-ptd-p/`) | Review for D5 and D6; to be revised likewise |
+| Foundations series (15 posts) | Prerequisites: backprop, losses, optimisers, normalisation, attention, Transformer, language models; linked, not duplicated |
+
+Nothing taught pre-training or post-training before P1.
 
 ## Reference configuration
 
@@ -102,3 +103,4 @@ Chinchilla (arXiv 2203.15556), Llama 3 (2407.21783), OLMo 2 (2501.00656), ZeRO (
 - **2026-11-09, P1 drafted.** `/blog/model-development-one-update/` (series order 1). Verified against Transformers 4.51.3 and PyTorch 2.6 source, Loshchilov and Hutter v3 Algorithm 2, Llama 3 v3 §3.2 and nanoGPT; worked example and every number reproduced by `scripts/course/p1_update.py`, which checks hand gradients against autograd and the hand AdamW step against `torch.optim.AdamW`. Found and documented: the 4.51.3 Trainer counts each row's first label in `num_items_in_batch`. Self-review corrected one exercise (weight-decay factor) and two overstated phrases. Claims P1-01 to P1-07 added. **Status: drafted, awaiting Richard's review; not yet independently reviewed.**
 - Existing systems posts renumbered (memory 12, collectives 13, guide 20) so P1 comes first; memory stays before collectives until both are revised for the D strand, because the collectives text builds on the memory lesson.
 - **Next:** P2 (building a pre-training corpus) with the FineWeb review; first verify FineWeb (2406.17557) and the extraction, filtering and MinHash details against the paper and the datatrove code.
+- **2026-11-10.** Removed the three systems-first posts (memory, collectives, layout guide), their figures and libraries, and the old hub records (`coverage-matrix.md`, `research-index.md`, `docs/superpowers`); kept the ZeRO and Megatron-LM reviews and made them self-contained. Claims located on removed pages were dropped; the course plan is now the single record.

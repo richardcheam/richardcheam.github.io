@@ -20,10 +20,6 @@ tldr:
   - "**Evidence boundary:** the layout rules are measured on DGX A100 servers with NVLink inside and InfiniBand between; they transfer to hardware of the same shape, not to every cluster."
   - "**Decision:** the ZeRO-3 comparison shows a large gap at scale, but it compares tuned configurations, not one intervention. Use it to choose what to pilot."
 links:
-  - label: "Collectives lesson"
-    url: "/blog/model-development-collectives/"
-  - label: "Parallelism decision guide"
-    url: "/blog/model-development-choosing-parallelism/"
   - label: "Model development series"
     url: "/blog/?series=model-development#blog-filters"
 ---
@@ -56,7 +52,7 @@ consistent with the paper's 84 days. The estimate is only as good as $X$, which 
 
 The bubble formula connects directly to the scale result. A trillion-parameter model needs many pipeline stages to fit, and $\frac{p-1}{m}$ is only small if each batch has many microbatches. That is the mechanism behind the introduction's warning that "as much as 50% of time can be spent flushing the pipeline depending on the number of microbatches injected into the pipeline."
 
-The [collectives lesson](/blog/model-development-collectives/#tensor-and-pipeline-parallelism-move-activations) turns the four all-reduces per layer into bytes. For a microbatch of one 2,048-token sequence at width 8,192 in BF16, each all-reduce carries 32 MiB, and an 80-layer model runs 320 of them per microbatch. Inside a server they ride NVLink; between servers they would compete for the InfiniBand adapters. That is the arithmetic behind the tensor-within-a-server rule. The paper's ablation is the measurement that confirms it on this hardware.
+Turn the four all-reduces per layer into bytes. For a microbatch of one 2,048-token sequence at width 8,192 in BF16, each all-reduce carries 32 MiB, and an 80-layer model runs 320 of them per microbatch. Inside a server they ride NVLink; between servers they would compete for the InfiniBand adapters. That is the arithmetic behind the tensor-within-a-server rule. The paper's ablation is the measurement that confirms it on this hardware.
 
 ## Analysis: what each comparison isolates
 
@@ -72,7 +68,7 @@ The **interleaved schedule** shows how a result depends on its operating point. 
 
 The paper does not tell you how these layouts behave on a different network, with a different ratio of internal to external bandwidth, other jobs sharing links, or newer GPUs whose compute grew faster than their interconnect. Nor does it report convergence: these are throughput studies, and a layout that changes the effective batch can change the number of updates needed.
 
-A proportionate follow-up for your own cluster is the [decision guide's bounded experiment](/blog/model-development-choosing-parallelism/#a-bounded-experiment): fit the link constants with nccl-tests, then compare the two candidate layouts on one or two servers at the planned batch, with model, sequence length and precision held fixed. Report failed configurations alongside the successful ones.
+A proportionate follow-up for your own cluster: fit the network's latency and bandwidth with [nccl-tests](https://github.com/NVIDIA/nccl-tests), then compare the two candidate layouts on one or two servers at the planned batch, with model, sequence length and precision held fixed. Report failed configurations alongside the successful ones.
 
 <details>
   <summary>Check: the paper reports 52% of peak for the largest model. Can a smaller model on the same cluster expect at least that?</summary>

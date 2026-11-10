@@ -9,7 +9,7 @@
     "read": "Model-state memory analysis; Optimizer/gradient/parameter partitioning",
     "priority": 1,
     "verifiedOn": "2026-11-09",
-    "status": "used in memory and collectives modules",
+    "status": "planned for the distributed strand; cited in the ZeRO review",
     "limits": "Actual residency and bytes depend on precision and implementation"
   },
   {
@@ -22,7 +22,7 @@
     "read": "ZeRO overview; enabling stages; extraction and offload boundaries",
     "priority": 2,
     "verifiedOn": "2026-11-09",
-    "status": "used in first module",
+    "status": "planned for the distributed strand",
     "limits": "Documentation is an implementation contract, not a benchmark on the reader’s hardware."
   },
   {
@@ -35,7 +35,7 @@
     "read": "Stage ownership; prefetch_bucket_size; parameter persistence and offload options",
     "priority": 3,
     "verifiedOn": "2026-11-09",
-    "status": "used in first module",
+    "status": "planned for the distributed strand; cited in the ZeRO review",
     "limits": "Documentation is an implementation contract, not a benchmark on the reader’s hardware."
   },
   {
@@ -48,7 +48,7 @@
     "read": "Mixed precision; forward/backward with prefetching",
     "priority": 4,
     "verifiedOn": "2026-11-09",
-    "status": "used in first module",
+    "status": "planned for the distributed strand",
     "limits": "Tutorial configuration has different dtype/residency semantics from the illustrative sixteen-byte ledger."
   },
   {
@@ -61,7 +61,7 @@
     "read": "User contract; Communication groups; reshard_after_forward; MixedPrecisionPolicy",
     "priority": 5,
     "verifiedOn": "2026-11-09",
-    "status": "used in first module",
+    "status": "planned for the distributed strand",
     "limits": "Documentation interface verified; installed package behavior not executed"
   },
   {
@@ -74,7 +74,7 @@
     "read": "Sequence parallelism; Selective recomputation; Memory analysis",
     "priority": 6,
     "verifiedOn": "2026-11-09",
-    "status": "used in first module",
+    "status": "planned for the distributed strand",
     "limits": "Measured memory and speed gains depend on the evaluated configurations"
   },
   {
@@ -204,7 +204,7 @@
     "read": "§2.2 pipeline bubble and interleaved schedule; §2.3 and §3.2 tensor-parallel all-reduces; §3 takeaways; §4.1 scatter/gather; §5 results and the ZeRO-3 comparison",
     "priority": 1,
     "verifiedOn": "2026-11-09",
-    "status": "used in collectives module",
+    "status": "planned for the distributed strand; cited in the Megatron-LM review",
     "limits": "Measured on DGX A100 servers with NVLink inside and 8 × 200 Gb/s InfiniBand between; throughput only, no convergence comparison."
   },
   {
@@ -217,7 +217,7 @@
     "read": "Definitions of AllReduce, AllGather, ReduceScatter, AlltoAll; ReduceScatter + AllGather = AllReduce; same count and datatype on every rank",
     "priority": 1,
     "verifiedOn": "2026-11-09",
-    "status": "used in collectives module",
+    "status": "planned for the distributed strand",
     "limits": "Defines semantics, not performance; does not state an ordering rule beyond matching count and datatype."
   },
   {
@@ -230,7 +230,7 @@
     "read": "§3 cost model α + nβ; §4.1 ring allgather (p − 1)α + (p − 1)/p · nβ and why its bandwidth term cannot be reduced",
     "priority": 2,
     "verifiedOn": "2026-11-09",
-    "status": "used in collectives module",
+    "status": "planned for the distributed strand",
     "limits": "MPI on 2000s clusters; the model ignores contention, hierarchy and protocol switching."
   },
   {
@@ -243,7 +243,7 @@
     "read": "Algorithm bandwidth S/t; bus-bandwidth factors 2(n − 1)/n and (n − 1)/n; the best-case all-reduce derivation",
     "priority": 2,
     "verifiedOn": "2026-11-09",
-    "status": "used in collectives module",
+    "status": "planned for the distributed strand",
     "limits": "Defines reporting conventions for a benchmark; the derivation is a best case for point-to-point algorithms."
   },
   {
@@ -256,7 +256,7 @@
     "read": "bucket_cap_mb (default 25 MiB) and overlap of bucket reduction with backward",
     "priority": 2,
     "verifiedOn": "2026-11-09",
-    "status": "used in collectives module",
+    "status": "planned for the distributed strand",
     "limits": "API documentation; says overlap can happen, not how much on a given job."
   },
   {

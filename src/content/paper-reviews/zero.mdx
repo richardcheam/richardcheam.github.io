@@ -20,8 +20,6 @@ tldr:
   - "**Evidence boundary:** this is a paper review and educational analysis, with no training reproduction."
   - "**Decision:** preserve configuration and hardware context before transferring a systems result to another job."
 links:
-  - label: "Training-memory lesson"
-    url: "/blog/model-development-training-memory/"
   - label: "Model development series"
     url: "/blog/?series=model-development#blog-filters"
 ---
@@ -36,7 +34,7 @@ The [submission history](https://arxiv.org/abs/1910.02054v3) lists withdrawn v1 
 
 ## Derived: ownership changes the denominator
 
-The accompanying [memory lesson](/blog/model-development-training-memory/) makes one illustrative layout explicit: two-byte working weights, two-byte gradients, four-byte master weights and eight bytes of Adam moments. The following is educational arithmetic under those assumptions, not a reconstructed allocation trace from the paper.
+Take one illustrative mixed-precision layout: two-byte working weights, two-byte gradients, four-byte master weights and eight bytes of Adam moments. The following is educational arithmetic under those assumptions, not a reconstructed allocation trace from the paper.
 
 Let $N$ count trainable scalars and $d$ count ranks in the sharding group. If a state has $c$ bytes per scalar, replication costs $cN$ per rank while ideal even partitioning costs $cN/d$. Applying this operation to selected ledger rows gives:
 
@@ -74,4 +72,4 @@ A proposed follow-up would hold model, sequence length, effective batch, precisi
 
 To isolate a materialization effect, change only grouping or prefetching and inspect the allocation timeline. To isolate activation pressure, change only microbatch or recomputation. These interventions test competing explanations for a peak; neither is claimed to have been run here.
 
-The [training-memory lesson](/blog/model-development-training-memory/) includes a capped synthetic experiment proposal and worked calculations. The next post in the series, [Collectives](/blog/model-development-collectives/), takes up communication and parallelism, where a memory saving must be weighed against movement and scheduling costs.
+The next question is communication: §7 of the paper shows that stages 1 and 2 move the same volume per step as plain data parallelism, and stage 3 about 1.5 times as much, so a memory saving must be weighed against movement and scheduling costs.
