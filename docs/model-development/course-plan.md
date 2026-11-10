@@ -23,6 +23,8 @@ A lesson is done only when it has all of the following, and has been re-read for
 
 An outline, a placeholder page, an interactive figure or a passing build is not completion.
 
+Pages show only teaching content. Evidence status (reported, derived, implementation-dependent, open), versions and verification live in `claims.json`, `sources.json` and this file, not on the page: no evidence labels, disclaimers or notes about how the page was produced. Cite sources naturally in the text.
+
 ## Audit of the existing material (9 November 2026)
 
 The first version of this series taught only systems topics: a training-memory lesson, a collectives lesson and a parallelism decision guide, with interactive calculators. They started from memory and communication rather than from the update they distribute, and did not follow the sequence below. **On 10 November 2026 those three posts, their four figures and their two calculation libraries were removed** (recoverable from git history before commit `9fc3f83`'s successor). The distributed strand rewrites these topics in order, on the reference configuration.
@@ -104,3 +106,4 @@ Chinchilla (arXiv 2203.15556), Llama 3 (2407.21783), OLMo 2 (2501.00656), ZeRO (
 - Existing systems posts renumbered (memory 12, collectives 13, guide 20) so P1 comes first; memory stays before collectives until both are revised for the D strand, because the collectives text builds on the memory lesson.
 - **Next:** P2 (building a pre-training corpus) with the FineWeb review; first verify FineWeb (2406.17557) and the extraction, filtering and MinHash details against the paper and the datatrove code.
 - **2026-11-10.** Removed the three systems-first posts (memory, collectives, layout guide), their figures and libraries, and the old hub records (`coverage-matrix.md`, `research-index.md`, `docs/superpowers`); kept the ZeRO and Megatron-LM reviews and made them self-contained. Claims located on removed pages were dropped; the course plan is now the single record.
+- **2026-11-10.** Removed on-page meta commentary from P1 and both reviews (evidence-label headings and tags, the "Evidence and its limits" section, disclaimers, verification narration), per Richard; provenance stays in the claim and source records.

@@ -3,40 +3,38 @@ title: "ZeRO: what state partitioning proves, and what the experiments test"
 title_key: "ZeRO"
 published: true
 date: 2026-11-09
-question: "How should we separate ZeRO's memory argument from evidence for a particular distributed training implementation?"
-excerpt: "A source-bounded review of the original ZeRO paper, followed by independent accounting and an experiment-design critique. No training result is independently reproduced here."
+question: "What does partitioning optimizer state, gradients and parameters across data-parallel ranks save, and what do the paper's experiments actually measure?"
+excerpt: "ZeRO removes the redundant copies of model state that data parallelism keeps on every GPU. The memory arithmetic is exact; the speedups come from bundled configurations that change more than one thing at once."
 type: paper
 topic: [training]
 tags: [ZeRO, Distributed training, Memory accounting]
 org: "Microsoft"
 authors: "Samyam Rajbhandari, Jeff Rasley, Olatunji Ruwase, Yuxiong He"
 source_url: "https://arxiv.org/abs/1910.02054v3"
-source_label: "Read ZeRO (reviewed version v3)"
+source_label: "Read ZeRO (v3)"
 source_date: 2020-05-13
 read_time: "7 min"
 featured: false
 tldr:
-  - "**Derived here:** memory ownership is an accounting question; fitting a complete training step is a separate capacity question."
-  - "**Evidence boundary:** this is a paper review and educational analysis, with no training reproduction."
-  - "**Decision:** preserve configuration and hardware context before transferring a systems result to another job."
+  - "Partitioning model state cuts per-GPU memory, but replicated terms survive: stage 2 can never go below the working-weight copy."
+  - "Memory ownership and fitting a full training step are separate questions: activations and gathered parameters are not in the formulas."
+  - "The large speedups compare bundled configurations; carry the hardware and configuration with any result you transfer."
 links:
   - label: "Model development series"
     url: "/blog/?series=model-development#blog-filters"
 ---
 
-## Reported: a compact evidence record
+## What the paper does
 
-[ZeRO v3, §§3–7](https://arxiv.org/html/1910.02054v3#S3) analyzes partitioning optimiser states, gradients and parameters. Its contribution is distributed ownership/scheduling rather than a new optimisation objective. **§10 evaluates ZeRO-100B: optimiser-plus-gradient partitioning with ZeRO-R**, sometimes combined with Megatron model parallelism. It does not isolate complete parameter-partitioned stage 3 experimentally.
+[ZeRO, §§3–7](https://arxiv.org/html/1910.02054v3#S3) partitions three kinds of model state across data-parallel ranks instead of replicating them: optimizer state (stage 1), then gradients (stage 2), then parameters (stage 3). It changes who owns which tensor and when it is communicated, not the optimization objective.
 
-[§§10.1–10.2 and Figure 2](https://arxiv.org/html/1910.02054v3#S10) report 400 V100 GPUs in 25 DGX-2 nodes with 800 Gbps internode bandwidth, models up to 170B parameters, and speedups up to 10× against the stated baselines. §10.5/Figures 6–8 compare Table 3's optimisation bundles; the appendix records differing parallelism and batches. These conditional systems results establish neither universal speedup nor matched convergence.
+The experiments in §10 evaluate **ZeRO-100B: optimizer-plus-gradient partitioning with ZeRO-R**, sometimes combined with Megatron model parallelism. Full parameter partitioning (stage 3) is analysed but not isolated experimentally. §§10.1–10.2 and Figure 2 report 400 V100 GPUs in 25 DGX-2 nodes with 800 Gbps between nodes, models up to 170B parameters, and speedups up to 10× against the stated baselines. §10.5 and Figures 6–8 compare bundles of optimizations from Table 3, and the appendix shows the parallelism and batch sizes differ between runs.
 
-The [submission history](https://arxiv.org/abs/1910.02054v3) lists withdrawn v1 on 4 October 2019, v2 on 7 October, and reviewed v3 on 13 May 2020. The review date above is separate.
+The arXiv history lists v1 on 4 October 2019 (withdrawn), v2 on 7 October and v3, the version used here, on 13 May 2020.
 
-## Derived: ownership changes the denominator
+## Ownership changes the denominator
 
-Take one illustrative mixed-precision layout: two-byte working weights, two-byte gradients, four-byte master weights and eight bytes of Adam moments. The following is educational arithmetic under those assumptions, not a reconstructed allocation trace from the paper.
-
-Let $N$ count trainable scalars and $d$ count ranks in the sharding group. If a state has $c$ bytes per scalar, replication costs $cN$ per rank while ideal even partitioning costs $cN/d$. Applying this operation to selected ledger rows gives:
+Take a common mixed-precision layout: two-byte working weights, two-byte gradients, four-byte master weights and eight bytes of Adam moments, 16 bytes per parameter. Let $N$ be the number of trainable parameters and $d$ the number of ranks sharing the state. A state of $c$ bytes per parameter costs $cN$ per rank when replicated and $cN/d$ when evenly partitioned, so the four stages give
 
 $$
 \begin{aligned}
@@ -45,31 +43,29 @@ M_2&=2N+14N/d, & M_3&=16N/d.
 \end{aligned}
 $$
 
-One useful independent question is what happens to **aggregate** memory. Multiplying by $d$ gives $16Nd$, $4Nd+12N$, $2Nd+14N$ and $16N$. Increasing the group therefore reduces the redundancy of partitioned states while leaving replicated terms multiplied across ranks. This explains why adding devices can change model capacity before considering faster computation.
+Multiplying by $d$ gives the **total** across ranks: $16Nd$, $4Nd+12N$, $2Nd+14N$ and $16N$. Partitioning removes redundancy, but whatever stays replicated is still multiplied by the number of ranks.
 
-It also exposes an asymptote. Under this layout, stage 2 can never bring per-rank state below $2N$ merely by increasing $d$. For seven billion parameters, that surviving term is fourteen decimal gigabytes. A proposed device budget below it contradicts the assumptions before any benchmark is needed.
+The replicated terms also set a floor. Stage 2 can never bring per-rank state below $2N$, however large $d$ becomes. For seven billion parameters that floor is 14 GB, so a device budget below it is ruled out before any benchmark.
 
-None of these equations includes activation memory or the extra parameters materialized during computation. A full-state partition is an ownership statement; a kernel still needs its operands. The distinction is the bridge from paper analysis to an allocation timeline.
+None of these formulas includes activations or the parameters gathered for computation. Stage 3 says who **owns** each shard; a layer still needs its full weights while it runs.
 
 <details>
-  <summary>Check: does a state-memory formula validate a claim about peak memory?</summary>
-  <p>No. It validates only the counted allocations under its assumptions. Peak memory also depends on which temporary and persistent tensors coexist, their dtypes, and the implementation's scheduling.</p>
+  <summary>Check: does a state-memory formula settle whether a training step fits?</summary>
+  <p>No. It counts only the allocations it includes. The peak also depends on which activations, gathered parameters, communication buffers and temporary tensors exist at the same moment.</p>
 </details>
 
-## Analysis: capacity and speed need separate explanations
+## Capacity and speed need separate explanations
 
-An independent interpretation is that **more capacity can enable a different execution regime**. Once a job has room for a larger microbatch, useful work per kernel may change. Once it requires fewer model-parallel partitions, its communication pattern may change. Those are plausible causal pathways to investigate; they must not be relabeled as isolated measurements of the state-partitioning mechanism.
+More memory headroom can change how a job runs: room for a larger microbatch changes the work per kernel, and needing fewer model-parallel partitions changes the communication. Those are plausible reasons for a speedup, but they are not measurements of state partitioning itself.
 
-For a fair follow-up comparison, define the estimand first. Are we measuring the best throughput achievable within a fixed device budget, or the effect of a particular technique with workload and schedule held constant? Both questions are useful, but their controls differ. A best-configuration comparison permits tuning; an isolated intervention needs matched conditions.
+So any comparison has to say which question it answers. The best throughput achievable on a fixed set of GPUs allows each method its own tuning. The effect of one technique requires everything else held fixed. The paper's headline numbers are closer to the first.
 
-Likewise, tokens per second does not alone establish time to a target validation loss. A changed effective batch can alter the number and character of updates. A convergence claim needs the data stream, token budget, optimiser settings, stopping criterion and evaluation protocol. This review supplies no independent measurement of those quantities.
+Throughput also does not establish time to a target loss. If the effective batch changes, so do the number and character of the updates; a convergence claim needs the data, token budget, optimizer settings and evaluation fixed as well.
 
-## Unknown: what should be measured before adoption?
+## What to measure before adopting it
 
-The practical unknown is the complete behavior of **your intended configuration**. The historical result does not specify its peak, network contention, checkpoint behavior or recovery cost. Current software documentation must be checked separately: the [DeepSpeed stage and memory controls](https://deepspeed.readthedocs.io/en/latest/zero3.html) and [PyTorch FSDP2 tutorial](https://docs.pytorch.org/tutorials/intermediate/FSDP_tutorial.html) are implementation references, rather than additional original-paper experimental evidence.
+The paper does not give the peak memory, network contention, checkpoint behaviour or recovery cost of your configuration. Current implementations, such as [DeepSpeed's ZeRO stages](https://deepspeed.readthedocs.io/en/latest/zero3.html) and [PyTorch FSDP2](https://docs.pytorch.org/tutorials/intermediate/FSDP_tutorial.html), have their own grouping, prefetching and residency controls, so check their documentation rather than the 2020 paper.
 
-A proposed follow-up would hold model, sequence length, effective batch, precision and hardware fixed, then record state allocations, peak allocated/reserved memory, step time and collective time for each viable policy. Report failures as well as successful runs. If a policy permits a larger microbatch, add a separately labeled tuned comparison rather than folding it into the controlled one.
+A controlled comparison holds model, sequence length, effective batch, precision and hardware fixed, then records peak allocated and reserved memory, step time and collective time for each policy, including the ones that fail. To isolate gathered-parameter memory, change only grouping or prefetching; to isolate activation memory, change only the microbatch or recomputation.
 
-To isolate a materialization effect, change only grouping or prefetching and inspect the allocation timeline. To isolate activation pressure, change only microbatch or recomputation. These interventions test competing explanations for a peak; neither is claimed to have been run here.
-
-The next question is communication: §7 of the paper shows that stages 1 and 2 move the same volume per step as plain data parallelism, and stage 3 about 1.5 times as much, so a memory saving must be weighed against movement and scheduling costs.
+Memory is half the trade. §7 shows that stages 1 and 2 communicate the same volume per step as plain data parallelism, and stage 3 about 1.5 times as much.
