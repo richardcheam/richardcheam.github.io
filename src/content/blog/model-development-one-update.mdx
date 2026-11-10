@@ -17,19 +17,11 @@ evidence_limit: "The toy model has one trained matrix and a parameter-free atten
 lesson: "A training update is a chain of conventions: which positions are targets, which positions may see each other, how per-token losses are weighted, and how the optimizer turns gradients into steps. Every one of them is part of the objective, so write each down before you scale anything."
 ---
 
-Every later topic in this series is a question about one update. Data work decides which tokens arrive. Tokenization decides what a token is. Architecture decides how positions combine. Distributed training spreads the update across thousands of devices **without changing its meaning**. Post-training changes which positions count. So we start by fixing, precisely, what one update means.
+When people talk about training a large language model, the exciting parts seem to be elsewhere: the trillions of tokens, the architecture, the thousands of GPUs. But all of that machinery serves one small operation, repeated a few hundred thousand times: take a batch of tokens, measure how wrong the model's predictions are, and nudge the weights. Everything else, from data cleaning to distributed training to fine-tuning, is about feeding that operation or running it faster **without changing what it means**.
 
-By the end of this lesson you should be able to:
+So in this post we follow one update from start to finish, on a batch small enough to check by hand. On the way we will meet several quiet conventions that decide what the model actually learns: which positions count as targets, which positions may see each other, how the loss is averaged, and how AdamW turns a gradient into a step. Get any of them wrong and training still runs. It just optimizes something you did not intend.
 
-- turn a batch of documents into model inputs, next-token targets and attention masks, including padding and packing;
-- write down the loss a training step actually minimizes, and say when two plausible normalizations are different objectives;
-- derive the gradient of the loss with respect to the logits and to an output matrix, and check it against autograd;
-- apply global-norm gradient clipping and one AdamW step by hand, and explain why the first step looks the way it does;
-- name the implementation conventions that differ between codebases, and the failure each one causes when mixed up.
-
-Prerequisites: [backpropagation](/blog/foundations-neurons-backprop/), [softmax and cross-entropy](/blog/foundations-loss-gradient-descent/), [Adam](/blog/foundations-optimisers/) and [language models](/blog/foundations-language-models/) from the Foundations series.
-
-Code for every number in this lesson: [`scripts/course/p1_update.py`](https://github.com/richardcheam/richardcheam.github.io/blob/master/scripts/course/p1_update.py).
+If backpropagation, cross-entropy or Adam are new to you, the Foundations posts on [backpropagation](/blog/foundations-neurons-backprop/), [softmax and cross-entropy](/blog/foundations-loss-gradient-descent/), [optimisers](/blog/foundations-optimisers/) and [language models](/blog/foundations-language-models/) cover them. Every number below comes from a short script you can run yourself: [`scripts/course/p1_update.py`](https://github.com/richardcheam/richardcheam.github.io/blob/master/scripts/course/p1_update.py).
 
 ## The objective, before any code
 
@@ -40,7 +32,7 @@ $$
 $$
 
 - $b$ indexes the sequences (rows) in the batch, $t$ the positions in a row.
-- $\mathcal{T}$ is the set of **target positions**: pairs $(b, t)$ whose next token is a real training target. Which positions belong to $\mathcal{T}$ is a decision, and most of this lesson is about it.
+- $\mathcal{T}$ is the set of **target positions**: pairs $(b, t)$ whose next token is a real training target. Which positions belong to $\mathcal{T}$ is a decision, and most of this post is about it.
 - $N = |\mathcal{T}|$ is the number of target positions, so every target token gets weight $1/N$.
 
 Three facts hide in this formula. Each position predicts the **next** token, so a row of length $T$ yields at most $T-1$ targets. The conditioning set $x_{b,\le t}$ must contain only tokens the model is allowed to see, which is what attention masks enforce. And the weight $1/N$ is per **token**, not per sequence: a long document contributes more terms than a short one.
@@ -163,7 +155,7 @@ $$
 \mathcal{L}_{\text{token}} = \sum_{k} \frac{S_k}{N},\qquad S_k = \sum_{(b,t)\in\mathcal{T}_k}\ell_{b,t},
 $$
 
-so each microbatch $k$ backpropagates $S_k / N$ and the gradients add up to exactly the gradient of the token mean. In Transformers 4.51.3, the Trainer fetches all of a step's microbatches first, counts `num_items_in_batch`, and the loss then uses `reduction="sum"` divided by that count. With `average_tokens_across_devices` the count is summed over data-parallel ranks and the loss multiplied by the number of processes, to undo the averaging that data-parallel gradient synchronization applies. The distributed strand of this series develops that synchronization.
+so each microbatch $k$ backpropagates $S_k / N$ and the gradients add up to exactly the gradient of the token mean. In Transformers 4.51.3, the Trainer fetches all of a step's microbatches first, counts `num_items_in_batch`, and the loss then uses `reduction="sum"` divided by that count. With `average_tokens_across_devices` the count is summed over data-parallel ranks and the loss multiplied by the number of processes, to undo the averaging that data-parallel gradient synchronization applies. A later post in this series looks at that synchronization in detail.
 
 **A detail to check in your version.** In Transformers 4.51.3 the Trainer counts `labels.ne(-100).sum()` on the **unshifted** labels, while the loss drops each row's first label when shifting. When the first label is a real token, as with `<bos>`, the count includes one position per row that is never predicted. In our batch the count is 9 instead of 7, so the loss reported and differentiated is $2.0994 \times 7/9 = 1.6329$. For pre-training rows of thousands of tokens the effect is a constant factor of about $1 - B/(\text{tokens})$, tiny; for short fine-tuning sequences it is larger. With Adam, a constant rescaling of the loss barely changes the update (see below), but it interacts with gradient clipping and with any comparison of loss values across setups. Verify the counting rule in the version you use.
 
@@ -252,7 +244,7 @@ Every coordinate with a nonzero gradient moves by about $\gamma$ on the first st
 
 The gradients differ by a factor of eight, yet all three entries move by about 0.001. The small residual differences are weight decay: $W_{1,3}$ first shrinks by $0.5 \times \gamma\lambda = 0.00005$, then takes its step of $0.001$.
 
-Two consequences matter for practice. First, a uniformly rescaled loss (such as the 7/9 above) leaves Adam's step almost unchanged, since $\hat m/\sqrt{\hat v}$ is invariant to scaling $g$ until $\epsilon$ matters. Second, early steps are large relative to how little the moment estimates know yet; that is one common motivation for learning-rate **warmup**, which the optimization lesson examines.
+Two consequences matter for practice. First, a uniformly rescaled loss (such as the 7/9 above) leaves Adam's step almost unchanged, since $\hat m/\sqrt{\hat v}$ is invariant to scaling $g$ until $\epsilon$ matters. Second, early steps are large relative to how little the moment estimates know yet; that is one common motivation for learning-rate **warmup**, which a later post on optimization looks at.
 
 ### Weight decay: two conventions with one name
 
@@ -294,11 +286,11 @@ At realistic scale the loss itself has a memory cost. With a vocabulary of 32,00
 | Weight decay conventions confused | Effective decay off by a factor of the learning rate | Recipes fail to reproduce across codebases | Compute the per-step shrinkage $\gamma\lambda$ or $\eta_t\lambda$ explicitly |
 | Clipping hiding instability | Every step clipped; training slows without an obvious error | Pre-clip gradient norm constantly above the threshold | Log the pre-clip norm returned by `clip_grad_norm_` |
 
-## Exercises
+## Try it yourself
 
 <details>
   <summary>1. Compute the loss at row 0, position 0 by hand. (Input `<bos>`, target `the`.)</summary>
-  <p>Position 0 attends only to itself, so $h = 2E[\texttt{<bos>}] = (1, -1)$, the same as row 1, position 0, and the logits are again $(0.2, -0.4, 0.6, -0.5, -0.4, 0.5)$. The target `the` has logit 0.6, so $\ell = 1.8931 - 0.6 = 1.2931$, matching the 1.293 listed above. The lesson: the first position of every document sees only `<bos>`, so its prediction is the model's unconditional guess for a document's first word.</p>
+  <p>Position 0 attends only to itself, so $h = 2E[\texttt{<bos>}] = (1, -1)$, the same as row 1, position 0, and the logits are again $(0.2, -0.4, 0.6, -0.5, -0.4, 0.5)$. The target `the` has logit 0.6, so $\ell = 1.8931 - 0.6 = 1.2931$, matching the 1.293 listed above. Notice that the first position of every document sees only `<bos>`, so its prediction is the model's unconditional guess for a document's first word.</p>
 </details>
 
 <details>
@@ -328,4 +320,4 @@ At realistic scale the loss itself has a memory cost. With a vocabulary of 32,00
 
 ## What comes next
 
-This update is the unit everything else preserves. The pre-training strand continues with where the tokens come from: building the corpus, then tokenization, then mixtures. The distributed strand asks how to compute exactly this update when the batch, and then the model, no longer fit on one device, starting from the batch semantics fixed here. Two paper reviews already cover systems the distributed strand will use: [ZeRO](/paper-reviews/zero/) for sharding optimizer state, gradients and parameters, and [Megatron-LM](/paper-reviews/megatron-ptd-p/) for tensor and pipeline parallelism.
+This one update is what the rest of the series keeps coming back to. Next we go upstream, to where the tokens come from: how a pre-training corpus is built, then how text becomes tokens. Later posts ask how to compute exactly this update when the batch, and then the model, no longer fit on one GPU. If you want a head start on that side, the paper reviews of [ZeRO](/paper-reviews/zero/) and [Megatron-LM](/paper-reviews/megatron-ptd-p/) cover sharding the optimizer state and splitting the model across devices.
