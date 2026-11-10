@@ -8,7 +8,6 @@ series_order: 1
 series: model-development
 featured: false
 published: true
-rail: list
 excerpt: "Everything in pre-training, and everything a distributed system must preserve, starts from one update. Follow real tokens through shifted targets, attention and padding masks, packing, the loss and its normalization, the backward pass, gradient clipping and one AdamW step."
 question: "What exactly happens between a batch of token IDs and a changed parameter, and which of those steps silently change what the model learns?"
 my_work: "A lesson with a worked example small enough to check by hand, reproduced by a script that also runs the real PyTorch 2.6 and Hugging Face Transformers 4.51.3 code paths. Toy numbers are illustrative; implementation behaviour is quoted from the inspected source."
@@ -47,7 +46,9 @@ Take a six-word vocabulary: `<pad>` (id 0), `<bos>` (1), `the` (2), `cat` (3), `
 - document B: `<bos> cat` (truncated)
 - document C: `<bos> cat sat <eos>`
 
-Row 0 **packs** A and B into one row, so no slot is wasted. Row 1 holds C and is **padded** at the end. The input tensor `input_ids` has shape $B \times T = 2 \times 6$:
+Row 0 **packs** A and B into one row, so no slot is wasted. Row 1 holds C and is **padded** at the end.
+
+Everyday picture: packing is like sharing a minibus between two small groups so no seat goes empty. The document mask, coming below, is the partition that stops one group listening to the other's conversation. The input tensor `input_ids` has shape $B \times T = 2 \times 6$:
 
 | Row | Position 0 | 1 | 2 | 3 | 4 | 5 |
 |---|---|---|---|---|---|---|
@@ -98,14 +99,11 @@ Same token, same position, different hidden state: under plain causal masking, d
 
 Position IDs follow the same logic. Under document masking, position IDs usually restart at each document so that a rotary or learned position encoding sees document B starting at 0. Codebases differ here; check yours.
 
-<details>
-  <summary>Check: row 1 is padded at the end. Why does the padding never affect the non-padded positions' hidden states, even without the "not padding" rule?</summary>
-  <p>Because of the causal rule. Padding sits after every real token, so no real position satisfies $s \le t$ for a padded $s$. The "not padding" rule matters for <em>left</em> padding, used when generating from a batch of prompts of different lengths: there the padding comes first and would be visible to every real token.</p>
-</details>
+Notice that the padding at the end of row 1 never affects the real positions, even without the "not padding" rule: padding sits after every real token, so no real position satisfies $s \le t$ for a padded $s$. The rule matters for **left** padding, used when generating from a batch of prompts of different lengths: there the padding comes first and would be visible to every real token.
 
 <figure class="blog-figure blog-figure--wide">
   <BatchToTargets alt="Two rows of six token tiles. Step by step, next-token targets appear under each tile, ignored positions grey out with their reason, a six-by-six grid shows row 0's attention first under a causal mask and then with document B cut off from document A, and finally each target's loss is shown with its averaging weight." />
-  <figcaption><strong>From a batch to targets and masks.</strong> Step through the shift, the ignored positions, the two attention masks for the packed row, and how token-mean and row-mean averaging weight the same seven losses.</figcaption>
+  <figcaption><strong>Figure 1. From a batch to targets and masks.</strong> Step through the shift, the ignored positions, the two attention masks for the packed row, and how token-mean and row-mean averaging weight the same seven losses.</figcaption>
 </figure>
 
 ## The loss and its normalization
@@ -146,6 +144,8 @@ $$
 \mathcal{L}_{\text{row}} = \frac{1}{2}\left(\frac{1}{4}\sum_{t}\ell_{0,t} + \frac{1}{3}\sum_{t}\ell_{1,t}\right) = \frac{2.0274 + 2.1955}{2} = 2.1114 .
 $$
 
+Everyday picture: a school averaging exam marks. The token mean averages every paper in the school; the row mean averages each class first and then the classes, so one paper in a class of 3 counts ten times as much as one in a class of 30.
+
 These are **different objectives**, not two estimates of one. The token mean gives every target weight $1/7$. The row mean gives row 0's targets weight $1/8$ and row 1's targets weight $1/6$: tokens in shorter rows count more. Neither is wrong in itself; pre-training normally intends the token mean (every token of text equally important), while some fine-tuning setups deliberately weight sequences. What is wrong is getting one while believing you have the other.
 
 ### Gradient accumulation must preserve the objective
@@ -166,10 +166,7 @@ so each microbatch $k$ backpropagates $S_k / N$ and the gradients add up to exac
 
 **A detail to check in your version.** In Transformers 4.51.3 the Trainer counts `labels.ne(-100).sum()` on the **unshifted** labels, while the loss drops each row's first label when shifting. When the first label is a real token, as with `<bos>`, the count includes one position per row that is never predicted. In our batch the count is 9 instead of 7, so the loss reported and differentiated is $2.0994 \times 7/9 = 1.6329$. For pre-training rows of thousands of tokens the effect is a constant factor of about $1 - B/(\text{tokens})$, tiny; for short fine-tuning sequences it is larger. With Adam, a constant rescaling of the loss barely changes the update (see below), but it interacts with gradient clipping and with any comparison of loss values across setups. Verify the counting rule in the version you use.
 
-<details>
-  <summary>Check: microbatch A has 1,000 target tokens and microbatch B has 10. Under mean-then-divide accumulation over the two, how much more does each of B's tokens weigh than one of A's?</summary>
-  <p>Each of A's tokens gets $\frac{1}{2}\cdot\frac{1}{1000}$ and each of B's gets $\frac{1}{2}\cdot\frac{1}{10}$: B's tokens weigh 100 times as much. Under the token mean every token weighs $\frac{1}{1010}$. Packing to a fixed length makes counts similar and hides the problem; variable-length batches expose it.</p>
-</details>
+How large can the distortion get? Suppose one microbatch has 1,000 target tokens and the other has 10. Under mean-then-divide, each token of the first gets weight $\frac{1}{2}\cdot\frac{1}{1000}$ and each token of the second $\frac{1}{2}\cdot\frac{1}{10}$: the short microbatch's tokens weigh **100 times** as much. Under the token mean every token weighs $\frac{1}{1010}$. Packing rows to a fixed length makes the counts similar and hides the problem; variable-length batches expose it.
 
 ## The backward pass
 
@@ -241,7 +238,7 @@ $$
 \gamma\,\frac{g}{|g| + \epsilon} \approx \gamma\,\mathrm{sign}(g)\quad\text{whenever } |g| \gg \epsilon .
 $$
 
-Every coordinate with a nonzero gradient moves by about $\gamma$ on the first step, **whatever the size of its gradient**. With $\gamma = 10^{-3}$, $\beta = (0.9, 0.95)$, $\epsilon = 10^{-8}$ and $\lambda = 0.1$:
+Every coordinate with a nonzero gradient moves by about $\gamma$ on the first step, **whatever the size of its gradient**. Everyday picture: a crowd told "everyone take one step towards your exit". On the first step only the direction each person faces matters, not how hard they were pushed; Adam only learns how much to trust each push as its averages fill up. With $\gamma = 10^{-3}$, $\beta = (0.9, 0.95)$, $\epsilon = 10^{-8}$ and $\lambda = 0.1$:
 
 | Entry | Before | Clipped gradient | $\hat m / (\sqrt{\hat v} + \epsilon)$ | After |
 |---|---:|---:|---:|---:|
@@ -293,38 +290,38 @@ At realistic scale the loss itself has a memory cost. With a vocabulary of 32,00
 | Weight decay conventions confused | Effective decay off by a factor of the learning rate | Recipes fail to reproduce across codebases | Compute the per-step shrinkage $\gamma\lambda$ or $\eta_t\lambda$ explicitly |
 | Clipping hiding instability | Every step clipped; training slows without an obvious error | Pre-clip gradient norm constantly above the threshold | Log the pre-clip norm returned by `clip_grad_norm_` |
 
+## Where this update goes next
+
+This one update is what the rest of the series keeps coming back to. Next we go upstream, to where the tokens come from: how a pre-training corpus is built, then how text becomes tokens. Later posts ask how to compute exactly this update when the batch, and then the model, no longer fit on one GPU. For a head start on that side, the paper reviews of [ZeRO](/paper-reviews/zero/) and [Megatron-LM](/paper-reviews/megatron-ptd-p/) cover sharding the optimizer state and splitting the model across devices.
+
+
+## What to remember
+
+- A causal language model is trained to minimize the average negative log-likelihood of **next** tokens over a chosen set of target positions $\mathcal{T}$; a row of $T$ tokens gives at most $T - 1$ targets.
+- Targets are the inputs shifted by one. Padding, row ends and (optionally) document boundaries are marked `-100` and contribute neither loss nor gradient.
+- Attention masks decide what each position may see: causal, no padding and, for packed rows, the same document only. Llama 3 masks across documents.
+- **Token mean** and **mean of row means** are different objectives. Gradient accumulation keeps the token mean only if every microbatch is divided by the step's total target count.
+- The gradient with respect to the logits is $(p - e_y)/N$ at each target and zero elsewhere; the output-matrix gradient sums $h^{\top}(p - e_y)/N$ over positions.
+- Global-norm clipping rescales all gradients together, keeping their direction.
+- AdamW's first step moves every coordinate by about the learning rate. PyTorch scales weight decay by the learning rate; the original paper does not.
+
+
 ## Try it yourself
 
-<details>
-  <summary>1. Compute the loss at row 0, position 0 by hand. (Input `<bos>`, target `the`.)</summary>
-  <p>Position 0 attends only to itself, so $h = 2E[\texttt{<bos>}] = (1, -1)$, the same as row 1, position 0, and the logits are again $(0.2, -0.4, 0.6, -0.5, -0.4, 0.5)$. The target `the` has logit 0.6, so $\ell = 1.8931 - 0.6 = 1.2931$, matching the 1.293 listed above. Notice that the first position of every document sees only `<bos>`, so its prediction is the model's unconditional guess for a document's first word.</p>
-</details>
+- **Figure 1.** Step to the end: seven of twelve positions are targets, B's two positions cannot see A, the token mean reads **2.0994** and the mean of row means **2.1114**.
+- **By hand.** Row 0, position 0 (input `<bos>`, target `the`) sees only itself, so $h = (1, -1)$ and the logits are again (0.2, −0.4, 0.6, −0.5, −0.4, 0.5). Its loss is $1.8931 - 0.6 =$ **1.2931**: the first position of every document gives the model's unconditional guess for a first word.
+- **Keep the boundary target.** Row 0, position 3 gains the target `<bos>`, so $N$ becomes **8** and every weight **1/8**. The model learns that `<bos>` follows `<eos>`, a fact about the packing, not about language.
+- **Accumulation.** Gradients are linear, so $\nabla \sum_k S_k/N = \frac{1}{N}\nabla\sum_{\mathcal{T}}\ell$ for any split into microbatches; mean-then-divide gives $\frac{1}{K}\sum_k \nabla S_k/N_k$, equal only when every $N_k = N/K$.
+- **Adam's epsilon.** The first step is $\gamma\,g/(|g| + \epsilon)$. With $|g|$ near $\epsilon = 10^{-8}$ the step shrinks below $\gamma$; with $|g| \ll \epsilon$ it is about $\gamma g/\epsilon$, proportional to the gradient again.
+- **Weight decay conversion.** "Learning rate 3e-4, weight decay 0.1" in PyTorch shrinks weights by $1 - 3\times10^{-5}$ per step. The paper's formulation needs $\lambda =$ **3e-5** for the same shrinkage, a factor of $1/\gamma \approx$ **3,333** apart.
+- **Packing check.** Switching from padded to packed rows lowers the training loss by 3%. That alone shows nothing: the loss is now averaged over a different set of positions. Compare on a fixed held-out set, evaluated the same way with document boundaries respected.
 
-<details>
-  <summary>2. Keep the boundary target instead of masking it. What changes in $\mathcal{T}$, $N$ and what the model learns?</summary>
-  <p>Row 0, position 3 (A's `<eos>`) gains the target `<bos>`, so $N$ becomes 8 and every target's weight becomes 1/8. The model learns that `<bos>` follows `<eos>`, a fact about how the data was packed, not about language. It is mostly harmless, because `<bos>` after `<eos>` is deterministic, but it spends a little capacity and gradient on the packing format. Many pipelines keep it for simplicity; the point is to know which you have.</p>
-</details>
 
-<details>
-  <summary>3. Show that dividing each microbatch's summed loss by the step's total target count gives exactly the token-mean gradient.</summary>
-  <p>The gradient is linear: $\nabla \sum_k S_k/N = \sum_k \nabla S_k / N$, and $\sum_k S_k$ is the sum over all targets in the step. So accumulating $\nabla(S_k/N)$ over microbatches yields $\nabla\left(\frac{1}{N}\sum_{\mathcal{T}}\ell\right)$ exactly, whatever the split. Mean-then-divide accumulates $\nabla(S_k/N_k)/K$ instead, which equals the token mean only if every $N_k = N/K$.</p>
-</details>
+## Sources
 
-<details>
-  <summary>4. At the first AdamW step, when does $\epsilon$ stop being negligible, and what does the step look like then?</summary>
-  <p>The step is $\gamma\,g/(|g|+\epsilon)$. When $|g|$ is comparable to $\epsilon$ (here $10^{-8}$), the factor falls below 1; when $|g| \ll \epsilon$ the step is about $\gamma g/\epsilon$, proportional to the gradient again. Entries whose gradients are almost always tiny can sit in this regime for many steps, which is one reason recipes tune $\epsilon$.</p>
-</details>
-
-<details>
-  <summary>5. A recipe says "AdamW, learning rate 3e-4, weight decay 0.1" and was run in PyTorch. What constant per-step shrinkage factor does that apply at peak learning rate, and what $\lambda$ would the paper's formulation need for the same shrinkage with $\eta_t = 1$?</summary>
-  <p>PyTorch multiplies parameters by $1 - \gamma\lambda = 1 - 3\times10^{-4}\times 0.1 = 1 - 3\times10^{-5}$ per step. The paper's update shrinks by $\eta_t\lambda$, so with $\eta_t = 1$ it needs $\lambda = 3\times10^{-5}$. The same name, "weight decay", differs by a factor of $1/\gamma \approx 3{,}333$ between the two conventions here: one is a rate per unit of learning rate, the other a rate per step.</p>
-</details>
-
-<details>
-  <summary>6. Design check: you switch from padded batches to packed rows and the training loss drops by 3% at the same step. Has the model improved?</summary>
-  <p>Not necessarily. Packing changes which positions are targets (no padding, possibly boundary targets) and, without document masking, lets positions condition on extra unrelated context. The loss is now averaged over a different set of terms. Compare on a fixed held-out set evaluated identically for both runs, with document boundaries respected, before concluding anything.</p>
-</details>
-
-## What comes next
-
-This one update is what the rest of the series keeps coming back to. Next we go upstream, to where the tokens come from: how a pre-training corpus is built, then how text becomes tokens. Later posts ask how to compute exactly this update when the batch, and then the model, no longer fit on one GPU. If you want a head start on that side, the paper reviews of [ZeRO](/paper-reviews/zero/) and [Megatron-LM](/paper-reviews/megatron-ptd-p/) cover sharding the optimizer state and splitting the model across devices.
+- Llama Team, AI @ Meta (2024). "The Llama 3 Herd of Models." arXiv:2407.21783, v3. §3.2 on masking attention between documents; §3.4 on the pre-training recipe.
+- I. Loshchilov and F. Hutter (2019). "Decoupled Weight Decay Regularization." ICLR 2019. arXiv:1711.05101. Algorithm 2, AdamW.
+- D. P. Kingma and J. Ba (2015). "Adam: A Method for Stochastic Optimization." ICLR 2015. arXiv:1412.6980.
+- Hugging Face Transformers 4.51.3. `ForCausalLMLoss` in `loss_utils.py`; `get_batch_samples` and `training_step` in `trainer.py`.
+- PyTorch 2.6. The AdamW update in `optim/adam.py`; `clip_grad_norm_` in `clip_grad.py`.
+- A. Karpathy. nanoGPT, `model.py` (`configure_optimizers`).
