@@ -1,0 +1,79 @@
+---
+title: "Prompting, context and structured outputs: controlling what a model does"
+date: 2026-11-11
+category: deep-learning
+read_time: "13 min"
+series_order: 20
+series: model-development
+featured: false
+published: true
+excerpt: "A prompt is the cheapest way to change a model's behaviour, and the easiest to get subtly wrong. Learn what instructions, examples and reasoning steps actually do, how to budget and order a context window, why sampling several answers and voting helps, and how constrained decoding guarantees valid structured output."
+question: "How do instructions, context and structured outputs control what a model does?"
+my_work: "A concept post; constrained decoding and majority voting implemented on toy examples; findings from the chain-of-thought, self-consistency, lost-in-the-middle and Outlines papers."
+result: "Masking disallowed tokens made all 1,000 toy generations valid JSON, against none without; majority voting over 5 samples raised a 50%-accurate answer to 67% when wrong answers are spread out; models use information at the start and end of long contexts better than in the middle."
+evidence_limit: "Toy examples illustrate mechanisms; paper results are for their models and benchmarks, and prompting effects vary between models."
+lesson: "Treat a prompt as part of the program: state the task and format explicitly, put important information where the model uses it, constrain the output when it must be parsed, and evaluate every change on your evaluation set."
+---
+
+Once a model is chosen ([previous post](/blog/model-development-choosing-a-model/)), the first and cheapest tool is the **prompt**: everything the model reads before it answers. A prompt cannot teach a model knowledge it lacks, but it decides which of its behaviours you get. This post covers what each part of a prompt does, how to use the context window, and how to make outputs reliably machine-readable.
+
+## What a prompt is made of
+
+A chat model receives a sequence rendered through its [chat template](/blog/model-development-supervised-fine-tuning/#a-conversation-becomes-text-the-chat-template): usually a **system** message with standing instructions, then user and assistant turns. Within that, a prompt has a few kinds of content, and each does something different:
+
+- **Instructions** state the task, the audience, the format and the constraints. Post-trained models are trained to follow them; vague instructions get the model's default behaviour, which reflects its training data, not your needs.
+- **Examples** (few-shot prompting) show the input–output mapping. They are the most reliable way to specify format and tone, because they demonstrate rather than describe. They also bias: if all examples are positive, answers drift positive.
+- **Context**: documents, data, the conversation so far. The model can only use what is in its window.
+- **Reasoning space.** Asking the model to work step by step before answering lets it spend tokens on intermediate results. Wei et al. showed that a few examples with written-out reasoning, **chain-of-thought prompting**, improved arithmetic, commonsense and symbolic reasoning in large models; with eight such examples, PaLM 540B reached state-of-the-art accuracy on GSM8K ([Wei et al., 2022](https://arxiv.org/abs/2201.11903), abstract). Models post-trained for reasoning now do this by default.
+
+Prompt effects vary by model and are easy to over-generalize from a handful of tries. Every change should be checked on the [evaluation set](/blog/model-development-choosing-a-model/#build-a-small-evaluation-set-first).
+
+## Sampling several times and voting
+
+A single sampled answer is a draw from a distribution. If the correct answer is the most likely one, drawing several and taking the most common gets closer to it. **Self-consistency** samples several reasoning paths and takes the majority answer; it improved chain-of-thought results by 17.9 points on GSM8K and by 3.9 to 12.2 points on other benchmarks ([Wang et al., 2023](https://arxiv.org/abs/2203.11171), abstract).
+
+Why it helps is simple arithmetic. Suppose one sample is right half the time and the wrong half is spread evenly over three wrong answers. One sample: 50%. The majority of 3 samples: 58%. Of 5: **67%**. Correct answers agree with each other; wrong answers scatter. If wrong answers concentrate on one popular mistake, voting helps much less. The cost is linear: five samples cost five times as much.
+
+## Using the context window
+
+The context window is a budget measured in the model's tokens, and it must hold everything: system prompt, examples, documents, the question, and room for the answer.
+
+**Try it: budget a context.** You have an 8,192-token window. Your system prompt is 600 tokens, the question 200, and you reserve 800 for the answer. How many 450-token document chunks fit? What changes if the documents are in a language that costs 6 times as many tokens?
+
+**Answer.** $8{,}192 - 600 - 200 - 800 = 6{,}592$ tokens for documents: **14 chunks** of 450 tokens. If the same content costs 6 times as many tokens, as Khmer did under one multilingual tokenizer in the [tokenization post](/blog/model-development-tokenization/#what-the-same-text-costs), each chunk becomes 2,700 tokens and only **2** fit. Long contexts are not free either: cost and latency grow with every input token.
+
+Position matters too. Liu et al. placed the document containing an answer at different positions among 20 retrieved documents and found accuracy highest when it was first or last and markedly lower in the middle, even for models built for long contexts ([Liu et al., 2024](https://arxiv.org/abs/2307.03172), abstract). Practical consequences: put instructions and the most relevant material at the start or the end, keep irrelevant text out, and prefer a few well-chosen documents to many. Whether a given model shows this effect, and how strongly, should be measured; newer models vary.
+
+## Structured outputs
+
+Applications often need output a program can parse: JSON with specific fields, a label from a fixed set, a date. Asking for JSON in the prompt usually works and sometimes does not: a missing comma, an extra sentence before the brace, a field name the parser does not expect. At scale, "usually" means failures every day.
+
+**Constrained decoding** removes the failure mode. At each step, the decoder knows which tokens can legally come next under a grammar (a JSON schema, a regular expression), and sets the logits of all other tokens to $-\infty$ before sampling. Willard and Louf showed this can be done efficiently by compiling the grammar into a finite-state machine and indexing, for each state, which vocabulary tokens are allowed ([Willard and Louf, 2023](https://arxiv.org/abs/2307.09702)).
+
+A toy shows the guarantee. A "model" that likes to begin with "Sure!" and otherwise picks tokens at random, from a vocabulary of twelve tokens, is asked for `{"name": …, "age": …}`. Sampling freely, none of 1,000 outputs is valid. With a small state machine masking every token the schema does not allow at each step, all 1,000 are valid, for example `{ "name" : "Ana" , "age" : 30 }`.
+
+Two cautions. The constraint guarantees **syntax**, not truth: a valid JSON object can contain a wrong age. And forcing a format the model would not naturally produce can lower quality, because the model may be pushed into tokens it considers unlikely; let it reason in free text first and constrain only the final answer when that matters.
+
+Everyday picture: a form with labelled boxes and dropdown menus. People still write wrong answers, but nobody writes a paragraph in the date field.
+
+
+## What to remember
+
+- Instructions specify; examples demonstrate format and tone (and bias); context supplies information; reasoning space lets the model work before answering.
+- Sampling several answers and voting (self-consistency) helps when wrong answers scatter; it costs one generation per sample.
+- Budget the context in the model's own tokens, keep it relevant, and put the important parts at the start or end.
+- Constrained decoding guarantees valid structure by masking disallowed tokens; it does not guarantee correct content.
+- Evaluate every prompt change on your evaluation set; prompting effects vary between models.
+
+
+## Sources
+
+- J. Wei, X. Wang, D. Schuurmans, M. Bosma, B. Ichter, F. Xia, E. Chi, Q. Le and D. Zhou (2022). "Chain-of-Thought Prompting Elicits Reasoning in Large Language Models." NeurIPS 2022. arXiv:2201.11903.
+- X. Wang, J. Wei, D. Schuurmans, Q. Le, E. Chi, S. Narang, A. Chowdhery and D. Zhou (2023). "Self-Consistency Improves Chain of Thought Reasoning in Language Models." ICLR 2023. arXiv:2203.11171.
+- N. F. Liu, K. Lin, J. Hewitt, A. Paranjape, M. Bevilacqua, F. Petroni and P. Liang (2024). "Lost in the Middle: How Language Models Use Long Contexts." TACL. arXiv:2307.03172.
+- B. T. Willard and R. Louf (2023). "Efficient Guided Generation for Large Language Models." arXiv:2307.09702.
+
+
+## Further reading
+
+- Berkeley CS294-280 (Spring 2025), [Xinyun Chen, "Inference-Time Techniques for LLM Reasoning"](https://rdi.berkeley.edu/adv-llm-agents/sp25) (27 Jan), on self-consistency and self-correction.

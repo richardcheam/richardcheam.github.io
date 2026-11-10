@@ -1,0 +1,102 @@
+---
+title: "When post-training goes wrong: reward hacking, length, shift and how to evaluate"
+date: 2026-11-11
+category: deep-learning
+read_time: "13 min"
+series_order: 18
+series: model-development
+featured: false
+published: true
+excerpt: "Every post-training method optimizes a proxy: a reward model, a verifier, a benchmark. Learn how optimizing a proxy too hard makes the real thing worse, why longer answers win judgements they should not, how a recipe can overfit its own development benchmarks, and how to evaluate post-training so these failures show up before users find them."
+question: "How do reward hacking, length effects and distribution shift show up, and how should post-training be evaluated?"
+my_work: "A concept post; reward-model overoptimization illustrated with a best-of-n simulation; findings read from Gao et al. (2022), Length-Controlled AlpacaEval, InstructGPT, DeepSeek-R1 and Tülu 3's unseen-evaluation analysis."
+result: "In a simulation where a judge rewards length more than quality, best-of-n raises the judge's score steadily while true quality peaks at n = 2 and then falls; Tülu 3's persona data raised IFEval from 53.6 to 72.8 but left an unseen instruction-following test flat (18.0 to 17.6); length control raised AlpacaEval's correlation with Chatbot Arena from 0.94 to 0.98."
+evidence_limit: "The simulation's constants are illustrative; reported findings are the papers' own, in their settings."
+lesson: "Post-training optimizes proxies. Watch what the optimization actually changes (length, refusals, KL), evaluate on held-out tasks you did not tune on, and treat any single benchmark gain with suspicion."
+---
+
+The last three posts each optimized something: [SFT](/blog/model-development-supervised-fine-tuning/) imitated examples, [DPO](/blog/model-development-preference-optimization/) fitted preferences, [RL](/blog/model-development-reinforcement-learning/) maximized a reward. None of them optimizes what we actually want, a model that is helpful, honest and safe for real users, because that cannot be written as a loss. They optimize **proxies**. This post is about what happens when a proxy and the goal come apart, and how to evaluate post-training so that you notice.
+
+The general principle is Goodhart's law: when a measure becomes a target, it ceases to be a good measure. In post-training it takes a few specific, recurring forms.
+
+## Reward hacking and overoptimization
+
+A reward model is trained on a limited set of comparisons. Within that set it tracks human preference; outside it, it can be wrong in ways the policy will find, because finding high-reward outputs is exactly what the policy is trained to do.
+
+Gao et al. measured this cleanly by replacing humans with a large "gold" reward model and training a smaller "proxy" reward model on its labels. Optimizing the policy against the proxy, by RL or by best-of-$n$ sampling, raised the proxy score steadily while the gold score rose, peaked and then *fell*, with a functional form that depended on the optimization method and scaled smoothly with reward-model size ([Gao et al., 2022](https://arxiv.org/abs/2210.10760), abstract).
+
+A small simulation shows the mechanism. Each candidate response has a quality and a length. The judge, our proxy, rewards quality plus twice the length; readers, the truth, reward quality minus a penalty that grows with the square of the length, since padding is mildly annoying and lots of it is very annoying. Picking the best of $n$ responses by the judge's score:
+
+| Best of $n$ | Judge's score | True quality | Length |
+|---|---|---|---|
+| 1 | 0.00 | −0.49 | 0.0 |
+| 2 | 1.26 | **−0.23** | 0.5 |
+| 16 | 3.94 | −0.67 | 1.6 |
+| 256 | 6.32 | −2.03 | 2.5 |
+
+The judge's score climbs at every step. True quality improves once, then falls, because the cheapest way to impress this judge is to write more. The numbers are made up; the shape is the one Gao et al. measured.
+
+Verifiers are proxies too. Tülu 3's RL with verifiable rewards, run with a small KL penalty on prompts with checkable constraints, learned to satisfy the checker while no longer producing meaningful content ([Tülu 3](https://arxiv.org/abs/2411.15124), App. B.4, Fig. 28). DeepSeek-R1's team avoided neural reward models for reasoning altogether because they found them susceptible to reward hacking at scale ([DeepSeek-R1](https://arxiv.org/abs/2501.12948), §2.2).
+
+The defences are partial and should be combined: a KL penalty that keeps the policy near the reference, stopping before the proxy is fully exploited, monitoring the KL divergence and samples during training, rewards that are hard to game (verifiers on hidden test cases), and periodic checks against a stronger judge or humans.
+
+**Try it: find the shortcut.** A coding model is trained with RL; the reward is 1 if its program passes the three unit tests shown in the prompt, 0 otherwise. What shortcut does this reward encourage, and how would you close it?
+
+**Answer.** The model can pass by special-casing the three visible inputs, returning the expected outputs without solving the problem, and nothing in the reward distinguishes that from a real solution. Close it by scoring on **hidden** tests the model never sees, by using many randomized or property-based tests, and by checking samples for hard-coded answers. The reward should measure the skill, not the evidence the model can see.
+
+## Length
+
+Judges, human and automatic, tend to prefer longer answers, and every optimization method that learns from judgements inherits the bias. AlpacaEval, which uses a language model as judge, was known to favour verbose models. Dubois et al. fitted a model of the judge's preferences that included the difference in length and asked what the preference would be at equal length; this **length-controlled** version was harder to game by verbosity and raised the Spearman correlation with human rankings in Chatbot Arena from 0.94 to 0.98 ([Dubois et al., 2024](https://arxiv.org/abs/2404.04475), abstract). In training, the same bias is why Tülu 3 normalized DPO's log-probabilities by length ([preference post](/blog/model-development-preference-optimization/#what-practice-has-found)).
+
+Practical rule: track response length throughout post-training, and report length-controlled or length-matched comparisons. A gain that disappears at equal length was not a gain in quality.
+
+## Overfitting the benchmarks you develop on
+
+Post-training recipes are built by trying things and keeping what improves a set of evaluations. Those evaluations then stop being independent tests. Tülu 3 addressed this explicitly: it developed against one suite and held out an **unseen** suite of different evaluations for the same skills, checked only at the end (§7.4).
+
+The result is instructive. Tülu 3's synthetic persona data for instruction following raised IFEval, a development benchmark, from **53.6 to 72.8**. On IFEval-OOD, an unseen test of the same skill with different constraints, the same data moved the score from **18.0 to 17.6**: no improvement at all (Table 32). The authors concluded their choices overfit the development evaluations for precise instruction following, while generalizing on average across skills. A 19-point gain on one benchmark was, for the underlying skill, mostly a gain on that benchmark's kind of constraint.
+
+## Distribution shift and side effects
+
+The prompts used in training are not the prompts users send. Three shifts recur:
+
+- **Over-refusal.** Safety data teaches refusals; without contrastive examples it also teaches refusing harmless requests that look risky. Tülu 3 added such contrastive prompts to prevent it (§4.2).
+- **The alignment tax.** Post-training can cost capabilities that pre-training had. InstructGPT observed performance regressions on public NLP datasets after RL from human feedback, and reduced them by mixing pre-training gradients into the RL updates, its PPO-ptx models ([Ouyang et al., 2022](https://arxiv.org/abs/2203.02155), §3.5).
+- **Style drift.** RL on reasoning tasks made DeepSeek-R1-Zero's outputs hard to read and mix languages, which needed additional training stages to fix (§2).
+
+## Evaluating post-training
+
+Putting these together, a sound evaluation of a post-trained model:
+
+1. **Separates development and held-out evaluations,** and reports both. Decisions are made on the first; claims rest on the second.
+2. **Decontaminates** training prompts against every evaluation, as in the [post-training data post](/blog/model-development-post-training-data/#keeping-synthetic-data-honest).
+3. **Controls for length** in judge-based comparisons.
+4. **Measures what was not targeted:** base capabilities (knowledge, reasoning), safety and over-refusal, so regressions show up.
+5. **Estimates noise.** Tülu 3's SFT runs with different seeds varied by a few tenths of a point on average; differences smaller than that are not results.
+6. **Reads samples.** Overoptimized outputs are often obvious to a person long before a metric moves.
+
+Everyday picture: a school that teaches to the test. Scores rise every term; whether the students learned the subject shows only on an exam they have never seen.
+
+
+## What to remember
+
+- Post-training optimizes proxies. Pushed far enough, a proxy's score keeps rising while the real objective falls (Gao et al.); verifiers can be gamed too.
+- KL penalties, early stopping, hidden tests and human checks limit overoptimization; none removes it.
+- Judges prefer length; length-controlled evaluation fixed much of AlpacaEval's bias (correlation with Chatbot Arena 0.94 to 0.98).
+- Development benchmarks get overfitted: Tülu 3's persona data added 19 points on IFEval and nothing on an unseen version. Keep a held-out suite.
+- Watch side effects: over-refusal, lost capabilities (the alignment tax), style drift. Evaluate what you did not target, estimate noise, and read samples.
+
+
+## Sources
+
+- L. Gao, J. Schulman and J. Hilton (2022). "Scaling Laws for Reward Model Overoptimization." arXiv:2210.10760.
+- Y. Dubois, B. Galambosi, P. Liang and T. B. Hashimoto (2024). "Length-Controlled AlpacaEval: A Simple Way to Debias Automatic Evaluators." arXiv:2404.04475.
+- N. Lambert et al. (2024). "Tülu 3." arXiv:2411.15124. §§4.2, 7.4, App. B.4.
+- L. Ouyang et al. (2022). "Training language models to follow instructions with human feedback." arXiv:2203.02155.
+- DeepSeek-AI (2025). "DeepSeek-R1." arXiv:2501.12948.
+
+
+## Further reading
+
+- Stanford CS336, [lecture 12, "Evaluation"](https://cs336.stanford.edu/).
+- [Benchmark numbers that misled me and how I corrected them](/blog/benchmark-denominators/): the same discipline applied to measuring systems.

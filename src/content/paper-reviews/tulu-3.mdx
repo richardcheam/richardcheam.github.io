@@ -1,0 +1,77 @@
+---
+title: "Tülu 3: an open post-training recipe and what its ablations show"
+title_key: "Tülu 3"
+published: true
+date: 2026-11-11
+question: "What does a complete, open post-training recipe consist of, and which of its stages does the evidence actually support?"
+excerpt: "Tülu 3 releases every piece of a modern post-training pipeline, from prompts and decontamination to SFT, preference tuning and RL with verifiable rewards, together with development and unseen evaluations. Its most valuable contribution is the evidence about each stage, including where its own choices overfit."
+type: tech-report
+topic: [training, rl, evaluation]
+tags: [Post-training, SFT, DPO, RLVR, Open recipe, Ai2]
+org: "Allen Institute for AI and University of Washington"
+authors: "Nathan Lambert, Jacob Morrison, Valentina Pyatkin, Shengyi Huang, Hamish Ivison, Faeze Brahman, et al."
+source_url: "https://arxiv.org/abs/2411.15124"
+source_label: "Read the Tülu 3 report"
+source_date: 2024-11-22
+read_time: "11 min"
+featured: false
+math: true
+tldr:
+  - "**What it releases:** data, code (open-instruct), evaluation (OLMES/oe-eval) and models for a four-stage recipe on Llama 3.1: prompt curation, SFT, length-normalized DPO with on-policy data, and RL with verifiable rewards (Sec 1–2)."
+  - "**Strongest evidence:** per-stage ablations on a fixed base, including removing each data source from SFT (Table 10, p. 17) and checking every design decision on a held-out unseen suite (Sec 7.4)."
+  - "**Most honest finding:** synthetic persona data raised IFEval from 53.6 to 72.8 while an unseen instruction-following test stayed flat (Table 32, p. 45)."
+  - "**My reading:** SFT data and DPO carry most of the gains; RLVR adds targeted, modest improvements where answers are checkable. The report is most useful as a map of which knobs matter and how to test them."
+links:
+  - label: "Post: supervised fine-tuning"
+    url: "/blog/model-development-supervised-fine-tuning/"
+  - label: "Post: post-training data"
+    url: "/blog/model-development-post-training-data/"
+---
+
+## The problem and what came before
+
+By 2024, the post-training of leading models was known only in outline: SFT, then some form of preference learning, then often RL. The data, the hyperparameters and the ablations that decided each choice were not published, and open recipes such as Tülu 2 and Zephyr trailed closed ones (Sec 1). Tülu 3's goal is a fully open recipe for Llama 3.1 8B and 70B, competitive with Llama 3.1 Instruct, in which every artifact can be inspected and rerun.
+
+## The method
+
+Four stages, each built and evaluated separately (Sec 2):
+
+1. **Prompts and decontamination** (Sec 3). Prompts from public datasets with clear provenance, plus synthetic prompts for target skills generated with about 250,000 personas. Training prompts are checked against every evaluation with 8-gram overlap; a test item is matched if more than half its tokens fall in 8-grams shared with one training example, and datasets overlapping more than 2% of an evaluation are removed or filtered (Sec 3.2).
+2. **SFT** (Sec 4) on a mix assembled by building skill-specific mixes, combining them, and iterating, at learning rate $5 \times 10^{-6}$ for two epochs (8B). A summed rather than averaged loss fixed a loss-aggregation problem with gradient accumulation (Sec 4.3.2).
+3. **Preference tuning** (Sec 5) with **length-normalized DPO** on a mix of off-policy and on-policy synthetic preference pairs, judged by a language model.
+4. **RL with verifiable rewards** (Sec 6): PPO against a reward of 10 for verifiably correct answers to math problems or satisfied instruction constraints, and 0 otherwise, with a KL penalty to the DPO model.
+
+Evaluation is part of the method (Sec 7): a **development** suite used for every decision and an **unseen** suite, different benchmarks for the same skills, used only to check whether those decisions generalized.
+
+## The evidence for each stage
+
+**SFT data** (Sec 4.2, Table 10, 8B). Removing one source at a time from the final mix: without WildChat's real conversations, AlpacaEval 2 falls from 12.4 to 7.5; without safety data, the safety score falls from 93.1 to 74.7 while other skills barely move; without math data, GSM8K falls from 76.2 to 64.1. These are the clearest results in the report: specific data produces specific skills. Seed variation moved the SFT average by about 0.1 points (Table 14), so effects of several points are well above noise.
+
+**Preference tuning** (Sec 5.3–5.4). Increasing unique prompts and adding on-policy pairs both improved DPO. Among algorithms tried on one dataset and an early checkpoint, only length-normalized DPO beat the SFT starting point on average (Table 18); PPO with a reward model roughly matched the starting point (55.5 against 55.7).
+
+**RLVR** (Sec 6, Table 23). Starting from the DPO models, RLVR raised the 8B average from 64.4 to 64.8 and the 70B average from 75.9 to 76.0, with gains concentrated where rewards are verifiable: GSM8K 84.3 to 87.6 and MATH 42.0 to 43.7 at 8B. More KL budget did not necessarily raise verifiable rewards, initializing PPO's value model from a general reward model worked best, and at low KL the instruction-following runs overoptimized the checker until outputs stopped being meaningful (Sec 6.2.1; App. B.4).
+
+**The pipeline as a whole** (Sec 7.4, Table 31). On the unseen suite, each stage improved the 8B average: 29.9 after SFT, 31.9 after DPO, 32.4 after RLVR, and similarly at 70B. The final 8B and 70B models exceeded Llama 3.1 Instruct's averages (62.2 to 64.8; 73.4 to 76.0) on the development suite (Table 23).
+
+## What the evidence supports, confounds and leaves open
+
+**Supported.** The ordering of what matters: carefully targeted SFT data produces large, specific gains; preference tuning adds broad improvements, especially on chat quality (AlpacaEval 2 from 24.2 for Llama 3.1 Instruct 8B to 33.5); RLVR adds small, targeted gains on verifiable skills. The recipe generalizes on average to unseen evaluations.
+
+**Overfitting, measured.** The unseen suite exposed where development-driven choices did not transfer. Synthetic persona data for precise instruction following raised IFEval from 53.6 to 72.8 but left IFEval-OOD at 17.6 against 18.0 without it (Table 32). The authors say so plainly, which is rare and valuable: a 19-point benchmark gain that does not move the underlying skill.
+
+**Confounded or narrow.**
+
+- **Judge-dependent data.** Preference pairs are labelled by language-model judges, so DPO optimizes towards a model's taste; the length normalization is partly a correction for that judge's bias.
+- **Comparisons to Llama 3.1 Instruct** compare full pipelines with different data and stages, not single choices. Several benchmarks favour Llama 3.1 Instruct (MMLU, HumanEval, IFEval at 70B).
+- **Small RLVR effects** (+0.1 to +0.4 average) are close to run-to-run variation for the averages, though the targeted GSM8K and MATH gains are larger.
+- **Development set reuse.** Many decisions were made on the same suite, which the unseen suite partly but not fully corrects: it shares skill definitions with the development suite.
+
+**Left open.** How these results change at larger scale (the report includes a 405B variant, Sec 8.1); whether DPO or online RL is better when compute is matched; and how much of RLVR's effect is new capability versus sharpening of behaviour the DPO model already had.
+
+## How it changes decisions
+
+- Build post-training data skill by skill, and ablate sources: their effects are large and specific.
+- Use a token-level (summed) loss and check it is invariant to gradient accumulation and GPU count.
+- Prefer on-policy preference pairs and control for length.
+- Use RL with verifiable rewards where correctness can be checked, with a KL penalty and output inspection to catch overoptimization; expect targeted rather than broad gains.
+- Keep an unseen evaluation suite and report it; Tülu 3 shows what it catches.

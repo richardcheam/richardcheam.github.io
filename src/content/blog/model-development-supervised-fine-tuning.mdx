@@ -1,0 +1,112 @@
+---
+title: "Supervised fine-tuning: teaching a base model to answer"
+date: 2026-11-11
+category: deep-learning
+read_time: "13 min"
+series_order: 14
+series: model-development
+featured: false
+published: true
+excerpt: "A pre-trained model continues text; it does not answer. Supervised fine-tuning teaches it to, with the same next-token loss on example conversations. See what a chat template really is, which tokens the loss is computed on and why, how averaging choices reweight examples, and what the open Tülu 3 recipe found about data."
+question: "How does a base model learn to follow instructions, and what do chat templates and loss masks decide?"
+my_work: "A concept post; the Tülu 3 chat template rendered and assistant-only labels built with its released tokenizer in Transformers 4.51.3; masking checked in open-instruct's code; data ablations and the loss-aggregation finding read from the Tülu 3 report."
+result: "Fine-tuning is next-token prediction on rendered conversations; with assistant-only labels, 8 of a short conversation's 25 tokens are trained, including the end-of-text token; per-sequence averaging can weight a short reply's tokens 5.5 times more; in Tülu 3, removing math data cut GSM8K from 76.2 to 64.1."
+evidence_limit: "Ablation results are Tülu 3's, for Llama 3.1 8B and its evaluation suite; the masking code is open-instruct's current version, not necessarily the 2024 training code."
+lesson: "Supervised fine-tuning teaches format and behaviour through the same loss as pre-training. The template, the mask, the averaging and the data decide what is learned."
+---
+
+A pre-trained model has read trillions of tokens, and it has learned to continue text. Give it "What is the capital of France?" and it may answer, or it may continue with "What is the capital of Germany?", because lists of questions are common on the web. Nothing in pre-training told it that a question is a request.
+
+**Supervised fine-tuning** (SFT) teaches the missing behaviour with examples: conversations in which a user asks and an assistant answers well. The surprising part is how little changes mechanically. It is the same next-token loss as the [first post](/blog/model-development-one-update/), on a different kind of text, with a few decisions about which tokens count. Those decisions are what this post is about. You need only the first post to follow it; nothing from the distributed-training posts is required.
+
+## A conversation becomes text: the chat template
+
+A model reads one sequence of tokens, so a conversation must be flattened into one. A **chat template** does it: it wraps each message in role markers and ends each assistant turn with a stop token. The released Tülu 3 tokenizer renders a two-message conversation as
+
+```text
+<|user|>
+What is 2+3?
+<|assistant|>
+2+3 = 5.<|end_of_text|>
+```
+
+Three consequences follow:
+
+- **The template is part of the model.** It is learned during fine-tuning, so the same template must be used at inference. A different one, or none, puts the model in an unfamiliar format. Tülu 3 compared five templates and found differences of about 1.4 points on its average (§4.3.1, Table 13): the choice matters less than consistency.
+- **Role markers are often special tokens,** added to the vocabulary for fine-tuning. Their embeddings start untrained, as the [tokenization post](/blog/model-development-tokenization/#when-text-and-tokenizer-disagree) noted.
+- **The stop token is what makes the model stop.** At inference, generation ends when the model produces `<|end_of_text|>`. It only learns to do that if the stop token is among the trained tokens.
+
+## Which tokens are trained: the loss mask
+
+Usually the model is trained only to produce the assistant's replies, not to predict the user's messages. The labels for every other token are set to −100, the ignore value from the first post, so they contribute no loss. For the conversation above, rendering it with the Tülu 3 tokenizer gives 25 tokens; the first 17 (the user's message and the `<|assistant|>` header) are masked, and the 8 tokens of `2+3 = 5.<|end_of_text|>` are trained. open-instruct, the code behind Tülu 3, builds exactly this kind of mask by rendering each prefix of the conversation and masking every non-assistant span, including the header that announces the assistant's turn.
+
+Two points from the first post carry over directly:
+
+- **Masked tokens still shape the gradient.** A masked user message receives no direct loss, but the assistant's tokens attend to it, so its representations are still trained through them. The model learns to *use* the prompt, just not to predict it.
+- **Masking prompts is a default, not a law.** Shi et al. (2024) found that also training on the instruction tokens can help in many settings, especially when instructions are long and answers short, or when there are few examples, which they attribute to reduced overfitting ([Shi et al., 2024](https://arxiv.org/abs/2405.14394), abstract).
+
+**Try it: trace the labels.** A conversation has a system message of 10 tokens, a user message of 20, an assistant reply of 30, another user message of 15 and a final assistant reply of 40. Each assistant reply ends with one stop token. How many tokens are trained with assistant-only masking? And if only the last turn is trained?
+
+**Answer.** All assistant turns: $(30 + 1) + (40 + 1) =$ **72** tokens, the replies and their stop tokens; the 45 tokens of system and user messages and every role header are masked. Last turn only: **41**. Training only on the last turn treats earlier replies as context, which is useful when they came from a weaker model; training on all turns uses more of the data.
+
+## How the loss is averaged
+
+Conversations have very different reply lengths, so averaging matters as much here as it did for packed pre-training rows. Suppose one conversation has a 100-token reply with mean loss 1.0 and another a 10-token reply with mean loss 2.0:
+
+- **Per token:** $(100 \times 1.0 + 10 \times 2.0)/110 \approx 1.09$; every trained token weighs $1/110$.
+- **Per sequence**, averaging each conversation first: $(1.0 + 2.0)/2 = 1.5$; each token of the short reply weighs $1/20$, **5.5 times** as much.
+
+The Tülu 3 team ran into exactly this. Their models trained on GPUs underperformed others, and the cause was loss aggregation in Hugging Face Transformers: with gradient accumulation each sample was averaged separately, so samples, not tokens, were weighted equally, and changing the accumulation steps changed the weighting. They switched to a summed loss, which weights every token equally, retuned the learning rate, and found it generally better (§4.3.2). It is the same trap as mean-then-divide accumulation in the [first post](/blog/model-development-one-update/#gradient-accumulation-must-keep-the-same-objective) and per-rank averaging in the [data-parallelism post](/blog/model-development-data-parallelism/#the-normalization-trap).
+
+## What the data teaches
+
+The mechanism is simple; the data is where the work is. Tülu 3 is unusually informative because it published ablations of its own mix for Llama 3.1 8B (§4.2, Table 10):
+
+| Removed from the mix | Average | Most affected |
+|---|---|---|
+| nothing (full mix) | 60.1 | — |
+| WildChat (diverse real conversations) | 58.9 | AlpacaEval 2: 12.4 → 7.5 |
+| safety data | 58.0 | safety: 93.1 → 74.7, others nearly unchanged |
+| math data | 58.2 | GSM8K: 76.2 → 64.1; MATH: 31.5 → 23.5 |
+
+Three lessons generalize:
+
+- **Skills come from targeted data.** Removing math examples cost 12 points on GSM8K; the rest of the mix could not compensate.
+- **Some behaviours are nearly independent.** Safety data changed the safety score a lot and other skills little. Adding contrastive prompts, requests that look risky but are fine, helped avoid over-refusal.
+- **Diversity of real requests matters** for open-ended conversation quality, where curated tasks alone fall short.
+
+Fine-tuning is short and sensitive. Tülu 3's 8B model trained for 2 epochs at a learning rate of $5 \times 10^{-6}$, with an effective batch of 128 sequences of up to 4,096 tokens (Table 11). Changing only the random seed moved the average between 59.8 and 59.9, and averaging the weights of two runs ("model soup") gave 60.2, not reliably better than the best single run (Table 14). Differences smaller than a few tenths of a point are within noise.
+
+The base model still sets the ceiling. The same SFT mix gave 31.5 on MATH from Llama 3.1 8B but 56.4 from Qwen 2.5 Math 7B, a model whose pre-training emphasized mathematics (Table 12). SFT draws out and formats what pre-training learned; it adds less than it seems.
+
+Everyday picture: SFT is an apprenticeship by example. The apprentice already knows a great deal; watching how answers are given teaches them the shop's format and manners, not the trade itself.
+
+## What can go wrong
+
+- **Template mismatch** at inference: fluent but oddly formatted or never-ending output. Check that serving uses the exact training template.
+- **Stop token not trained,** for example because it was masked or truncated: the model runs on past its answer.
+- **Weighting by sequence by accident:** results change when gradient accumulation or the number of GPUs changes. Sum the loss and divide by the global token count.
+- **Contaminated chat data:** real chat logs contain benchmark questions. Tülu 3 found public datasets such as ShareGPT, WildChat and LMSys Chat likely to overlap with test sets and decontaminated its mix (§3.2; App. B.2), at a small cost in measured scores.
+
+
+## What to remember
+
+- SFT is next-token prediction on rendered conversations; the chat template is part of the model and must match at inference.
+- Assistant-only masking trains the replies and their stop tokens; masked prompts still shape the gradient through attention. Training on prompts can also help in some settings.
+- Average per token across the whole batch, not per conversation; otherwise short replies are overweighted and results depend on accumulation and GPU count.
+- Data decides skills: in Tülu 3, removing math data cost 12 points of GSM8K. Seed noise is a few tenths of a point.
+- The base model sets the ceiling; SFT mostly teaches format and behaviour.
+
+
+## Sources
+
+- N. Lambert, J. Morrison, V. Pyatkin, S. Huang, H. Ivison, F. Brahman et al. (2024). "Tülu 3: Pushing Frontiers in Open Language Model Post-Training." arXiv:2411.15124. §§3.2, 4.1–4.3, App. B.
+- Z. Shi, A. X. Yang, B. Wu and L. Aitchison (2024). "Instruction Tuning With Loss Over Instructions." arXiv:2405.14394.
+- open-instruct, `dataset_transformation.py` (commit 3cfb440): masking of non-assistant spans; Hugging Face Transformers 4.51.3, `apply_chat_template`.
+
+
+## Further reading
+
+- [Tülu 3 review](/paper-reviews/tulu-3/): the full open post-training recipe and its evidence.
+- Stanford CS336, [lecture 15, "Mid/post-training (SFT/RLHF)"](https://cs336.stanford.edu/).
+- L. Ouyang et al. (2022). "Training language models to follow instructions with human feedback." arXiv:2203.02155. The InstructGPT pipeline that made SFT plus RLHF standard.

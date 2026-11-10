@@ -260,5 +260,466 @@
     ],
     "location": "/blog/model-development-pretraining-corpus/",
     "conditions": "Definition per the series' writing guide; toy overlap counts in scripts/course/p2_corpus.py. FineWeb (Sec 4.2) is cited only for not describing decontamination."
+  },
+  {
+    "id": "P3-01",
+    "status": "Reported",
+    "claim": "Temperature sampling sets q_l proportional to p_l^(1/τ); τ = 1 is proportional and τ → ∞ uniform; multilingual models used τ from 1.43 to 3.33. UniMax allocates the budget uniformly with a cap of N epochs per language and outperformed temperature sampling across tested scales.",
+    "sourceIds": [
+      "unimax"
+    ],
+    "location": "/blog/model-development-data-mixtures/",
+    "conditions": "§3 Eq. 2, Table 1, Algorithm 1, abstract (ICLR 2023). Worked examples in scripts/course/p3_mixtures.py."
+  },
+  {
+    "id": "P3-02",
+    "status": "Reported",
+    "claim": "Llama 3: final mix about 50% general knowledge, 25% math and reasoning, 17% code, 8% multilingual; annealing on high-quality code and math improved 8B GSM8K/MATH validation by 24.0%/6.4% with negligible gains at 405B; annealing a half-trained 8B over 40B tokens with 30% weight tests data value.",
+    "sourceIds": [
+      "llama3"
+    ],
+    "location": "/blog/model-development-data-mixtures/",
+    "conditions": "§3.1.2–3.1.3, §3.4.3, p. 6 and 15."
+  },
+  {
+    "id": "P4-01",
+    "status": "Reported",
+    "claim": "On FLORES-200 devtest (1,012 sentences), token premiums versus English: GPT-2 French 2.0, Chinese 3.15, Hindi 7.41, Khmer 15.18; XLM-R 1.3/0.96/1.25/1.59; Qwen2.5 1.58/1.0/4.42/6.47. GPT-2 gives 1.06 bytes per token on Khmer.",
+    "sourceIds": [
+      "flores-200",
+      "hf-tokenizers-measured"
+    ],
+    "location": "/blog/model-development-tokenization/",
+    "conditions": "Measured with Transformers 4.51.3, add_special_tokens=False; scripts/course/p4_tokenization.py with FLORES_DIR set."
+  },
+  {
+    "id": "P4-02",
+    "status": "Reported",
+    "claim": "Decode(encode(text)) is not the original text for Qwen2.5 on Hindi (NFC normalizer decomposes U+095B) or XLM-R on French (non-breaking spaces) and Khmer (zero-width spaces become spaces); GPT-2 round-trips exactly.",
+    "sourceIds": [
+      "hf-tokenizers-measured"
+    ],
+    "location": "/blog/model-development-tokenization/",
+    "conditions": "First 50 FLORES sentences per language; normalizers read from tokenizer.json."
+  },
+  {
+    "id": "P4-03",
+    "status": "Reported",
+    "claim": "Unigram tokenization prunes a large seed vocabulary by likelihood loss (keeping e.g. top 80% each round and all single characters) and encodes with the Viterbi-best segmentation.",
+    "sourceIds": [
+      "kudo-2018"
+    ],
+    "location": "/blog/model-development-tokenization/",
+    "conditions": "§3.2, p. 3."
+  },
+  {
+    "id": "P5-01",
+    "status": "Derived",
+    "claim": "From Llama 3 Table 3, an 8B layer has 41.9M attention and 176.2M SwiGLU parameters (81% MLP); total 8.03B with untied embeddings; KV cache per token in BF16 is 128 KiB with 8 KV heads versus 512 KiB with 32.",
+    "sourceIds": [
+      "llama3"
+    ],
+    "location": "/blog/model-development-decoder-architecture/",
+    "conditions": "Arithmetic from published configuration; scripts/course/p5_architecture.py."
+  },
+  {
+    "id": "P5-02",
+    "status": "Reported",
+    "claim": "DeepSeek-V3 has 671B total parameters with 37B activated per token, using 1 shared and 256 routed experts with 8 routed experts per token.",
+    "sourceIds": [
+      "deepseek-v3"
+    ],
+    "location": "/blog/model-development-decoder-architecture/",
+    "conditions": "Abstract; §4.2, p. 22."
+  },
+  {
+    "id": "P6-01",
+    "status": "Reported",
+    "claim": "A 1,066,112-parameter decoder on Tiny Shakespeare (2,048-token BPE, 600 steps of 2,048 tokens) starts at loss 7.650 (ln V = 7.625) and reaches validation loss 4.13; without warmup 4.44 (ahead until about step 50, then behind); peak lr 3e-2 4.77; 1e-1 5.40; 1e-1 without clipping 5.46 with gradient norms up to 15; resuming at step 300 reproduces the run exactly; BF16 autocast validation loss equals FP32 to four decimals.",
+    "sourceIds": [
+      "tinyshakespeare",
+      "pytorch-2.6-optim"
+    ],
+    "location": "/blog/model-development-small-training-run/",
+    "conditions": "Executed on Apple M1 CPU with PyTorch 2.6 and Tokenizers 0.21, seed 0; scripts/course/p6_train.py; curves in scripts/course/data/p6_runs.json."
+  },
+  {
+    "id": "P7-01",
+    "status": "Reported",
+    "claim": "Chinchilla Approaches 1 and 2 give N_opt ∝ C^0.50 and C^0.49 (Kaplan: 0.73), about 20 tokens per parameter (1B → 20.2B tokens); the published Approach 3 fit implies about 51 tokens per parameter at 1.2e21 FLOPs, which a replication attributes to an unconverged fit and rounding.",
+    "sourceIds": [
+      "chinchilla",
+      "besiroglu-2024"
+    ],
+    "location": "/blog/model-development-scaling-laws/",
+    "conditions": "Chinchilla Table 2–3 p. 8, App. D.2 p. 25; Besiroglu et al. abstract; optimum computed in scripts/course/p7_scaling.py."
+  },
+  {
+    "id": "P7-02",
+    "status": "Reported",
+    "claim": "With large expected inference demand, compute-optimal models are smaller and trained longer than Chinchilla-optimal; quality kept improving up to 10,000 tokens per parameter in the tested runs.",
+    "sourceIds": [
+      "sardana-2024"
+    ],
+    "location": "/blog/model-development-scaling-laws/",
+    "conditions": "Abstract only."
+  },
+  {
+    "id": "P7-03",
+    "status": "Reported",
+    "claim": "Llama 3 fitted N*(C) = A C^α with (α, A) = (0.53, 0.29), predicting 402B on 16.55T tokens at 3.8e25 FLOPs; a two-step forecast from log-likelihood to accuracy slightly underestimated the final ARC Challenge result.",
+    "sourceIds": [
+      "llama3"
+    ],
+    "location": "/blog/model-development-scaling-laws/",
+    "conditions": "§3.2.1, p. 8."
+  },
+  {
+    "id": "R-CH-01",
+    "status": "Reported",
+    "claim": "Chinchilla differs from Gopher not only in size and tokens but also in optimizer (AdamW), tokenizer (no NFKC), MassiveText subset mix and FP32 master weights.",
+    "sourceIds": [
+      "chinchilla"
+    ],
+    "location": "/paper-reviews/chinchilla/",
+    "conditions": "§4.1, p. 9."
+  },
+  {
+    "id": "S1-01",
+    "status": "Derived",
+    "claim": "Mixed-precision AdamW needs 12 bytes per parameter (BF16 weights and gradients, FP32 moments) or 16 with FP32 master weights; a GPT-style layer at h=4096, a=32, s=4096, b=1 stores about 3.25 GB of activations (2.68 GB attention scores); 70B on 15T tokens on 1,024 H100s at 50% MFU takes about 144 days.",
+    "sourceIds": [
+      "cs336-2026",
+      "activation-recomputation",
+      "zero"
+    ],
+    "location": "/blog/model-development-gpu-memory-compute/",
+    "conditions": "CS336 lecture 2 figures (989.5 TFLOP/s, 3.35 TB/s); Korthikanti Eq. 1; scripts/course/p8_gpu.py."
+  },
+  {
+    "id": "S2-01",
+    "status": "Reported",
+    "claim": "With two DDP ranks holding 3 and 1 target tokens, per-rank mean losses give the gradient of the mean of rank means, while dividing summed losses by the all-reduced global count times world size reproduces the single-process token-mean gradient to 3e-8.",
+    "sourceIds": [
+      "pytorch-ddp"
+    ],
+    "location": "/blog/model-development-data-parallelism/",
+    "conditions": "Executed on CPU with gloo, PyTorch 2.6; scripts/course/p9_ddp.py. DDP averages gradients, syncs rank 0 state at construction, 25 MiB default buckets (source read)."
+  },
+  {
+    "id": "S3-01",
+    "status": "Reported",
+    "claim": "ZeroRedundancyOptimizer (ZeRO stage 1) over two gloo ranks holds half of AdamW moments per rank and matches single-process AdamW parameters to 1.2e-6 after 3 steps; checkpointing four blocks reduces bytes saved in forward from 90,112 to 40,960 with identical gradients. FSDP2 fully_shard was not executed (PyTorch 2.6 needs accelerator streams).",
+    "sourceIds": [
+      "zero",
+      "fsdp2"
+    ],
+    "location": "/blog/model-development-sharding-recomputation/",
+    "conditions": "Executed on CPU; scripts/course/p10_sharding.py. Stage formulas from ZeRO §5.1–5.3; communication §7.2."
+  },
+  {
+    "id": "S4-01",
+    "status": "Reported",
+    "claim": "Splitting an MLP first matrix by columns and second by rows across two gloo ranks reproduces the unsplit output to 4e-6 with one all-reduce; splitting the first by rows errs by up to 2.55. Pipeline bubble fraction is (p − 1)/m, and (1/v)(p − 1)/m interleaved.",
+    "sourceIds": [
+      "megatron-2021",
+      "megatron-2019"
+    ],
+    "location": "/blog/model-development-model-parallelism/",
+    "conditions": "Executed on CPU; scripts/course/p11_model_parallel.py. Narayanan et al. §2.2–2.3, Takeaway #1 (§3.2)."
+  },
+  {
+    "id": "S4-02",
+    "status": "Reported",
+    "claim": "DeepSeek-V3 trained with 16-way pipeline, 64-way expert parallelism across 8 nodes and ZeRO-1 data parallelism, without tensor parallelism.",
+    "sourceIds": [
+      "deepseek-v3"
+    ],
+    "location": "/blog/model-development-model-parallelism/",
+    "conditions": "§3.2, p. 12."
+  },
+  {
+    "id": "S5-01",
+    "status": "Reported",
+    "claim": "Tiled attention with an online softmax matches ordinary attention to 5e-7; in FlashAttention Fig. 2, GPT-2 medium attention takes 75.2 vs 66.6 GFLOPs but 4.4 vs 40.3 GB HBM traffic and 7.3 vs 41.7 ms on A100.",
+    "sourceIds": [
+      "flashattention"
+    ],
+    "location": "/blog/model-development-efficient-execution/",
+    "conditions": "Tiling executed on CPU (scripts/course/p12_efficient.py); benchmark quoted from the paper."
+  },
+  {
+    "id": "S5-02",
+    "status": "Reported",
+    "claim": "With 1,024 values of size about 0.001 and one of 100, FP8 E4M3 with one scale flushes 16% of small values to zero (median relative error 14%); per-128 block scales give 2.1%. DeepSeek-V3 used 1x128 activation tiles and 128x128 weight blocks with relative loss error below 0.25% versus BF16.",
+    "sourceIds": [
+      "deepseek-v3"
+    ],
+    "location": "/blog/model-development-efficient-execution/",
+    "conditions": "Executed with torch.float8_e4m3fn in PyTorch 2.6; DeepSeek-V3 §3.3, pp. 15–18."
+  },
+  {
+    "id": "S6-01",
+    "status": "Reported",
+    "claim": "Llama 3 405B ran at 38–43% BF16 MFU on 8K–16K H100s (TP8, CP1 or 16, PP16, DP 8–128, 16M tokens per batch) and had 466 interruptions in 54 days, 419 unexpected, about 78% hardware-related; diurnal 1–2% throughput variation.",
+    "sourceIds": [
+      "llama3"
+    ],
+    "location": "/blog/model-development-running-at-scale/",
+    "conditions": "§3.3.2 Table 4, §3.3.4 Table 5, pp. 10–14."
+  },
+  {
+    "id": "S6-02",
+    "status": "Reported",
+    "claim": "Profiling one CPU training step of four nn.TransformerEncoderLayer blocks showed aten::bernoulli_ (default dropout 0.1) at about 30% of self CPU time; disabling dropout cut the profiled step by about a third.",
+    "sourceIds": [
+      "pytorch-2.6-optim"
+    ],
+    "location": "/blog/model-development-running-at-scale/",
+    "conditions": "torch.profiler, PyTorch 2.6, Apple M1; timings vary run to run. scripts/course/p13_at_scale.py."
+  },
+  {
+    "id": "T1-01",
+    "status": "Reported",
+    "claim": "The Tülu 3 template renders a user/assistant pair as '<|user|>\\nWhat is 2+3?\\n<|assistant|>\\n2+3 = 5.<|end_of_text|>'; with assistant-only labels 8 of 25 tokens are trained, including the end-of-text token.",
+    "sourceIds": [
+      "tulu3-tokenizer",
+      "open-instruct"
+    ],
+    "location": "/blog/model-development-supervised-fine-tuning/",
+    "conditions": "Executed with Transformers 4.51.3; scripts/course/p14_sft.py."
+  },
+  {
+    "id": "T1-02",
+    "status": "Reported",
+    "claim": "Tülu 3 SFT ablations (8B): removing WildChat drops AlpacaEval 2 from 12.4 to 7.5; removing safety data drops safety from 93.1 to 74.7; removing math data drops GSM8K from 76.2 to 64.1; seeds vary the average by about 0.1. Averaging the loss per sample under gradient accumulation weighted samples equally; a summed loss fixed it.",
+    "sourceIds": [
+      "tulu3"
+    ],
+    "location": "/blog/model-development-supervised-fine-tuning/",
+    "conditions": "§4.2 Table 10, Table 14, §4.3.2."
+  },
+  {
+    "id": "T2-01",
+    "status": "Derived",
+    "claim": "With a verifier and independent samples, a prompt survives best-of-K with probability 1-(1-p)^K; with K=16, 1,000 prompts at p=0.5 and 1,000 at p=0.02 yield about 1,000 and 276 kept examples, so hard prompts fall from 50% to 22%.",
+    "sourceIds": [
+      "llama3"
+    ],
+    "location": "/blog/model-development-post-training-data/",
+    "conditions": "Arithmetic and simulation in scripts/course/p15_post_training_data.py; Llama 3 §4.2.2 for rejection sampling with K of 10–30."
+  },
+  {
+    "id": "T2-02",
+    "status": "Reported",
+    "claim": "DeepSeek-R1-Distill-Qwen-32B scored 72.6 on AIME 2024 against 47.0 for Qwen2.5-32B trained with large-scale RL (over 10K steps).",
+    "sourceIds": [
+      "deepseek-r1"
+    ],
+    "location": "/blog/model-development-post-training-data/",
+    "conditions": "DeepSeek-R1 arXiv v2, App. F.1, Table 16."
+  },
+  {
+    "id": "T2-03",
+    "status": "Reported",
+    "claim": "Tülu 3 decontaminates prompts with 8-gram matching: a test item matches if more than 50% of its tokens fall in 8-grams shared with one training example; datasets overlapping more than 2% of an evaluation are removed or filtered; embedding matching was hard to separate from topical similarity.",
+    "sourceIds": [
+      "tulu3"
+    ],
+    "location": "/blog/model-development-post-training-data/",
+    "conditions": "§3.2, p. 14."
+  },
+  {
+    "id": "T3-01",
+    "status": "Derived",
+    "claim": "With reference (0.5, 0.3, 0.2), rewards (0, 1, 2) and beta = 1, the KL-regularized optimum is (0.18, 0.29, 0.53); the DPO gradient on logits for a fresh pair is beta*sigma(-margin)*(e_w - e_l), (0.05, 0, -0.05) at beta = 0.1.",
+    "sourceIds": [
+      "dpo"
+    ],
+    "location": "/blog/model-development-preference-optimization/",
+    "conditions": "DPO §4 Eqs. 4–7; checked with autograd in scripts/course/p16_preferences.py."
+  },
+  {
+    "id": "T3-02",
+    "status": "Reported",
+    "claim": "Tülu 3 found only length-normalized DPO beat its SFT starting point among DPO, SimPO and length-normalized DPO; final 8B beta 5, lr 5e-7. Llama 3 used DPO with lr 1e-5, beta 0.1, masked formatting tokens and an NLL term with coefficient 0.2.",
+    "sourceIds": [
+      "tulu3",
+      "llama3"
+    ],
+    "location": "/blog/model-development-preference-optimization/",
+    "conditions": "Tülu 3 §5.4, Tables 18 and 20; Llama 3 §4.1.4."
+  },
+  {
+    "id": "T4-01",
+    "status": "Reported",
+    "claim": "GRPO normalizes rewards within a group of samples per question, uses no value model and adds KL to the loss; DeepSeekMath used 64 samples, KL 0.04, lr 1e-6 and raised MATH from 46.8% to 51.7%. RL raised Maj@K but not Pass@K.",
+    "sourceIds": [
+      "deepseekmath"
+    ],
+    "location": "/blog/model-development-reinforcement-learning/",
+    "conditions": "§4.1–4.2, Table 5, §5.2.2 Fig. 7."
+  },
+  {
+    "id": "T4-02",
+    "status": "Reported",
+    "claim": "DeepSeek-R1-Zero used rule-based accuracy and format rewards with GRPO, avoided neural reward models for reasoning because of reward hacking, and rose from 15.6% to 77.9% pass@1 on AIME 2024. Tülu 3 RLVR gives reward 10 for verified answers with PPO.",
+    "sourceIds": [
+      "deepseek-r1",
+      "tulu3"
+    ],
+    "location": "/blog/model-development-reinforcement-learning/",
+    "conditions": "R1 §§2.2–2.3; Tülu 3 §6 Eqs. 7–8."
+  },
+  {
+    "id": "T4-03",
+    "status": "Derived",
+    "claim": "On a four-answer toy, a baseline of 0.2 lowered the variance of a one-sample gradient estimate from 0.102 to 0.057 with the same mean; a group of 8 has mixed rewards with probability 1-p^8-(1-p)^8 (0.34 at p = 0.95).",
+    "sourceIds": [
+      "ppo"
+    ],
+    "location": "/blog/model-development-reinforcement-learning/",
+    "conditions": "Simulation in scripts/course/p17_rl.py."
+  },
+  {
+    "id": "T5-01",
+    "status": "Reported",
+    "claim": "Tülu 3 persona instruction-following data raised IFEval from 53.6 to 72.8 while IFEval-OOD went from 18.0 to 17.6; length-controlled AlpacaEval raised Spearman correlation with Chatbot Arena from 0.94 to 0.98; optimizing against a proxy reward can lower a gold reward (Gao et al.).",
+    "sourceIds": [
+      "tulu3",
+      "lc-alpacaeval",
+      "gao-2022"
+    ],
+    "location": "/blog/model-development-post-training-failures/",
+    "conditions": "Tülu 3 Table 32; abstracts of Dubois et al. and Gao et al."
+  },
+  {
+    "id": "T5-02",
+    "status": "Derived",
+    "claim": "In a simulation where a judge rewards quality + 2 x length and the truth is quality - 0.5 x length^2, best-of-n raises the judge score at every n while true quality peaks at n = 2.",
+    "sourceIds": [
+      "gao-2022"
+    ],
+    "location": "/blog/model-development-post-training-failures/",
+    "conditions": "Illustrative constants; scripts/course/p18_failures.py."
+  },
+  {
+    "id": "R-DPO-01",
+    "status": "Reported",
+    "claim": "DPO reached about 61% GPT-4 win rate on TL;DR against 57% for PPO; humans preferred DPO samples 58% of the time; on Anthropic HH no public PPO model beat the base model, so best-of-128 stood in for PPO.",
+    "sourceIds": [
+      "dpo",
+      "ivison-2024"
+    ],
+    "location": "/paper-reviews/dpo/",
+    "conditions": "§6.2–6.4, Tables 1–2."
+  },
+  {
+    "id": "U1-01",
+    "status": "Derived",
+    "claim": "With illustrative prices ($3/$15 vs $0.15/$0.60 per million tokens), 1,500 input and 300 output tokens, accuracies 92% vs 85% and $0.50 per error, the larger model costs $49 vs $75 per 1,000 requests; a 95% interval at n = 100 is about ±5 points at 92%.",
+    "sourceIds": [
+      "chatbot-arena"
+    ],
+    "location": "/blog/model-development-choosing-a-model/",
+    "conditions": "Illustrative; scripts/course/p19_choosing.py."
+  },
+  {
+    "id": "U2-01",
+    "status": "Derived",
+    "claim": "Constrained decoding with a finite-state machine made 1,000 of 1,000 toy generations valid JSON (0 of 1,000 unconstrained); majority voting raises 50% single-sample accuracy to 58% (k=3) and 67% (k=5) when wrong answers are spread over three alternatives. Self-consistency added 17.9 points on GSM8K.",
+    "sourceIds": [
+      "outlines",
+      "self-consistency"
+    ],
+    "location": "/blog/model-development-prompting-context/",
+    "conditions": "scripts/course/p20_prompting.py; Wang et al. abstract."
+  },
+  {
+    "id": "U3-01",
+    "status": "Derived",
+    "claim": "BM25 on a six-passage toy corpus retrieves 2 of 4 gold passages at rank 1 without stemming and 3 with a plural stemmer, failing on a query with no shared words; 8 steps at 95% succeed 66% of the time, 98% with one verified retry per step.",
+    "sourceIds": [
+      "bm25",
+      "react"
+    ],
+    "location": "/blog/model-development-retrieval-tools/",
+    "conditions": "scripts/course/p21_retrieval.py."
+  },
+  {
+    "id": "U4-01",
+    "status": "Reported",
+    "claim": "LoRA matched or exceeded full fine-tuning of GPT-3 175B on WikiSQL, MNLI and SAMSum with 4.7M trainable parameters, cut training memory from 1.2 TB to 350 GB, and found rank 1 sufficient for query/value adaptation on those tasks; rank-8 LoRA on Llama 3 8B query and value projections trains 3.4M parameters.",
+    "sourceIds": [
+      "lora"
+    ],
+    "location": "/blog/model-development-adapt-or-prompt/",
+    "conditions": "LoRA Table 4, §4.2, §7.2; parameter count and merging checked in scripts/course/p22_adapt.py."
+  },
+  {
+    "id": "R-LORA-01",
+    "status": "Reported",
+    "claim": "In standard low-rank settings LoRA substantially underperformed full fine-tuning on programming and mathematics while forgetting less; full fine-tuning learned perturbations of 10-100x higher rank.",
+    "sourceIds": [
+      "lora-learns-less"
+    ],
+    "location": "/paper-reviews/lora/",
+    "conditions": "Biderman et al. abstract."
+  },
+  {
+    "id": "U5-01",
+    "status": "Derived",
+    "claim": "Llama 3 8B in BF16 on an H100 is bounded at about 209 tokens/s for one sequence (16 GB read per step at 3.35 TB/s); batch 64 at 2,048 tokens of context gives about 6,450 tokens/s at 9.9 ms per step; about 60 sequences of 8,192 tokens fit beside BF16 weights; per-channel INT8 scales cut a small channel's error from 74% to 0.8%; speculative decoding yields 3.36 tokens per step at acceptance 0.8 and 4 drafts.",
+    "sourceIds": [
+      "cs336-2026",
+      "speculative-decoding"
+    ],
+    "location": "/blog/model-development-inference-serving/",
+    "conditions": "Upper bounds ignoring overheads; scripts/course/p23_inference.py; Leviathan et al. Eq. 1."
+  },
+  {
+    "id": "U5-02",
+    "status": "Reported",
+    "claim": "vLLM (PagedAttention) improved throughput 2-4x at the same latency; GPTQ quantized 175B to 3-4 bits in about four GPU hours with negligible accuracy loss; AWQ protects about 1% salient weights by scaling.",
+    "sourceIds": [
+      "vllm",
+      "gptq",
+      "awq"
+    ],
+    "location": "/blog/model-development-inference-serving/",
+    "conditions": "Abstracts."
+  },
+  {
+    "id": "U6-01",
+    "status": "Derived",
+    "claim": "Two systems at 85% and 80% on the same 200 items with 20 vs 10 disagreements give a two-sided exact sign-test p = 0.099; the same proportions over 90 disagreements give p = 0.002. LLM judges reach over 80% agreement with humans with position, verbosity and self-enhancement biases.",
+    "sourceIds": [
+      "mt-bench",
+      "indirect-injection"
+    ],
+    "location": "/blog/model-development-evaluating-applications/",
+    "conditions": "scripts/course/p24_evaluating.py; Zheng et al. and Greshake et al. abstracts."
+  },
+  {
+    "id": "X1-01",
+    "status": "Reported",
+    "claim": "Llama 3 uses a 128K vocabulary (100K tiktoken + 28K non-English) improving English compression from 3.17 to 3.94 characters per token, and GQA with 8 KV heads to reduce KV cache during decoding.",
+    "sourceIds": [
+      "llama3"
+    ],
+    "location": "/blog/model-development-how-it-fits/",
+    "conditions": "§3.2, p. 6–7."
+  },
+  {
+    "id": "X2-01",
+    "status": "Derived",
+    "claim": "A 224 x 224 image is 196 ViT patches; Mimi in Moshi yields 12.5 x 8 = 100 tokens per second, about 31 times the text tokens of the same minute of speech at 150 words per minute and 1.3 tokens per word.",
+    "sourceIds": [
+      "vit",
+      "clip",
+      "llava"
+    ],
+    "location": "/blog/model-development-other-modalities/",
+    "conditions": "Speaking rate illustrative; Mimi figures from this site's Moshi review (Moshi §3.3.1); scripts/course/p26_modalities.py."
   }
 ]

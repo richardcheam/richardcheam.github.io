@@ -1,0 +1,115 @@
+---
+title: "Learning from preferences: reward models and DPO"
+date: 2026-11-11
+category: deep-learning
+read_time: "15 min"
+series_order: 16
+series: model-development
+featured: false
+published: true
+excerpt: "People find it easier to say which of two answers is better than to write the perfect one. Learn how pairwise preferences become a training signal: the Bradley–Terry model behind reward models, the KL-regularized objective that keeps a policy close to where it started, and how DPO optimizes that objective without a separate reward model."
+question: "How do pairwise preferences become a training signal, through a reward model or directly?"
+my_work: "A concept post; Bradley–Terry, the KL-regularized optimum and DPO worked on toy numbers and checked with PyTorch autograd; DPO's derivation followed from the DPO paper; practice from InstructGPT, Llama 3 and Tülu 3."
+result: "With a reference policy (0.5, 0.3, 0.2), rewards (0, 1, 2) and β = 1, the KL-regularized optimum is (0.18, 0.29, 0.53); DPO's gradient pushes up the preferred response and down the rejected one in proportion to how wrongly the implicit reward orders them; Tülu 3 found length-normalized DPO the only variant that beat its starting checkpoint."
+evidence_limit: "Toy examples illustrate the mathematics; reported findings are the papers' own, on their data and evaluations."
+lesson: "Preference learning fits a reward to comparisons and then moves the policy towards higher reward while a KL term keeps it near the reference. DPO does both in one supervised-looking loss."
+---
+
+After [supervised fine-tuning](/blog/model-development-supervised-fine-tuning/), a model answers in the right format, but it only imitates its examples. Many qualities we want, helpfulness, tone, honesty about uncertainty, are hard to demonstrate and easy to judge: given two answers, people can usually say which is better. **Preference learning** turns those judgements into a training signal. This post needs only the SFT post and basic probability.
+
+## From comparisons to a reward
+
+The data is a set of triples: a prompt $x$, a preferred response $y_w$ and a rejected one $y_l$. InstructGPT showed labelers 4 to 9 responses at a time and had them rank them; each ranking yields many pairs ([Ouyang et al., 2022](https://arxiv.org/abs/2203.02155), §3.5). Judgements are noisy: InstructGPT's trained labelers agreed with each other 72.6% of the time (§3.4). No model can be more consistent with the labels than the labels are with themselves.
+
+The standard way to turn pairs into a number is the **Bradley–Terry model**: each response has a hidden score, a **reward** $r(x, y)$, and
+
+$$
+P(y_w \succ y_l \mid x) = \sigma\big(r(x, y_w) - r(x, y_l)\big), \qquad \sigma(z) = \frac{1}{1 + e^{-z}}.
+$$
+
+Only the difference of rewards matters. A difference of 0 gives a coin flip; a difference of 1 gives $\sigma(1) \approx 0.73$; a difference of 3 gives 0.95. Read backwards: if response A is preferred to B in 3 of 4 comparisons, the best-fitting reward gap is $\ln 3 \approx 1.10$.
+
+A **reward model** is a language model with its output layer replaced by a single number, trained on the pairs by maximizing that probability, that is, minimizing $-\log \sigma(r(x, y_w) - r(x, y_l))$ (InstructGPT Eq. 1; [DPO](https://arxiv.org/abs/2305.18290) Eq. 2). It is logistic regression on the difference of two scores.
+
+## The objective: more reward, but stay close
+
+Given a reward model, the obvious move is to make the policy produce high-reward responses. Pushed too far, that fails: the reward model is only accurate near the kinds of responses it was trained on, and a policy that wanders far from them finds responses the reward model scores highly for the wrong reasons. So the standard objective adds a penalty for moving away from a **reference policy** $\pi_{\text{ref}}$, usually the SFT model:
+
+$$
+\max_{\pi}\ \mathbb{E}_{y \sim \pi(\cdot \mid x)}\big[r(x, y)\big] - \beta\, \mathrm{KL}\big(\pi(\cdot \mid x)\,\|\,\pi_{\text{ref}}(\cdot \mid x)\big).
+$$
+
+- $\pi$: the policy being trained, the model's distribution over responses.
+- $\mathrm{KL}$: how far $\pi$ has moved from $\pi_{\text{ref}}$.
+- $\beta$: the exchange rate between reward and staying close.
+
+This objective has an exact solution ([DPO](https://arxiv.org/abs/2305.18290), §4, Eq. 4):
+
+$$
+\pi^*(y \mid x) = \frac{1}{Z(x)}\,\pi_{\text{ref}}(y \mid x)\,\exp\!\big(r(x, y)/\beta\big),
+$$
+
+where $Z(x)$ is whatever makes the probabilities sum to 1. The optimal policy reweights the reference policy by exponentiated reward.
+
+Work it on three possible responses with reference probabilities $(0.5, 0.3, 0.2)$ and rewards $(0, 1, 2)$:
+
+- With $\beta = 1$: weights $0.5$, $0.3e \approx 0.82$, $0.2e^2 \approx 1.48$; normalized, **$(0.18, 0.29, 0.53)$**. The best response becomes the most likely, but the others keep some probability.
+- With $\beta = 0.5$, reward counts double: $(0.04, 0.16, 0.80)$.
+- With $\beta = 2$: $(0.33, 0.32, 0.35)$; and as $\beta$ grows, the policy returns to the reference.
+
+$\beta$ is a dial between "trust the reward model" and "stay where you were".
+
+## DPO: optimizing preferences directly
+
+The usual way to reach $\pi^*$ is reinforcement learning against the reward model, the subject of the [next post](/blog/model-development-reinforcement-learning/). **Direct Preference Optimization** (DPO) takes a shortcut ([Rafailov et al., 2023](https://arxiv.org/abs/2305.18290), §4). Rearranging the optimal policy gives the reward in terms of the policy:
+
+$$
+r(x, y) = \beta \log \frac{\pi^*(y \mid x)}{\pi_{\text{ref}}(y \mid x)} + \beta \log Z(x).
+$$
+
+In the toy example, $\log(\pi^*/\pi_{\text{ref}})$ is $(-1.03, -0.03, 0.97)$: the rewards $(0, 1, 2)$ shifted by a constant. Substituting this into Bradley–Terry, the constant $\beta \log Z(x)$ appears in both rewards and cancels in their difference. What remains is a loss on the policy alone (Eq. 7):
+
+$$
+\mathcal{L}_{\text{DPO}} = -\log \sigma\!\left(\beta \log \frac{\pi_\theta(y_w \mid x)}{\pi_{\text{ref}}(y_w \mid x)} - \beta \log \frac{\pi_\theta(y_l \mid x)}{\pi_{\text{ref}}(y_l \mid x)}\right).
+$$
+
+Each $\log \pi_\theta(y \mid x)$ is the sum of the log-probabilities of the response's tokens under the model, the same quantity as the SFT loss with the sign flipped. So DPO needs no reward model and no sampling during training: for each pair, run the policy and the frozen reference on both responses and compute one logistic loss. The quantity $\beta \log(\pi_\theta/\pi_{\text{ref}})$ acts as an **implicit reward**.
+
+The gradient shows what DPO does. On the three-response toy with $\beta = 0.1$, preferring response 3 over response 1, the first gradient on the logits is $(+0.05, 0, -0.05)$: push the preferred response up and the rejected one down, by $\beta\,\sigma(-\text{margin})$. The weight $\sigma(-\text{margin})$ is large when the implicit reward orders the pair wrongly and small when it already orders it right, so well-learned pairs stop contributing. After four steps the probabilities move from $(0.5, 0.3, 0.2)$ to $(0.43, 0.32, 0.26)$, and the response not in the pair moved too, through the softmax.
+
+**Try it: compute a DPO loss.** At the start of training $\pi_\theta = \pi_{\text{ref}}$, so both log-ratios are 0. What is the loss? Later, the chosen response's log-ratio is +0.2 and the rejected one's −0.1, with $\beta = 0.1$. And if they are −0.5 and −1.5?
+
+**Answer.** At the start the margin is 0 and the loss is $-\log \sigma(0) = \ln 2 \approx$ **0.693**. Then the margin is $0.1 \times (0.2 - (-0.1)) = 0.03$ and the loss **0.678**. In the third case the margin is $0.1 \times (-0.5 + 1.5) = 0.1$ and the loss **0.644**, lower still, although *both* responses became less likely than under the reference. DPO only cares about the difference, so it can lower the probability of the chosen response as long as the rejected one falls faster. This is a known behaviour of DPO and one reason practitioners monitor the chosen response's log-probability during training.
+
+## What practice has found
+
+- **Off-policy data has limits.** DPO learns from fixed pairs, often generated by other models. Tülu 3 found that adding **on-policy** pairs, with responses sampled from the model being trained, improved results, as did increasing the number of unique prompts ([Tülu 3](https://arxiv.org/abs/2411.15124), §5.3). Llama 3 likewise trained each round's DPO mainly on preference data collected with its latest models, so the data matched the policy being optimized ([Llama 3](https://arxiv.org/abs/2407.21783), §4.1.4).
+- **Length is a confound.** Summed log-probabilities grow with length, and judges, human or model, tend to prefer longer answers. Tülu 3 compared standard DPO, SimPO and length-normalized DPO, which divides each log-ratio by the response length, and found that only the length-normalized variant beat its starting checkpoint on average (§5.4.1, Table 18). Its final 8B setting used $\beta = 5$ with a learning rate of $5 \times 10^{-7}$ (Table 20); $\beta$'s scale changes with normalization, so values do not transfer between variants.
+- **Formatting tokens can distort the loss.** Llama 3 masked special formatting tokens out of the DPO loss, because tokens shared by both responses are pushed up and down at once, and added a negative-log-likelihood term with coefficient 0.2 on the chosen response to keep its probability from falling (§4.1.4).
+- **DPO or reinforcement learning?** Llama 3 explored PPO but found DPO needed less compute at large scale and performed better on instruction following (§4.1.4). Tülu 3 used DPO for preferences and added reinforcement learning only where answers can be verified. The next post covers when online RL earns its cost.
+
+Everyday picture: a wine tasting where judges only say which of two glasses they prefer. A reward model learns a score for each wine from those choices; DPO skips the score and adjusts the cellar directly, buying more of what won and less of what lost, but never straying too far from the cellar it started with.
+
+
+## What to remember
+
+- Bradley–Terry: $P(y_w \succ y_l) = \sigma(r_w - r_l)$. A reward model is trained as logistic regression on reward differences; label agreement (about 73% in InstructGPT) caps what it can learn.
+- The KL-regularized objective trades reward against distance from a reference; its optimum is $\pi^* \propto \pi_{\text{ref}}\exp(r/\beta)$.
+- DPO substitutes the policy's log-ratio for the reward; the normalizer cancels, leaving a logistic loss on the difference of log-ratios of chosen and rejected responses.
+- DPO only constrains the difference: both responses can become less likely. Monitor the chosen response's probability.
+- In practice: prefer on-policy pairs, control for length, and tune $\beta$ for the specific variant.
+
+
+## Sources
+
+- R. Rafailov, A. Sharma, E. Mitchell, S. Ermon, C. D. Manning and C. Finn (2023). "Direct Preference Optimization: Your Language Model is Secretly a Reward Model." NeurIPS 2023. arXiv:2305.18290. §§3–4, Eqs. 1–7.
+- L. Ouyang, J. Wu, X. Jiang et al. (2022). "Training language models to follow instructions with human feedback." NeurIPS 2022. arXiv:2203.02155. §§3.4–3.5.
+- N. Lambert et al. (2024). "Tülu 3." arXiv:2411.15124. §§5.1–5.4.
+- Llama Team, AI @ Meta (2024). "The Llama 3 Herd of Models." arXiv:2407.21783. §4.1.4.
+
+
+## Further reading
+
+- [DPO paper review](/paper-reviews/dpo/).
+- Stanford CS336, [lecture 15](https://cs336.stanford.edu/): SFT and RLHF.
+- Berkeley CS294-280 (Spring 2025), [Jason Weston, "Learning to reason with LLMs"](https://rdi.berkeley.edu/adv-llm-agents/sp25), whose readings include DPO and iterative reasoning preference optimization.

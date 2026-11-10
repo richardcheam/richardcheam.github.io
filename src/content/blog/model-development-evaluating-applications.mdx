@@ -1,0 +1,100 @@
+---
+title: "Evaluating an application: test sets, judges, error bars, feedback and security"
+date: 2026-11-11
+category: deep-learning
+read_time: "14 min"
+series_order: 24
+series: model-development
+featured: false
+published: true
+excerpt: "An application built on a model is never finished: prompts change, models are swapped, users ask new things. Learn to build an evaluation that tracks what matters, use a model as a judge without inheriting its biases, tell a real improvement from noise, learn from production, and recognize the privacy and security risks that arrive with retrieval and tools."
+question: "How do you know an application works, and keep knowing after release, safely?"
+my_work: "A concept post; a paired comparison analysed with a bootstrap and an exact sign test; judge reliability and biases from MT-Bench; evaluation framing from CS336 lecture 12; indirect prompt injection from Greshake et al."
+result: "On 200 shared items, an 85% system and an 80% system differ on 30 items, 20 to 10: two-sided p = 0.099, not yet convincing; the same proportions over 90 disagreements give p = 0.002. Strong LLM judges agree with humans about as often as humans agree with each other, but favour the first answer, longer answers and their own outputs."
+evidence_limit: "Statistics are on a constructed example; judge findings are for the models and tasks in the cited work."
+lesson: "Evaluate on real tasks with a fixed, versioned test set; compare systems on the same items with uncertainty; correct judge biases; feed production failures back into the test set; and treat retrieved and tool content as untrusted input."
+---
+
+Every earlier post in this track relied on an evaluation set: to [choose a model](/blog/model-development-choosing-a-model/), to check a [prompt change](/blog/model-development-prompting-context/), to measure [retrieval](/blog/model-development-retrieval-tools/), to decide whether [fine-tuning](/blog/model-development-adapt-or-prompt/) helped. This post is about building that evaluation well and keeping it honest after the application is in users' hands. It parallels the [post-training evaluation post](/blog/model-development-post-training-failures/), seen from the application side.
+
+## What to evaluate
+
+Start from the question the evaluation must answer. CS336's evaluation lecture is blunt that there is no single true evaluation: a company choosing between two models, a researcher measuring capability and a developer looking for failures need different ones ([CS336 lecture 12](https://cs336.stanford.edu/)). For an application, the question is usually: does it do the job for our users, at acceptable cost, without causing harm?
+
+A useful test set has four properties:
+
+- **Real inputs,** sampled from actual or realistic use, including the awkward cases: ambiguous questions, long inputs, other languages, requests the system should refuse.
+- **A clear standard** for each item: a reference answer, a checkable property (the JSON validates, the cited passage contains the claim), or a rubric.
+- **Fixed and versioned.** If the test set changes whenever the system does, scores cannot be compared over time.
+- **Kept out of development data**, so prompt and fine-tuning choices do not overfit it, the failure Tülu 3 measured for its development benchmarks ([post-training failures](/blog/model-development-post-training-failures/#overfitting-the-benchmarks-you-develop-on)).
+
+Measure components as well as the whole: retrieval recall, tool-call correctness, final-answer quality. When the end result fails, component metrics say where.
+
+## Models as judges
+
+Many outputs cannot be checked by a program: is this summary faithful, is this reply helpful? Human grading is reliable but slow. A strong model can grade instead. Zheng et al. found that GPT-4 as a judge agreed with human preferences over 80% of the time, the same level at which humans agreed with each other, and documented its biases: **position** (favouring the answer shown first), **verbosity** (favouring longer answers) and **self-enhancement** (favouring its own outputs) ([Zheng et al., 2023](https://arxiv.org/abs/2306.05685), abstract).
+
+Each bias has a standard correction:
+
+- **Position:** judge every pair in both orders and average, or count only consistent verdicts. A judge that picks the first answer 65% of the time on truly equal pairs gives 65% one way and 35% the other; the average is 50%, the right answer.
+- **Verbosity:** control for length, as [length-controlled AlpacaEval](/blog/model-development-post-training-failures/#length) does, or instruct the judge to penalize padding and check that it does.
+- **Self-preference:** do not let a model judge its own outputs against others'; use a different judge, or several.
+
+Validate the judge itself: have people grade a sample, and measure how often the judge agrees with them before trusting it on thousands of items.
+
+## How sure are you?
+
+A score on a test set is an estimate. Two systems should be compared **on the same items**, because what matters is where they disagree.
+
+**Try it: is B really worse?** Systems A and B answer the same 200 items. A is right on 170 (85%), B on 160 (80%). They agree on 170 items (150 both right, 20 both wrong) and disagree on 30: A alone is right on 20, B alone on 10. Is A better?
+
+**Answer.** Only the 30 disagreements carry information about which is better. If the systems were equally good, each disagreement would favour A or B like a coin flip; getting 20 or more of 30 one way happens with probability about **0.099** (two-sided exact sign test). A bootstrap interval for the difference in accuracy runs from 0 to about +10.5 points. The evidence leans towards A but is not convincing; a 5-point gap on 200 items is within what chance produces. If the same 2-to-1 pattern held over 90 disagreements, the probability would fall to **0.002**. Collect more items, or examine the disagreements to see whether they share a cause.
+
+As a rule of thumb, a 95% interval for a single accuracy near 85% on $n$ items is about $\pm 2\sqrt{0.85 \times 0.15/n}$: ±5 points at 200 items, ±1.6 at 2,000. Paired comparisons are much more sensitive than comparing two separate intervals.
+
+## After release: production feedback
+
+The test set is a snapshot; users keep changing. Production adds information the test set cannot:
+
+- **Logs** of inputs and outputs (with consent and the privacy controls below) show what users actually ask, which often differs from what was expected.
+- **Explicit feedback** (ratings, corrections) is sparse and biased towards strong reactions; **implicit signals** (a rephrased question, a copied answer, an escalation to a human) are plentiful but noisy.
+- **Regression testing:** every model swap, prompt edit or retrieval change is run against the fixed test set before release, so improvements in one place do not break another.
+- **Closing the loop:** production failures, once understood, become new test items. Over time the test set grows towards the real distribution of hard cases.
+- **Controlled comparisons** (A/B tests) measure effects on real users when offline metrics are not enough, with the same paired logic and error bars.
+
+## Security and privacy
+
+Retrieval and tools connect a model to content and actions outside the prompt, and that connection is an attack surface.
+
+**Prompt injection.** A model reads instructions and data in the same stream of tokens and cannot reliably tell them apart. Greshake et al. showed **indirect prompt injection**: an attacker places instructions in content the application will retrieve, a web page, an email, a document, and the model follows them, with consequences ranging from manipulated answers to data theft and unauthorized tool calls. They demonstrated it against real systems and noted that effective mitigations were lacking ([Greshake et al., 2023](https://arxiv.org/abs/2302.12173), abstract). There is still no complete fix, so systems limit the damage:
+
+- treat all retrieved and tool-returned content as untrusted data;
+- give the model only the tools and permissions the task requires, and require confirmation for consequential actions (payments, deletions, sending messages);
+- separate the privilege to read untrusted content from the privilege to act;
+- include injection attempts in the test set.
+
+**Privacy.** Logs, retrieved documents and fine-tuning data may contain personal or confidential information. Minimize what is logged, control who can retrieve what (retrieval should respect the same access rules as the documents themselves), keep personal data out of fine-tuning sets unless there is a clear basis for it, and remember that a model can repeat what was in its context or training data. Evaluation itself must be designed with this in mind: realistic test data is the most valuable, and the most sensitive.
+
+Everyday picture: a new employee on probation. You check their work on real cases, compare them fairly with the previous employee on the same cases, keep reviewing after probation ends, and never give them the keys to everything because a stranger's letter told them to ask for them.
+
+
+## What to remember
+
+- Evaluate on real inputs with clear standards; keep the test set fixed, versioned and out of development data; measure components as well as the whole.
+- Model judges agree with people about as well as people agree with each other, but favour first, longer and their own answers: swap orders, control length, use a different judge, and validate against human grades.
+- Compare systems on the same items and look at the disagreements: 20 to 10 out of 30 is p ≈ 0.1, not proof.
+- Production feeds evaluation: log carefully, use explicit and implicit signals, run regression tests on every change, and turn failures into test items.
+- Treat retrieved and tool content as untrusted; limit tool permissions; protect personal data in logs, retrieval and training.
+
+
+## Sources
+
+- L. Zheng, W.-L. Chiang, Y. Sheng, S. Zhuang et al. (2023). "Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena." NeurIPS 2023 Datasets and Benchmarks. arXiv:2306.05685.
+- K. Greshake, S. Abdelnabi, S. Mishra, C. Endres, T. Holz and M. Fritz (2023). "Not what you've signed up for: Compromising Real-World LLM-Integrated Applications with Indirect Prompt Injection." arXiv:2302.12173.
+- Stanford CS336, [lecture 12, "Evaluation"](https://cs336.stanford.edu/) (lecture file `lecture_12.py`).
+
+
+## Further reading
+
+- Berkeley CS294-280 (Spring 2025), [Dawn Song, "Towards building safe and secure agentic AI"](https://rdi.berkeley.edu/adv-llm-agents/sp25) (28 Apr), whose readings cover prompt-injection detection and privilege control for agents.
+- [Benchmark numbers that misled me and how I corrected them](/blog/benchmark-denominators/).

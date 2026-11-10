@@ -1,0 +1,80 @@
+---
+title: "Chinchilla: how much data a model should see, and how firmly the paper shows it"
+title_key: "Chinchilla"
+published: true
+date: 2026-11-11
+question: "For a fixed training budget, how should model size and training tokens be balanced, and which parts of the paper's evidence carry that conclusion?"
+excerpt: "Chinchilla argues that parameters and training tokens should grow together with compute, roughly 20 tokens per parameter at its optimum. Two of its three estimation methods agree closely; the third, a parametric fit, was later shown to be mis-estimated; and its famous 70B-versus-280B comparison changed more than the budget split."
+type: paper
+topic: [training]
+tags: [Scaling laws, Compute budget, Pre-training, DeepMind]
+org: "DeepMind"
+authors: "Jordan Hoffmann, Sebastian Borgeaud, Arthur Mensch, Elena Buchatskaya, Trevor Cai, Eliza Rutherford, et al."
+source_url: "https://arxiv.org/abs/2203.15556v1"
+source_label: "Read Chinchilla (v1)"
+source_date: 2022-03-29
+read_time: "10 min"
+featured: false
+math: true
+tldr:
+  - "**Claim:** for compute-optimal training, model size and training tokens should be scaled equally; the earlier recommendation to put most extra compute into parameters left large models undertrained (Abstract, p. 1)."
+  - "**Strongest evidence:** two independent estimation methods, over 400 runs from 70M to 16B parameters, give exponents of 0.50 and 0.49 for parameters, and IsoFLOP analyses on two other datasets agree (Table 2, p. 8; App. C)."
+  - "**Weakest link:** the parametric fit, whose published coefficients imply a different optimum; a replication attributes this to an unconverged fit and rounding (Besiroglu et al., 2024)."
+  - "**My reading:** trust the equal-scaling conclusion and the flat optimum; treat 20 tokens per parameter as a training-compute optimum for this data and recipe, not a target for models that will be served."
+links:
+  - label: "Post: scaling laws and compute budgets"
+    url: "/blog/model-development-scaling-laws/"
+---
+
+## The problem and what came before
+
+Training budgets are fixed in advance: a number of accelerators for a number of weeks. The question is how to spend them. Kaplan et al. (2020) had found that loss falls as a power law in model size, and recommended that a tenfold increase in compute go mostly into parameters, with model size growing about 5.5 times and data only 1.8 times (Sec 1, pp. 1–2). The large models of 2020–2021, GPT-3, Gopher and Megatron-Turing NLG among them, were trained on roughly 300 billion tokens regardless of their size (Table 1, p. 3).
+
+Chinchilla's authors suspected a methodological cause. Kaplan's runs used a fixed number of training tokens and a fixed learning-rate schedule for all models. Chinchilla found that setting the cosine schedule to decay over roughly the actual number of training tokens gives the best final loss at every model size (Sec 2, p. 3; App. B, Fig. A1). A model evaluated part-way through a schedule tuned for a longer run looks worse than it would be, which biases any comparison between short and long training towards bigger models trained less.
+
+## The method: three estimates of the same frontier
+
+The question is: for a compute budget $C \approx 6ND$, which pair $(N, D)$ minimizes final loss (Sec 2, Eq. 1, p. 2; the $6ND$ approximation is used in Sec 3.3, p. 7)? The paper answers it three ways, all on Gopher's MassiveText data:
+
+1. **Minimum over training curves** (Sec 3.1, p. 4). Train models from 70M to over 10B parameters, each with four schedule lengths. For each FLOP value, take the lowest loss any run achieves; fit power laws to the model sizes and token counts that achieve it.
+2. **IsoFLOP profiles** (Sec 3.2, pp. 5–6). Fix nine budgets, from $6 \times 10^{18}$ to $3 \times 10^{21}$ FLOPs; at each, vary model size with tokens set by the budget, fit a parabola to loss against log model size, and take its minimum.
+3. **Parametric fit** (Sec 3.3, pp. 6–7). Fit $L(N, D) = E + A/N^{\alpha} + B/D^{\beta}$ to all runs with a Huber loss on log loss, then minimize it under the compute constraint.
+
+Approaches 1 and 2 are the more direct: they read the optimum off measured runs. Approach 3 is useful for extrapolation and for interpreting the terms, the irreducible loss $E$ and the penalties for finite model and finite data, but it is only as good as the fit.
+
+## The decisive results
+
+The two direct methods agree closely. With $N_{\text{opt}} \propto C^{a}$ and $D_{\text{opt}} \propto C^{b}$ (Table 2, p. 8):
+
+| Approach | $a$ (parameters) | $b$ (tokens) |
+|---|---|---|
+| 1. Minimum over training curves | 0.50 | 0.50 |
+| 2. IsoFLOP profiles | 0.49 | 0.51 |
+| 3. Parametric fit (published) | 0.46 | 0.54 |
+| Kaplan et al. (2020) | 0.73 | 0.27 |
+
+Projected from Approach 1, a 1B model should see 20.2B tokens and a 10B model 205.1B, about 20 tokens per parameter (Table 3, p. 8). The IsoFLOP analysis repeated on C4 and on GitHub code gives the same equal scaling (App. C). That robustness across methods and datasets is the paper's strongest evidence.
+
+The headline test is Chinchilla itself: 70B parameters on 1.4 trillion tokens, the same compute as the 280B-parameter Gopher trained on 300B tokens (Sec 4, p. 9). It outperformed Gopher on a wide range of tasks, for example 67.5% against 60.0% on 5-shot MMLU (Abstract; Table 6, p. 11).
+
+## What the evidence supports, confounds and leaves open
+
+**Supported.** Parameters and tokens should grow at similar rates with compute, for transformer language models trained on web-scale text with well-matched schedules, over the range studied. The loss surface is flat near the optimum: the IsoFLOP parabolas are shallow, so missing the optimum by a modest factor costs little. Llama 3's own IsoFLOP study saw the same flattening at larger budgets ([Llama 3](https://arxiv.org/abs/2407.21783), §3.2.1).
+
+**The parametric fit is not reliable as published.** Minimizing the published formula ($E = 1.69$, $A = 406.4$, $B = 410.7$, $\alpha = 0.34$, $\beta = 0.28$; App. D.2, p. 25) at a budget of $1.2 \times 10^{21}$ FLOPs gives about 51 tokens per parameter, not the 20 that Approaches 1 and 2 imply. Besiroglu et al. (2024) reconstructed the data from the paper's figures and found the reported estimates inconsistent with the other two methods, failing to fit the data, and with confidence intervals implausibly narrow for fewer than 500 runs. They traced this to an optimizer that stopped before convergence and to rounding of the published coefficients; their refit agrees with Approaches 1 and 2 ([Besiroglu et al., 2024](https://arxiv.org/abs/2404.10102), abstract). Anyone using $L(N, D)$ to extrapolate should refit it, ideally on their own runs.
+
+**The Chinchilla–Gopher comparison changes more than the budget split.** Besides size and tokens, Chinchilla used AdamW instead of Adam, a tokenizer without NFKC normalization, a different mixture of MassiveText subsets, and float32 master weights (Sec 4.1, p. 9). The authors chose AdamW because it improves language-modelling loss and downstream performance after fine-tuning, and compare the optimizer-related changes in Appendix G (Sec 4.1, p. 9). The comparison confirms that a 70B model can beat a 280B one at equal compute, which is the practical point, but it does not isolate the budget split; the scaling analyses do that.
+
+**Left open.**
+
+- **Inference cost.** The paper notes that a smaller model is cheaper to fine-tune and serve (Sec 4, p. 9) but optimizes training compute only. Accounting for serving shifts the optimum towards smaller models trained much longer ([Sardana et al., 2024](https://arxiv.org/abs/2401.00448)).
+- **Data limits.** The analysis assumes fresh data is available; MassiveText subsets are already repeated within 1.4T tokens (Table A1), and data-constrained regimes need their own analysis.
+- **Downstream behaviour.** The frontier is fitted on loss. Llama 3's two-step method (loss on benchmark answers, then accuracy) is one way to bridge to capabilities.
+- **Extrapolation.** The runs reach about $3 \times 10^{21}$ FLOPs (IsoFLOP) and 16B parameters; the paper itself notes significant uncertainty when extrapolating many orders of magnitude (Sec 3.4, p. 8).
+
+## How it changes decisions
+
+- Plan model size and token count together. A budget that buys a bigger model also needs proportionally more data.
+- Tune the schedule to the run's length before comparing runs of different lengths, or the comparison will favour the wrong size.
+- Use direct measurements (IsoFLOP minima) on your own data in preference to transferred constants; refit any parametric law you rely on.
+- For a model that will be served heavily, start from the training-compute optimum and move towards a smaller model trained longer, checking whether enough unique data exists. The [scaling-laws post](/blog/model-development-scaling-laws/) works through this trade-off.

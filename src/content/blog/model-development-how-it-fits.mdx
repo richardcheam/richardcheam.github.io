@@ -1,0 +1,76 @@
+---
+title: "How it fits together: tracing one requirement through data, training and serving"
+date: 2026-11-11
+category: deep-learning
+read_time: "10 min"
+series_order: 25
+series: model-development
+featured: false
+published: true
+excerpt: "Each post in this series took one decision at a time. Real systems are constrained end to end: a requirement at the application layer reaches back into the tokenizer, the data mix, the architecture and the training budget. Trace two requirements through the whole stack, and read Llama 3's design as a set of interlocking choices."
+question: "How do data, training, post-training, inference and application requirements constrain one another?"
+my_work: "A synthesis post connecting the earlier posts; Llama 3's interlocking decisions summarized from its report."
+result: "A requirement such as serving Khmer users cheaply touches the tokenizer (6.5× token premium), the mixture, the model size, grouped-query attention, quantization and the evaluation set; Llama 3's vocabulary, attention heads, size and data mix were each chosen with later stages in mind."
+evidence_limit: "A synthesis of earlier posts; the traced examples are illustrative design reasoning, not measured systems."
+lesson: "Decisions at one stage are paid for at others. Start from the requirement that will be hardest to meet at serving time, and trace it back before fixing any stage."
+---
+
+The series took decisions one stage at a time: [data](/blog/model-development-pretraining-corpus/), [tokenization](/blog/model-development-tokenization/), [architecture](/blog/model-development-decoder-architecture/), [scale](/blog/model-development-scaling-laws/), [distributed training](/blog/model-development-running-at-scale/), [post-training](/blog/model-development-supervised-fine-tuning/), [serving](/blog/model-development-inference-serving/) and [application evaluation](/blog/model-development-evaluating-applications/). In a real project they are not independent. A choice made early fixes costs that appear much later, and a requirement discovered late can only be met cheaply if it was anticipated early. This short post traces the connections.
+
+## The main couplings
+
+| Decision | What it constrains later |
+|---|---|
+| **Tokenizer** | Compute and context per language; vocabulary parameters; how much of the corpus a token budget covers; serving cost per request |
+| **Data mixture** | Which capabilities the base model has; what post-training can draw out; what evaluation will find |
+| **Model size and token budget** | Training cost, but also serving latency and memory for the model's whole life |
+| **Attention heads (GQA)** | KV-cache size, and therefore batch size, throughput and cost when serving |
+| **Context length** | Training memory and cost; position-encoding choices; the usefulness of retrieval |
+| **Post-training recipe** | Format, refusal and reasoning behaviour that applications rely on; regressions applications must test |
+| **Evaluation set** | What every earlier decision is optimized towards |
+
+## Tracing a requirement: serving Khmer users cheaply
+
+Suppose the requirement is a Khmer-language assistant that answers in under two seconds at low cost.
+
+1. **Tokenizer.** Under an English-centred tokenizer, Khmer cost 15 times as many tokens as English for the same content; under a multilingual one, 6.5 times ([tokenization post](/blog/model-development-tokenization/#what-the-same-text-costs)). Every later cost is multiplied by that factor, so a tokenizer with Khmer pieces is the single largest saving available, and it can only be chosen before pre-training.
+2. **Data.** Khmer is a low-resource language. Its share of the mixture, and how many times it is repeated, decide how well the model learns it ([mixtures post](/blog/model-development-data-mixtures/#three-ways-to-set-weights)). Language identification must not discard mixed Khmer–English pages ([corpus post](/blog/model-development-pretraining-corpus/#keeping-one-language)).
+3. **Size.** A model that serves many requests should be smaller and trained longer than the compute-optimal size ([scaling laws](/blog/model-development-scaling-laws/#when-the-model-has-to-be-served)), but a small model has less capacity for a language it saw little of. This tension has to be measured, not assumed.
+4. **Architecture and serving.** Long Khmer token sequences fill the KV cache sooner, so grouped-query attention and quantization matter more than for English ([inference post](/blog/model-development-inference-serving/#the-kv-cache-decides-how-many-users-fit)).
+5. **Evaluation.** The test set must be in Khmer, with Khmer-speaking judges or validated automatic metrics; English benchmarks say little about the requirement.
+
+A team that fixes the tokenizer and mixture first and discovers the Khmer requirement at step 5 can only patch it with fine-tuning and retrieval, at higher serving cost for the life of the product.
+
+## Tracing a requirement: reliable mathematical answers
+
+Now the requirement is that answers to arithmetic and algebra problems are right, not just plausible.
+
+1. **Data and base model.** Mathematical skill comes mostly from pre-training data; DeepSeekMath's 120-billion-token math corpus did much of the work before any RL ([DeepSeekMath review](/paper-reviews/deepseekmath-grpo/)). The same SFT mix gave 31.5 on MATH from one base model and 56.4 from a math-specialized one ([SFT post](/blog/model-development-supervised-fine-tuning/#what-the-data-teaches)).
+2. **Post-training.** Answers are checkable, so verifiable rewards and RL fit ([RL post](/blog/model-development-reinforcement-learning/#verifiable-rewards)), with prompts chosen at the edge of the model's ability so groups carry signal.
+3. **Inference.** Sampling several solutions and voting improves accuracy ([prompting post](/blog/model-development-prompting-context/#sampling-several-times-and-voting)), but multiplies serving cost; a calculator tool makes arithmetic exact for the price of a tool call ([retrieval and tools](/blog/model-development-retrieval-tools/#tools)).
+4. **Evaluation.** Pass@1 for users, Pass@K and Maj@K to tell sharpening from new capability, and fresh problems the training data could not contain.
+
+Here the cheapest reliable system may combine a moderately sized model, RL with a verifier, and a tool, rather than a much larger model.
+
+## A real example: Llama 3's interlocking choices
+
+Llama 3's report is useful precisely because its decisions visibly anticipate later stages ([Llama 3](https://arxiv.org/abs/2407.21783), §3):
+
+- a **128,000-token vocabulary**, adding 28,000 tokens for non-English languages, improved English compression from 3.17 to 3.94 characters per token, letting the model read more text for the same training compute (§3.2);
+- **grouped-query attention with 8 key-value heads** to reduce the KV cache and speed up decoding (§3.2);
+- a **flagship size chosen from scaling laws** fitted on its own data mix, with the flat optimum used to pick a convenient 405B (§3.2.1), while smaller models were trained far longer for cheaper serving;
+- **annealing on high-quality data**, which helped the 8B model more than the 405B, and a document mask that mattered for long-context training (§3.1.3, §3.2).
+
+None of these is remarkable alone. Together they show the habit this series has tried to teach: every choice is judged by what it costs or enables at the other stages.
+
+**Try it: trace a requirement.** Your application must cite the document behind every answer, from a collection that changes daily. Which stages does that requirement reach?
+
+**Answer.** It is mostly a **retrieval** requirement: knowledge that changes daily belongs in an index, not in weights, and citations need retrieved passages ([adaptation post](/blog/model-development-adapt-or-prompt/#three-problems-three-tools)). It reaches **context length and serving** (passages consume tokens and KV cache), **prompting or fine-tuning** for a consistent citation format, **evaluation** (does the cited passage actually support the claim?), and **security** (retrieved documents can carry injected instructions). It barely touches pre-training: a model that follows instructions and handles long contexts is enough.
+
+
+## What to remember
+
+- Stages are coupled: the tokenizer, mixture, size and attention design fix costs that appear at serving time.
+- Start from the requirement hardest to meet in production, and trace it back through evaluation, serving, post-training, architecture, data and tokenizer before fixing any stage.
+- Some requirements can only be met cheaply early (tokenizer, language coverage); others belong late (fresh knowledge in retrieval).
+- Read technical reports for how decisions interlock, not only for their final numbers.

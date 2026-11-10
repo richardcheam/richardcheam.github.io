@@ -1,0 +1,100 @@
+---
+title: "Running at scale: throughput, failures and choosing a layout"
+date: 2026-11-11
+category: deep-learning
+read_time: "14 min"
+series_order: 13
+series: model-development
+featured: false
+published: true
+excerpt: "A large run is a machine that fails. Learn to measure whether it is running well (MFU), find where time goes with a profiler, plan checkpoints around how often thousands of GPUs break, and choose a parallel layout by working through memory first and communication second, with Llama 3's real configuration as the example."
+question: "How do you measure throughput, find bottlenecks, recover from failures and choose a parallel layout?"
+my_work: "A concept post; MFU and layout arithmetic checked against Llama 3's Table 4; failure rates from its §3.3.4; a checkpoint interval from Young's approximation; a CPU profile of one training step in PyTorch 2.6."
+result: "Llama 3 405B ran at 38–43% MFU on up to 16,384 GPUs and saw 419 unexpected interruptions in 54 days, one every 3.1 hours; profiling a small CPU step showed an unintended default dropout taking 30% of the time."
+evidence_limit: "Llama 3 numbers are one organization's report for its hardware; the checkpoint cost and the CPU profile are illustrative."
+lesson: "Measure MFU, read a profile before optimizing, checkpoint at an interval set by failure rate and save cost, and choose a layout by fitting memory first and placing communication on the fastest links."
+---
+
+The previous posts in this track each solved one problem: [data parallelism](/blog/model-development-data-parallelism/) for throughput, [sharding](/blog/model-development-sharding-recomputation/) and [model parallelism](/blog/model-development-model-parallelism/) for memory, [efficient kernels](/blog/model-development-efficient-execution/) for speed. A real run combines them on thousands of GPUs for weeks, and two new questions take over: is it running as fast as it should, and what happens when, not if, something breaks?
+
+## Is it running well? MFU
+
+**Model FLOPs utilization** compares the arithmetic the model needs with what the hardware could deliver:
+
+$$
+\text{MFU} = \frac{6 N \times \text{tokens per second per GPU}}{\text{peak FLOP/s per GPU}}.
+$$
+
+A 7-billion-parameter model processing 10,000 tokens per second per GPU needs $6 \times 7 \times 10^9 \times 10^4 = 420$ TFLOP/s, about **42%** of an H100's 989.5 TFLOP/s BF16 peak. MFU counts only the model's own arithmetic, so recomputation, padding and communication all lower it, which is the point: it measures useful work. (The $6N$ estimate ignores attention's FLOPs, so at long sequence lengths it understates the work slightly; Llama 3's figures include it.)
+
+Llama 3's 405-billion-parameter model reached 38–43% BF16 MFU ([Llama 3](https://arxiv.org/abs/2407.21783), §3.3.2, Table 4):
+
+| GPUs | Tensor | Context | Pipeline | Data | Sequence | TFLOPs/GPU | MFU |
+|---|---|---|---|---|---|---|---|
+| 8,192 | 8 | 1 | 16 | 64 | 8,192 | 430 | 43% |
+| 16,384 | 8 | 1 | 16 | 128 | 8,192 | 400 | 41% |
+| 16,384 | 8 | 16 | 16 | 8 | 131,072 | 380 | 38% |
+
+The product of the four degrees is always the number of GPUs, and every configuration processes about 16.8 million tokens per step. Doubling the GPUs at a fixed global batch halved the batch per data-parallel group and cost two points of MFU, a typical trade.
+
+## Where does the time go? Profiling
+
+When MFU is low, guessing is expensive. A **profiler** records every kernel and every communication call with its duration, and shows them on a timeline. Three questions organize what you read:
+
+1. **Which operations take the most time?** Large matrix multiplications should dominate. If elementwise operations, memory copies or data loading do, there is waste.
+2. **Is communication overlapped?** On the timeline, gradient all-reduces and parameter gathers should run alongside computation. Gaps where the GPU waits for a collective mean overlap has failed.
+3. **Are all ranks equally fast?** A collective finishes only when the slowest rank arrives.
+
+A small example shows the habit. Profiling one CPU training step of a 1-million-parameter model built from PyTorch's standard `TransformerEncoderLayer` put `aten::bernoulli_`, the operation that generates dropout masks, at the top: **30%** of the step. The layer applies dropout by default, which was never intended for this model. Turning it off cut the profiled step by about a third and moved matrix multiplications and the fused attention kernel to the top. The lesson generalizes: defaults you did not choose show up in profiles, not in configuration files.
+
+**Stragglers** are the large-scale version of question 3. Llama 3's report notes that a single slow but still-functioning GPU "can slow down thousands of other GPUs", and that even temperature mattered: throughput varied by 1–2% over the day as GPUs throttled in the midday heat (§3.3.4).
+
+## When it breaks: failures and checkpoints
+
+At this scale failure is routine. In a 54-day period of Llama 3 405B pre-training there were 466 job interruptions: 47 planned (maintenance, configuration changes) and **419 unexpected**, about 78% of them attributed to confirmed or suspected hardware problems, with GPU issues the largest category (§3.3.4, Table 5). That is an unexpected interruption roughly every **3.1 hours**. Despite this, the team reports more than 90% effective training time.
+
+Recovery means restarting from the last checkpoint, which raises a trade-off. Checkpoint often and you spend time writing state; checkpoint rarely and each failure loses more work. A classic approximation (Young, 1974) puts the best interval at
+
+$$
+\tau \approx \sqrt{2 \times \text{checkpoint cost} \times \text{mean time between failures}}.
+$$
+
+With failures every 3.1 hours and an illustrative 5-minute checkpoint, $\tau \approx \sqrt{2 \times 5 \times 186} \approx 43$ minutes. Each failure then loses about half an interval, 22 minutes, plus the time to restart. The same formula says what to improve: faster, asynchronous checkpoint writes lower the cost and allow shorter intervals, which is why Llama 3's team worked on reducing checkpointing and job start-up time (§3.3.4).
+
+A checkpoint must let the run continue exactly as if nothing happened: weights, optimizer state, schedule position and data-loader position, as the [small training run](/blog/model-development-small-training-run/#7-checkpoints-that-resume-exactly) verified on CPU. At scale it must also be written in shards from every rank in parallel, and be loadable onto a different number of GPUs when the cluster changes.
+
+## Choosing a layout
+
+The previous posts give a procedure. Work through memory first, then communication:
+
+1. **Fit the training state.** With $N$ parameters at 16 bytes each, how many GPUs must share the state? Use tensor parallelism within a server, then pipeline parallelism or ZeRO/FSDP sharding across servers.
+2. **Fit the activations.** Given the sequence length and microbatch, do activations fit? If not, use selective recomputation, an IO-aware attention kernel, or context parallelism for very long sequences.
+3. **Place communication.** Put the most frequent communication (tensor parallelism) on the fastest links, inside a server; pipeline stages across servers; data parallelism over what remains.
+4. **Check the batch.** The global batch is microbatch × accumulation × data-parallel ranks. Pipeline parallelism needs enough microbatches per step to keep the bubble small; data parallelism must not push the global batch beyond what the optimization can use.
+5. **Measure.** Run a few hundred steps, compute MFU, read a profile, and adjust.
+
+**Try it: lay out a 70B model.** You have 256 GPUs, 8 per server, 80 GB each, and a 70-billion-parameter model at 16 bytes per parameter. Propose a layout.
+
+**Answer.** The state is $16 \times 70 = 1{,}120$ GB. Tensor parallelism of 8 within a server leaves 140 GB per GPU, too much. Adding 4 pipeline stages across servers divides the model over 32 GPUs: 35 GB of state per GPU, leaving room for activations, with data parallelism of $256 / 32 = 8$. Sharding the optimizer state over those 8 data-parallel ranks (ZeRO-1) brings it to about $4 \times 70/32 + 12 \times 70/(32 \times 8) \approx 12$ GB, freeing memory for larger microbatches, more of them, and a smaller pipeline bubble. An alternative, FSDP over more GPUs with less pipelining, avoids the bubble but moves more data across servers; which is faster on a given network is what step 5 decides.
+
+
+## What to remember
+
+- MFU = $6N$ × tokens per second ÷ peak FLOP/s. Large runs typically reach 35–50%; Llama 3 405B ran at 38–43%.
+- Read a profile before optimizing: big matrix multiplications should dominate, communication should overlap computation, and ranks should be equally fast.
+- Failures are routine at scale: Llama 3 saw one unexpected interruption every 3.1 hours. Checkpoint at roughly $\sqrt{2 \times \text{cost} \times \text{MTBF}}$, and make checkpoints fast and exact.
+- Choose a layout by fitting state, then activations, then placing communication on the fastest links, then checking the batch, then measuring.
+
+
+## Sources
+
+- Llama Team, AI @ Meta (2024). "The Llama 3 Herd of Models." arXiv:2407.21783. §3.3, Tables 4 and 5.
+- J. W. Young (1974). "A first order approximation to the optimum checkpoint interval." Communications of the ACM 17(9).
+- Stanford CS336, [lecture 2](https://cs336.stanford.edu/): MFU definition and typical values.
+- PyTorch 2.6: `torch.profiler`.
+
+
+## Further reading
+
+- D. Narayanan et al. (2021). "Efficient Large-Scale Language Model Training on GPU Clusters Using Megatron-LM." arXiv:2104.04473. §3 works through layout choices with measurements.
+- CMU 15-442, "LLM Serving" and parallelization lectures (Feb–Mar 2026).

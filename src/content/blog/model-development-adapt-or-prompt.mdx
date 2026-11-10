@@ -1,0 +1,89 @@
+---
+title: "Prompt, retrieve or fine-tune: choosing how to adapt a model, and how LoRA works"
+date: 2026-11-11
+category: deep-learning
+read_time: "13 min"
+series_order: 22
+series: model-development
+featured: false
+published: true
+excerpt: "Prompting, retrieval and fine-tuning solve different problems: missing instructions, missing knowledge and missing behaviour. Learn to tell which one a task needs, then see how LoRA fine-tunes a large model by training a tiny low-rank update, why it starts from no change at all, and why it costs nothing extra at inference."
+question: "Which of prompting, retrieval and fine-tuning fits a use case, and how does LoRA adapt a model cheaply?"
+my_work: "A concept post; a decision procedure built from the earlier posts; LoRA's parameter counts, zero initialization, merging and rank recovery checked in PyTorch on a toy layer; results quoted from the LoRA and QLoRA papers."
+result: "Rank-8 LoRA on Llama 3 8B's query and value projections trains 3.4 million parameters, 0.04% of the model; a merged LoRA layer gives the same outputs as base plus adapter; fine-tuning needs a few hundred to a few thousand good examples of the target behaviour."
+evidence_limit: "The decision procedure is a guide built from mechanisms, not a measured result; LoRA results are the papers' own."
+lesson: "Prompt first, add retrieval for missing knowledge, and fine-tune for missing behaviour or format at scale. LoRA makes fine-tuning cheap by training a low-rank change to frozen weights."
+---
+
+The last three posts gave three ways to make a model do what an application needs: [prompting](/blog/model-development-prompting-context/), [retrieval and tools](/blog/model-development-retrieval-tools/), and, from the post-training track, [fine-tuning](/blog/model-development-supervised-fine-tuning/). They are often presented as rungs of a ladder, but they fix different problems. This post shows how to diagnose which problem you have, and then explains LoRA, the method that made fine-tuning affordable.
+
+## Three problems, three tools
+
+Look at your evaluation set's failures and ask what is missing:
+
+- **The model does not know what you want.** It answers a different question, in the wrong format or tone, or ignores a constraint. That is an **instruction** problem: fix it with clearer instructions and examples.
+- **The model lacks information.** It does not know your products, last week's prices or the contents of a contract. That is a **knowledge** problem: fix it with **retrieval**, which supplies the information at question time and keeps it current. Fine-tuning is a poor way to add facts: it is slow to update, hard to verify, and a fine-tuned model may still recall them unreliably and without citations.
+- **The model knows what to do and has the information, but does not do it well or reliably enough.** It cannot hold a specialized format across thousands of requests, a smaller model needs to match a larger one's behaviour, or the prompt needed to get the behaviour is too long and costly. That is a **behaviour** problem: fix it with **fine-tuning** on examples of the behaviour.
+
+These combine. A support assistant may use retrieval for policy documents, a fine-tuned small model for the company's response style, and a prompt for the current case.
+
+**Try it: choose a method.** Which would you start with for each case?
+1. A legal assistant must answer questions about a client's 400-page contract.
+2. A classifier must label support tickets into 30 categories; a large model with a long prompt of examples does it well but is too slow and expensive at 2 million tickets a day.
+3. A chatbot answers correctly but too casually for a bank.
+
+**Answer.** (1) **Retrieval**: the knowledge is private, specific and long; retrieve relevant clauses and cite them. (2) **Fine-tuning** a small model on the large model's labels (distillation, from the [post-training data post](/blog/model-development-post-training-data/#responses-who-writes-the-answer)): the behaviour exists, the cost is the problem. (3) **Prompting** first: tone is an instruction problem; fine-tune only if instructions and examples cannot make it consistent.
+
+## What fine-tuning needs
+
+Fine-tuning replaces a long prompt with a change to the weights, which removes the prompt's cost at every request. It needs:
+
+- **Examples of the target behaviour**, typically hundreds to a few thousand of high quality for a narrow task; more for broad behaviour. Their quality and coverage matter more than their number, as the [SFT post](/blog/model-development-supervised-fine-tuning/#what-the-data-teaches) showed for Tülu 3.
+- **An evaluation set** separate from the training examples, including cases the fine-tuning should *not* change, because fine-tuning on a narrow task can degrade others.
+- **Open weights,** or a provider's fine-tuning service.
+- **Compute and memory.** Full fine-tuning of an 8-billion-parameter model with AdamW needs about 128 GB for weights, gradients and optimizer state alone, as the [GPU post](/blog/model-development-gpu-memory-compute/#what-training-keeps-in-memory) worked out. That is where LoRA comes in.
+
+## LoRA: training a low-rank change
+
+**Low-Rank Adaptation** (LoRA) freezes the pre-trained weights and learns only a small change to some of them ([Hu et al., 2022](https://arxiv.org/abs/2106.09685), §4.1). For a weight matrix $W_0$ of shape $d \times k$, the adapted layer computes
+
+$$
+h = W_0 x + \frac{\alpha}{r} B A x, \qquad B \in \mathbb{R}^{d \times r},\ A \in \mathbb{R}^{r \times k},\ r \ll \min(d, k).
+$$
+
+- $A$ and $B$ are the only trained parameters; $BA$ is a $d \times k$ matrix of rank at most $r$.
+- $\alpha/r$ scales the update, so changing $r$ does not require retuning the learning rate.
+- $A$ starts random and $B$ starts at **zero**, so $BA = 0$ and training begins from exactly the pre-trained model.
+
+The saving is large. A $4{,}096 \times 4{,}096$ matrix has 16.8 million weights; a rank-8 adapter for it has $8 \times 4{,}096 + 4{,}096 \times 8 = 65{,}536$, 0.39%. Applying rank 8 to the query and value projections of all 32 layers of Llama 3 8B trains 3.4 million parameters, 0.04% of the model. Only those need gradients and optimizer state; the frozen 8B weights need just their BF16 copy, 16 GB.
+
+Why should a low-rank change be enough? The paper's hypothesis is that the change fine-tuning needs has low "intrinsic rank", and its experiments support it for the tasks studied: on GPT-3 175B, LoRA matched or exceeded full fine-tuning on three benchmarks (Table 4), a rank as small as one sufficed when adapting the query and value matrices (§7.2, Table 6), and training memory fell from 1.2 TB to 350 GB (§4.2). The same paper notes that on GPT-2 Medium performance peaked at larger ranks, so the right rank is task- and model-dependent. A toy shows the mechanism: when the true change to a 16 × 16 layer has rank 2, a rank-2 LoRA trained on its outputs recovers it to a loss of $3 \times 10^{-6}$.
+
+**No cost at inference.** After training, $\frac{\alpha}{r}BA$ can be added into $W_0$ once. The merged layer is an ordinary matrix of the original shape, so the model runs exactly as fast as before; on the toy, the merged layer's outputs equal base plus adapter. Alternatively the adapters can stay separate: many small adapters (tens of megabytes each) can share one base model, swapped per customer or task.
+
+**QLoRA** goes further by storing the frozen base model in 4 bits, about 4 GB for 8 billion parameters, while training LoRA adapters through it. Its authors fine-tuned a 65-billion-parameter model on a single 48 GB GPU while preserving 16-bit fine-tuning quality ([Dettmers et al., 2023](https://arxiv.org/abs/2305.14314), abstract). Quantization is covered in the [inference post](/blog/model-development-inference-serving/#quantization).
+
+LoRA's limits follow from its design: a low-rank update may be too small for large changes in knowledge or capability, the choice of which matrices to adapt and the rank matter, and LoRA results are usually reported against full fine-tuning on specific tasks, not in general. The [LoRA review](/paper-reviews/lora/) looks at that evidence.
+
+Everyday picture: instead of rewriting a textbook, you print a thin booklet of corrections that slots inside the cover. It is cheap to write and easy to swap, and you can bind it in permanently whenever you like.
+
+
+## What to remember
+
+- Diagnose the failure: missing instructions call for prompting, missing knowledge for retrieval, missing or unreliable behaviour for fine-tuning. They combine.
+- Fine-tuning adds behaviour, not reliably facts; it needs high-quality examples and an evaluation set that checks what should not change.
+- LoRA freezes $W_0$ and trains $\frac{\alpha}{r}BA$ with $B$ initialized to zero; rank 8 on Llama 3 8B's query and value projections trains 0.04% of the parameters.
+- Merging $BA$ into $W_0$ removes any inference cost; separate adapters let one base model serve many tasks.
+- QLoRA stores the frozen base model in 4 bits, fine-tuning 65B on one 48 GB GPU.
+
+
+## Sources
+
+- E. J. Hu, Y. Shen, P. Wallis, Z. Allen-Zhu, Y. Li, S. Wang, L. Wang and W. Chen (2022). "LoRA: Low-Rank Adaptation of Large Language Models." ICLR 2022. arXiv:2106.09685. §§4, 7; Table 4.
+- T. Dettmers, A. Pagnoni, A. Holtzman and L. Zettlemoyer (2023). "QLoRA: Efficient Finetuning of Quantized LLMs." NeurIPS 2023. arXiv:2305.14314.
+
+
+## Further reading
+
+- CMU 15-442, "LLMs: Training (PEFT)" (18 Mar 2026).
+- [Same model, new language: fine-tuning Pocket TTS to speak Khmer](/blog/khmer-tts-fine-tuning/): a full fine-tuning case study on this site.

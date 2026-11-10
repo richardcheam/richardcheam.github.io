@@ -1,0 +1,70 @@
+---
+title: "DeepSeekMath and GRPO: a cheaper RL algorithm, and what RL actually changed"
+title_key: "DeepSeekMath and GRPO"
+published: true
+date: 2026-11-11
+question: "Can reinforcement learning without a value model improve mathematical reasoning, and does it add new capability or sharpen what the model already has?"
+excerpt: "DeepSeekMath introduced GRPO, which replaces PPO's value model with the average reward of a group of samples. The paper's lasting value is twice over: a simpler algorithm that became standard for reasoning RL, and an analysis suggesting its RL made correct answers more reliable rather than making new answers possible."
+type: paper
+topic: [rl, training]
+tags: [GRPO, Reinforcement learning, Mathematical reasoning, DeepSeek]
+org: "DeepSeek-AI, Tsinghua University and Peking University"
+authors: "Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu, Junxiao Song, Xiao Bi, et al."
+source_url: "https://arxiv.org/abs/2402.03300"
+source_label: "Read DeepSeekMath"
+source_date: 2024-02-05
+read_time: "9 min"
+featured: false
+math: true
+tldr:
+  - "**Two contributions:** a 120B-token math corpus filtered from Common Crawl that makes a strong 7B base model, and GRPO, a PPO variant that uses group-normalized rewards instead of a value model (Abstract; Sec 2, Sec 4)."
+  - "**RL result:** GRPO on a subset of instruction data raised MATH from 46.8% to 51.7% and GSM8K from 82.9% to 88.2% (Table 5, p. 12)."
+  - "**Key analysis:** RL improved Maj@K but not Pass@K, suggesting it made the output distribution more robust rather than adding fundamental capability (Sec 5.2.2, Fig. 7)."
+  - "**My reading:** GRPO's practical advantage is memory and simplicity; the Pass@K finding is the result to remember, because it frames what RL on a fixed base model can and cannot do."
+links:
+  - label: "Post: reinforcement learning for language models"
+    url: "/blog/model-development-reinforcement-learning/"
+---
+
+## The problem and what came before
+
+Open models trailed closed ones by a wide margin on competition mathematics in early 2024. Two levers were available: better pre-training data for mathematics, and better post-training. On the second, PPO was the standard RL algorithm, but it trains a value model as large as the policy, which roughly doubles memory, and the value model must predict reward at every token although the reward arrives only at the end of a solution (Sec 4.1.1).
+
+## The method
+
+**Data** (Sec 2). Starting from a seed set of mathematical web pages, a fastText classifier recalls math pages from deduplicated Common Crawl; pages from domains with many recalled hits are inspected and added as positives, and the classifier is retrained. After four iterations the corpus has 35.5M pages and 120B tokens. A 7B model continued from DeepSeek-Coder-Base-v1.5 on it becomes DeepSeekMath-Base.
+
+**GRPO** (Sec 4.1). For each question, sample a group of $G$ outputs from the current policy, score them, and give each output the advantage $\hat A_i = (r_i - \text{mean}(r))/\text{std}(r)$ for all its tokens (outcome supervision). Optimize PPO's clipped objective with these advantages, and add the KL divergence to the reference policy as a separate term in the loss rather than inside the reward (Eq. 3). With process supervision, rewards at each reasoning step are normalized the same way and an output's advantage at a token sums the normalized rewards of the steps that follow (Sec 4.1.3). The RL run used 64 samples per question, a KL coefficient of 0.04 and a learning rate of $10^{-6}$ on about 144K GSM8K- and MATH-style questions (Sec 4.2). The [RL post](/blog/model-development-reinforcement-learning/#grpo-the-group-is-the-baseline) works the advantages through on toy groups.
+
+## The evidence
+
+**Main result** (Table 5, p. 12). From DeepSeekMath-Instruct 7B, GRPO raised chain-of-thought accuracy on GSM8K from 82.9% to 88.2% and on MATH from 46.8% to 51.7%, and also improved the Chinese benchmarks it was not trained on (MGSM-zh 73.2% to 79.6%, CMATH 84.6% to 88.8%).
+
+**A unified view of post-training methods** (Sec 5.2.1, Fig. 5–6). The paper writes SFT, rejection-sampling fine-tuning (RFT), online RFT, DPO, PPO and GRPO as one gradient with three ingredients, the data source, the reward function and the gradient coefficient, and compares them on the same model:
+
+- **Online beats offline.** Online RFT, which samples from the current policy, significantly outperformed RFT, which samples once from the SFT model, especially later in training.
+- **Graded coefficients beat uniform ones.** GRPO outperformed online RFT; the difference is that GRPO weights outputs by their normalized reward and penalizes wrong ones, while RFT reinforces every correct answer equally and ignores wrong ones.
+- **Process supervision beat outcome supervision,** and iterative RL, retraining the reward model on new policy samples, helped, mostly in the first iteration.
+
+**What RL changed** (Sec 5.2.2, Fig. 7). Comparing the instruction-tuned and RL models with $K$ samples per question, RL raised **Maj@K**, the accuracy of the majority answer, but not **Pass@K**, whether any of the $K$ samples is correct. The authors' interpretation: RL makes the output distribution more robust, boosting correct answers already among the model's top candidates, rather than enhancing fundamental capabilities.
+
+## What the evidence supports, confounds and leaves open
+
+**Supported.** GRPO works for mathematical reasoning at 7B scale and avoids the value model's cost; group-relative advantages fit the comparative nature of correctness rewards. On-policy sampling matters. The unified framing is a useful way to compare methods by their data, reward and coefficient rather than by name.
+
+**The Pass@K result is the important one, and its scope matters.** It is measured on one model, two benchmarks and one RL run on a modest dataset. It says this RL sharpened the distribution; it does not prove that RL can never add capability. DeepSeek-R1's later results, with far longer RL from a base model and longer outputs, are the counterpoint the field has since debated ([DeepSeek-R1](https://arxiv.org/abs/2501.12948)). What the result does establish is a test worth running on any RL claim: compare Pass@K before and after, not only Pass@1 or Maj@K.
+
+**Confounded.**
+
+- **Reward model versus rule.** The main GRPO run uses a learned reward model trained on rule-based correctness labels, not the rule itself (Sec 4.2; Sec 5.2.1 distinguishes "Rule" and "Model"), so gains mix the algorithm with reward-model quality.
+- **In-domain training.** RL questions are GSM8K- and MATH-style, so the two headline benchmarks are in-domain; the out-of-domain gains are smaller but present.
+- **No head-to-head PPO run** at equal compute in the main results; the comparison to PPO is conceptual and through the unified framework.
+
+**Left open.** How GRPO's normalization behaves when group rewards are nearly constant (groups where all answers agree contribute nothing, which makes prompt difficulty selection important); the effect of dividing by the standard deviation, which upweights low-variance questions; and how the length of outputs evolves.
+
+## How it changes decisions
+
+- Use GRPO, or a variant, where rewards are checkable and memory for a value model is a constraint; budget for several samples per prompt.
+- Sample from the current policy (online), and select prompts of intermediate difficulty so groups contain both successes and failures.
+- Evaluate RL with Pass@K as well as Pass@1 and Maj@K, to tell sharpening from new capability.
+- Remember that a strong, domain-specific base model (here from 120B tokens of math) did much of the work; RL builds on it.

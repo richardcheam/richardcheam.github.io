@@ -1,0 +1,80 @@
+---
+title: "Sharding and recomputation: making a model fit"
+date: 2026-11-11
+category: deep-learning
+read_time: "14 min"
+series_order: 10
+series: model-development
+featured: false
+published: true
+excerpt: "Data parallelism gives every GPU a full copy of the training state, which stops working once that state outgrows a GPU. Learn how ZeRO and FSDP shard weights, gradients and optimizer state across data-parallel GPUs, what each stage saves and costs in communication, and how activation recomputation trades compute for memory."
+question: "How do ZeRO/FSDP and activation recomputation make a model fit, and what do they cost?"
+my_work: "A concept post; ZeRO stage 1 executed on CPU with PyTorch's ZeroRedundancyOptimizer against a single-process reference, recomputation checked with saved-tensor hooks; stage arithmetic from the ZeRO paper; FSDP described from the PyTorch 2.6 fully_shard documentation (not executed: it needs accelerator streams)."
+result: "Sharding optimizer state, gradients and parameters across 8 GPUs cuts a 7B model's per-GPU state from 112 to 38.5, 26.25 or 14 GB; stages 1 and 2 cost no more communication than data parallelism, stage 3 costs 1.5 times as much; full recomputation costs about a third more compute."
+evidence_limit: "Model-state arithmetic excludes activations, buffers and fragmentation; the executed checks are tiny CPU models."
+lesson: "Shard what is replicated, recompute what is cheap to recompute, and check how much communication each choice adds."
+---
+
+A 7-billion-parameter model needs about 112 GB for its weights, gradients and AdamW state in mixed precision, as the [GPU post](/blog/model-development-gpu-memory-compute/#what-training-keeps-in-memory) worked out. [Data parallelism](/blog/model-development-data-parallelism/) puts all of that on every GPU. With eight GPUs that is eight identical copies of the optimizer state, seven of them redundant. This post removes the redundancy, then attacks the other large memory consumer, activations.
+
+## Sharding the training state
+
+**ZeRO** (the Zero Redundancy Optimizer) keeps data parallelism's structure, every GPU processing its own slice of the batch, but stops replicating the training state. Each of the $n$ data-parallel GPUs **owns** one $n$-th of it ([ZeRO](https://arxiv.org/abs/1910.02054), §5). It comes in three stages, each sharding one more part. With $N$ parameters and 16 bytes per parameter (2 for BF16 weights, 2 for BF16 gradients, 12 for FP32 master weights and moments):
+
+| Stage | What is sharded | Per-GPU state | 7B on 8 GPUs |
+|---|---|---|---|
+| 0 (plain data parallelism) | nothing | $16N$ | 112 GB |
+| 1 | optimizer state | $4N + 12N/n$ | **38.5 GB** |
+| 2 | + gradients | $2N + 14N/n$ | **26.25 GB** |
+| 3 | + parameters | $16N/n$ | **14 GB** |
+
+The formulas are ZeRO's (§5.1–5.3). Stages 1 and 2 keep a floor that does not shrink with more GPUs: every GPU still holds full BF16 weights, and in stage 1 full gradients. Stage 3 removes the floor; with 64 GPUs it would be 1.75 GB each.
+
+How does a GPU update parameters it does not fully hold? In stage 1, after the backward pass, each GPU applies AdamW only to its own slice of the parameters, using its own slice of the moments, and an **all-gather** then gives every GPU the full updated weights. Running this on CPU with two processes and PyTorch's `ZeroRedundancyOptimizer` (its implementation of stage 1) shows each process holding exactly half of AdamW's moments, and after three steps the parameters match an unsharded single-process AdamW to within $10^{-6}$.
+
+## What sharding costs in communication
+
+An all-reduce, the operation data parallelism uses, can be done as two halves: a **reduce-scatter**, after which each GPU holds the sum of one shard, followed by an **all-gather**, after which every GPU holds all the shards. Stages 1 and 2 use exactly those halves, reduce-scatter for gradients and all-gather for updated weights, so they move **the same amount of data as plain data parallelism** (ZeRO §7).
+
+Stage 3 has to do more. A GPU holds only its shard of each layer's weights, so before computing a layer it must all-gather the full weights, use them, and free them, in the forward pass and again in the backward pass. That raises communication to **1.5 times** data parallelism (ZeRO §7.2.2). Whether that is affordable depends on whether the gathers can overlap with computation.
+
+**FSDP** (Fully Sharded Data Parallel) is PyTorch's implementation of stage 3. In the current API, `fully_shard` is applied to each Transformer block and then to the whole model. Each block's parameters are stored as shards, gathered by a hook just before the block runs and, by default (`reshard_after_forward=True`), freed after the forward pass and gathered again for the backward pass; after its gradients are computed they are reduce-scattered so each GPU keeps only its shard (PyTorch 2.6 documentation). Wrapping block by block matters: only one or two blocks' full weights exist at a time, and the next block's gather can be prefetched while the current block computes. Setting `reshard_after_forward=False` keeps gathered weights between forward and backward, trading memory for one fewer gather.
+
+Everyday picture: a shared kitchen where each cook keeps a few of the recipe books on their own shelf. Before cooking a dish, everyone briefly borrows the pages they need, then gives them back. The shelves stay small; the cost is the time spent passing pages around.
+
+## Activations: store or recompute
+
+Sharding addresses state, which scales with parameters. Activations scale with batch and sequence, and at long sequences they dominate: about 104 GB per sequence of 4,096 tokens for a 32-layer GPT-style model, in the [GPU post's example](/blog/model-development-gpu-memory-compute/#activations).
+
+**Activation recomputation** (also called checkpointing) stores only each layer's input during the forward pass and recomputes everything inside the layer during the backward pass, when it is needed. Memory for a layer's internals then exists for only one layer at a time. Measuring the bytes that a small four-block network saves for backward shows the effect: 90,112 bytes when storing everything, 40,960 with each block checkpointed, and identical gradients either way.
+
+The cost is compute. Training costs about $6N$ FLOPs per token, and recomputing every layer adds another forward pass, $2N$: about **33% more** arithmetic.
+
+**Selective recomputation** keeps most of the saving for a fraction of the cost ([Korthikanti et al., 2022](https://arxiv.org/abs/2205.05198), §5). Recall the activation formula $sbh(34 + 5as/h)$: the $5as/h$ part comes from the attention scores, softmax and dropout, which take a lot of memory but little compute to redo. For a GPT-3-shaped model ($a = 96$, $s = 2{,}048$, $h = 12{,}288$) that part is $5as/h = 80$, more than twice the other 34. Recomputing only it, combined with sequence parallelism, reduced activation memory by 5 times and cut the time overhead of recomputation by over 90%; a 530-billion-parameter model reached 54.2% MFU instead of 42.1% with full recomputation (abstract). IO-aware attention kernels, the subject of the [efficient-execution post](/blog/model-development-efficient-execution/), avoid storing the scores in the first place.
+
+**Try it: choose a stage.** You train a 13-billion-parameter model on 80 GB GPUs and need about 25 GB per GPU for activations and buffers. Which ZeRO stage fits on 8 GPUs? On 16?
+
+**Answer.** On 8 GPUs, stage 2 needs $2 \times 13 + 14 \times 13/8 \approx 48.8$ GB of state, plus 25 GB: about 74 GB, which fits with little margin. Stage 3 needs $16 \times 13/8 = 26$ GB, plus 25: 51 GB, comfortable. On 16 GPUs, stage 2 needs about 37.4 GB of state and fits easily, avoiding stage 3's extra 50% communication. The answer depends on the GPU count: more GPUs make the cheaper stage fit.
+
+
+## What to remember
+
+- ZeRO shards the state that data parallelism replicates: stage 1 the optimizer state, stage 2 also gradients, stage 3 also parameters.
+- At 16 bytes per parameter, per-GPU state is $4N + 12N/n$, $2N + 14N/n$ and $16N/n$ for the three stages.
+- Stages 1 and 2 communicate as much as data parallelism (reduce-scatter plus all-gather); stage 3 communicates 1.5 times as much because weights are gathered for every forward and backward pass.
+- FSDP is PyTorch's fully sharded implementation; wrapping each block bounds how much unsharded weight exists at once.
+- Activation recomputation stores layer inputs and recomputes the rest: about a third more compute for full recomputation, much less if only the attention internals are recomputed.
+
+
+## Sources
+
+- S. Rajbhandari, J. Rasley, O. Ruwase and Y. He (2020). "ZeRO: Memory Optimizations Toward Training Trillion Parameter Models." SC 2020. arXiv:1910.02054. §§5, 7.
+- V. Korthikanti, J. Casper, S. Lym, L. McAfee, M. Andersch, M. Shoeybi and B. Catanzaro (2022). "Reducing Activation Recomputation in Large Transformer Models." arXiv:2205.05198.
+- PyTorch 2.6 documentation: `fully_shard`, `ZeroRedundancyOptimizer`, `checkpoint`.
+
+
+## Further reading
+
+- [ZeRO paper review](/paper-reviews/zero/): what the paper's memory arithmetic proves and what its speed-ups compare.
+- CMU 15-442, "Memory Optimizations: Tensor Rematerialization and Offload" (18 Feb 2026).
+- T. Chen, B. Xu, C. Zhang and C. Guestrin (2016). "Training Deep Nets with Sublinear Memory Cost." arXiv:1604.06174.

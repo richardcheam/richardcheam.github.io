@@ -1,0 +1,78 @@
+---
+title: "DPO: preference learning without a reward model, and how strong the evidence was"
+title_key: "DPO"
+published: true
+date: 2026-11-11
+question: "Can the KL-regularized RLHF objective be optimized with a simple classification loss instead of a reward model and PPO, and how convincingly does the paper show it?"
+excerpt: "DPO shows that the optimal policy of the KL-regularized reward objective defines its own reward, so preferences can train the policy directly. The derivation is exact and elegant; the experiments are small, use GPT-4 as the main judge, and compare against PPO baselines of uneven strength."
+type: paper
+topic: [training, rl]
+tags: [DPO, RLHF, Preference learning, Stanford]
+org: "Stanford University"
+authors: "Rafael Rafailov, Archit Sharma, Eric Mitchell, Stefano Ermon, Christopher D. Manning, Chelsea Finn"
+source_url: "https://arxiv.org/abs/2305.18290"
+source_label: "Read DPO"
+source_date: 2023-05-29
+read_time: "9 min"
+featured: false
+math: true
+tldr:
+  - "**Claim:** the RLHF objective can be optimized exactly with a binary cross-entropy loss on preference pairs, with no reward model and no sampling during training (Abstract; Sec 4, Eq. 7)."
+  - "**Strongest evidence:** in controlled sentiment generation, where the true reward is known, DPO's reward–KL frontier dominates PPO's (Sec 6.1, Fig. 2 left, p. 7)."
+  - "**Weaker evidence:** real-task comparisons use GPT-4 as judge on models of 2.8–6B parameters, and on dialogue the PPO baseline could not beat the base model, so best-of-128 stood in for it (Sec 6.2, p. 9)."
+  - "**My reading:** the reparameterization is the lasting contribution; whether offline DPO matches well-tuned online RL depends on data being close to the policy, which later work (Tülu 3, Llama 3) addressed with on-policy pairs."
+links:
+  - label: "Post: learning from preferences"
+    url: "/blog/model-development-preference-optimization/"
+---
+
+## The problem and what came before
+
+RLHF as practised by InstructGPT has two stages after SFT: fit a reward model to human comparisons with a Bradley–Terry loss, then maximize that reward with PPO under a KL penalty to the SFT model (Sec 3). The second stage is expensive and fragile: it samples from the policy during training, needs a value model, and has many sensitive hyperparameters. The question DPO asks is whether the second stage is necessary at all.
+
+## The method and its central argument
+
+The KL-regularized objective, maximize $\mathbb{E}[r] - \beta\,\mathrm{KL}(\pi \| \pi_{\text{ref}})$, has a closed-form optimum, $\pi^*(y \mid x) \propto \pi_{\text{ref}}(y \mid x)\exp(r(x, y)/\beta)$ (Sec 4, Eq. 4). Inverting it expresses any reward through its optimal policy, $r(x, y) = \beta \log \frac{\pi^*(y \mid x)}{\pi_{\text{ref}}(y \mid x)} + \beta \log Z(x)$ (Eq. 5). The partition function $Z(x)$ is intractable, but Bradley–Terry depends only on reward differences between two responses to the same prompt, so it cancels. Fitting a Bradley–Terry model whose reward is parameterized by the policy is therefore the same as fitting the policy, giving the DPO loss (Eq. 7):
+
+$$
+\mathcal{L}_{\text{DPO}} = -\mathbb{E}\left[\log \sigma\!\left(\beta \log \frac{\pi_\theta(y_w \mid x)}{\pi_{\text{ref}}(y_w \mid x)} - \beta \log \frac{\pi_\theta(y_l \mid x)}{\pi_{\text{ref}}(y_l \mid x)}\right)\right].
+$$
+
+The paper shows that every reward equivalence class is representable this way (Sec 5, Lemma 1 and Theorem 1), so nothing is lost by the reparameterization, and that the gradient weights each pair by how badly the implicit reward currently orders it (Sec 4). The [preference post](/blog/model-development-preference-optimization/) works the gradient through on a three-response toy.
+
+Two assumptions deserve emphasis. The equivalence is with the *optimum* of the KL-regularized objective; how training dynamics reach it is a separate matter. And the loss is evaluated only on the pairs in the dataset: DPO is offline, so what it learns about responses far from those pairs is determined by generalization, not by the objective.
+
+## The evidence
+
+**Controlled sentiment generation** (Sec 6.1, Fig. 2 left). GPT-2-large generates movie-review continuations; a sentiment classifier provides a known "true" reward, so the reward achieved at each KL from the reference can be measured exactly. DPO's frontier of reward against KL dominates PPO's, including PPO given access to the true reward. This is the cleanest test in the paper, because it measures optimization of the stated objective rather than a downstream judgement.
+
+**Summarization** (Sec 6.2, Fig. 2 right). On Reddit TL;DR with a GPT-J SFT model, GPT-4-judged win rates against the reference summaries were about 61% for DPO at temperature 0 against 57% for PPO at its best temperature. DPO was also far less sensitive to sampling temperature. In a human evaluation, DPO samples were preferred to PPO's 58% of the time (Sec 6.4).
+
+**Dialogue** (Sec 6.2). On single-turn Anthropic HH with Pythia-2.8B, DPO matched or beat a best-of-128 baseline. The authors could not find a publicly available PPO model whose performance exceeded the base model, so best-of-128 served as "a rough proxy for PPO-level performance".
+
+**Out of distribution** (Sec 6.3, Table 1). Applied to CNN/DailyMail news articles, the TL;DR-trained DPO policy won 36% of GPT-4 comparisons against ground truth at temperature 0, against 26% for PPO.
+
+**The judge** (Sec 6.4, Table 2). GPT-4 judgements agreed with humans about as often as humans agreed with each other, from 67% to 86% depending on the comparison. A simpler GPT-4 prompt preferred longer, more repetitive summaries than humans did, so the main results use a prompt that also asks about conciseness.
+
+## What the evidence supports, confounds and leaves open
+
+**Supported.** The mathematical result is exact, and in the one setting where the true reward is known, DPO optimizes the objective at least as well as PPO. DPO is simpler and more stable to train: no sampling, no value model, fewer hyperparameters.
+
+**Confounded.**
+
+- **Baseline strength.** The dialogue comparison has no working PPO baseline; summarization uses one PPO configuration. A later systematic comparison found PPO outperforming DPO by up to 2.5% in math and 1.2% in general domains, with the quality of preference data mattering more than either algorithm ([Ivison et al., 2024](https://arxiv.org/abs/2406.09279), abstract); Tülu 3's comparison on one dataset found length-normalized DPO best ([Tülu 3 review](/paper-reviews/tulu-3/)). Rankings depend on tuning and data.
+- **Judge and length.** Win rates come mostly from GPT-4, whose length preference the authors had to correct with prompting. Length-normalized variants that later worked better point to the same bias.
+- **Scale.** Models are 0.8B (GPT-2-large) to 6B; the paper notes $\beta$ was not meaningfully tuned for summarization.
+
+**Left open.**
+
+- **Offline versus on-policy data.** DPO learns from fixed pairs. When the pairs come from a different model, the policy is trained on responses it would rarely produce. Llama 3 and Tülu 3 both collected preference data from their current models for this reason.
+- **Probability of chosen responses.** The loss constrains only the difference of log-ratios, so both chosen and rejected responses can lose probability; practitioners add negative-log-likelihood terms on chosen responses to counter it (Llama 3, §4.1.4).
+- **Exploration.** An offline method cannot discover better responses than those in its data; online RL can, which matters for tasks with verifiable rewards.
+
+## How it changes decisions
+
+- For preference tuning, start with DPO or a length-normalized variant: it is cheaper and more stable than PPO, and competitive in practice.
+- Generate preference pairs from the model being trained where possible.
+- Monitor response length and the log-probability of chosen responses during training.
+- Reserve online RL for cases where exploration matters, such as verifiable rewards, and compare methods at matched tuning effort.

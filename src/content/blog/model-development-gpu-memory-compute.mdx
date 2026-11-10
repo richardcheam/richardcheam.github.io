@@ -1,0 +1,103 @@
+---
+title: "GPU memory and compute: what training stores, computes and waits for"
+date: 2026-11-11
+category: deep-learning
+read_time: "15 min"
+series_order: 8
+series: model-development
+featured: false
+published: true
+excerpt: "Before splitting training across many GPUs, it helps to know exactly what one GPU holds and why it is slow. Count the bytes of weights, gradients, optimizer state and activations, estimate training time from FLOPs and utilization, and use arithmetic intensity to tell compute-bound work from memory-bound work."
+question: "What does a GPU store and compute during training, and where are the bottlenecks?"
+my_work: "A concept post with napkin arithmetic: bytes per parameter compared across two conventions, activation memory from Korthikanti et al. (2022), training time and arithmetic intensity with the H100 figures used in CS336 lecture 2."
+result: "Mixed-precision AdamW needs 12 to 16 bytes per parameter before activations; activations grow with batch and sequence and can dominate; matrix multiplications are compute-bound while matrix-vector products and elementwise operations are memory-bound."
+evidence_limit: "Napkin estimates; real memory includes temporary buffers, fragmentation and framework overhead, and the activation formula is for a GPT-style layer."
+lesson: "Account for memory as weights, gradients, optimizer state and activations, and for time as FLOPs over achieved throughput. Arithmetic intensity says which resource limits each operation."
+---
+
+The [scaling-laws post](/blog/model-development-scaling-laws/) turned a training run into a number of FLOPs. This post turns that number into hardware: how much memory the run needs, how long it takes, and why a GPU that advertises nearly a thousand trillion operations per second often delivers far fewer. Everything in the rest of this track, data parallelism, sharding, model parallelism, efficient kernels, is an answer to one of the limits we meet here.
+
+We use the NVIDIA H100 as the running example, with the figures CS336's resource-accounting lecture uses: **989.5 trillion BF16 operations per second** without sparsity, **3.35 TB/s** of memory bandwidth and **80 GB** of memory ([CS336 lecture 2](https://cs336.stanford.edu/)).
+
+## What training keeps in memory
+
+Training memory has four parts:
+
+1. **Weights**, used in the forward and backward pass.
+2. **Gradients**, one per weight, produced by the backward pass.
+3. **Optimizer state**: for AdamW, the two moving averages $m$ and $v$ from the [first post](/blog/model-development-one-update/#one-adamw-step-on-one-number), one of each per weight.
+4. **Activations**: the intermediate values of the forward pass that the backward pass needs.
+
+The first three scale with the number of parameters $N$. In mixed-precision training, weights and gradients are usually kept in 16-bit BF16 (2 bytes each), and the optimizer moments in 32-bit FP32 (4 bytes each), because they accumulate many small updates. That makes **12 bytes per parameter**, the count CS336 uses.
+
+Many large-scale systems also keep an FP32 **master copy** of the weights, apply the update to it, and cast it down to BF16 for the next step. That adds 4 bytes, for **16 bytes per parameter**, the count used in the ZeRO paper ([ZeRO](https://arxiv.org/abs/1910.02054), §3.1). The reason for the master copy is that BF16 cannot hold small updates: it keeps only 8 significant bits, so near 1.0 the next representable number is 1.0078, and adding 0.001 to a BF16 weight of 1.0 leaves it at exactly 1.0. The [small training run](/blog/model-development-small-training-run/#5-precision) demonstrates this. Both conventions are in use; which one a framework follows is a configuration choice, and it changes the memory bill by a third.
+
+At 16 bytes per parameter, a 7-billion-parameter model needs **112 GB** for weights, gradients and optimizer state alone. It does not fit on one 80 GB GPU before a single activation is stored. That is the problem the [sharding post](/blog/model-development-sharding-recomputation/) solves.
+
+## Activations
+
+Activations do not depend on the number of parameters but on how much text is in flight: batch size $b$, sequence length $s$, width $h$ and number of attention heads $a$. Korthikanti et al. counted them for a GPT-style Transformer layer in 16-bit precision, without recomputation ([Korthikanti et al., 2022](https://arxiv.org/abs/2205.05198), §4.1, Eq. 1):
+
+$$
+\text{activation bytes per layer} = s\,b\,h\left(34 + \frac{5\,a\,s}{h}\right).
+$$
+
+- The $34\,sbh$ term covers the inputs saved by the linear layers, norms, activation function and dropout masks.
+- The $5\,a\,s^2 b$ term (the second part multiplied out) covers the attention scores and their softmax: one $s \times s$ matrix per head.
+
+With $h = 4{,}096$, $a = 32$, $s = 4{,}096$ and $b = 1$: the first term is 0.57 GB, the attention term **2.68 GB**, together 3.25 GB per layer and about **104 GB** for 32 layers, for a single sequence. The attention term grows with the square of the sequence length; at $s = 1{,}024$ the whole layer needs only 0.31 GB. Modern blocks differ in the constants (no dropout, SwiGLU instead of GeLU), but not in this shape. Long sequences make the attention scores the dominant cost, which is why the [efficient-execution post](/blog/model-development-efficient-execution/) is largely about not storing them.
+
+## How long training takes
+
+Training time is FLOPs divided by the FLOPs you actually achieve:
+
+$$
+\text{time} = \frac{6 N D}{\text{GPUs} \times \text{peak FLOP/s} \times \text{MFU}} .
+$$
+
+**Model FLOPs utilization** (MFU) is the fraction of peak that goes into the model's own arithmetic; communication, waiting for memory and recomputation all lower it. CS336's lecture works a concrete case: a 70-billion-parameter model on 15 trillion tokens needs $6 \times 7 \times 10^{10} \times 1.5 \times 10^{13} = 6.3 \times 10^{24}$ FLOPs. On 1,024 H100s at 50% MFU, that is about **144 days**. The lecture calls an MFU of 50% or more "quite good". Every percentage point is worth roughly a day and a half of this run.
+
+## Compute-bound or memory-bound
+
+Why is MFU not close to 100%? A GPU must move data from memory before it can compute on it. Each operation has an **arithmetic intensity**: FLOPs performed per byte moved. The H100 can do $989.5 \times 10^{12} / 3.35 \times 10^{12} \approx$ **295 FLOPs per byte** at full speed. An operation with lower intensity than that waits for memory; one with higher intensity is limited by arithmetic.
+
+Three examples in BF16, with $n = 1{,}024$ (CS336 lecture 2):
+
+- **Matrix times matrix**, $n \times n$ by $n \times n$: about $2n^3$ FLOPs for $3 \times 2n^2$ bytes, an intensity of about $n/3 \approx$ **341**. Compute-bound.
+- **Matrix times vector**: $2n^2$ FLOPs for about $2n^2$ bytes, an intensity of about **1**. Reading the matrix takes 0.63 microseconds; the arithmetic would take 2 nanoseconds. Memory-bound by a factor of 300.
+- **An elementwise operation** like ReLU: one operation per element read and written, intensity **0.25**. Memory-bound.
+
+Training spends most FLOPs in large matrix multiplications, so it can approach the compute limit. The elementwise operations around them (norms, activations, residual additions) are memory-bound, which is why fusing them into fewer kernels helps. Generating text one token at a time is mostly matrix-times-vector work, which is why inference is usually memory-bound; the [inference post](/blog/model-development-inference-serving/) builds on this.
+
+Everyday picture: a chef (the arithmetic units) and a single narrow pantry door (memory bandwidth). Making a big stew from a few bulk ingredients keeps the chef busy; plating hundreds of garnishes, each fetched separately, leaves the chef waiting at the door.
+
+**Try it: will it fit?** You want to fine-tune the 1.24-billion-parameter model from the [architecture post](/blog/model-development-decoder-architecture/#rules-of-thumb-and-what-they-are) (16 layers, width 2,048, 32 heads) with AdamW on a single 24 GB GPU, at sequence length 1,024 and batch size 1. Does it fit?
+
+**Answer.** State: $16 \times 1.24 \approx 19.8$ GB with FP32 master weights, or $12 \times 1.24 \approx 14.9$ GB without, leaving 4.2 or 9.1 GB. Activations with the GPT-style formula: $1{,}024 \times 2{,}048 \times 34$ bytes plus $5 \times 32 \times 1{,}024^2$ bytes, about 239 MB per layer, **3.8 GB** for 16 layers. So it fits tightly with master weights and comfortably without, before temporary buffers and the logits for a 128,000-token vocabulary (about 0.26 GB per sequence in BF16), which may tip the tight case over. Doubling the sequence length would more than double the activations and break the tight case; recomputation or a smaller batch would bring it back.
+
+## Diagnosing the two limits
+
+- **Out of memory.** Work out which term grew: state (more parameters, master weights), activations (longer sequences, bigger batches) or temporaries (logits over a large vocabulary). The remedy differs: sharding for state, recomputation or smaller microbatches for activations.
+- **Slow steps.** Measure achieved FLOP/s and compare with peak. Low MFU with large matrices points to communication or input stalls; low MFU dominated by small operations points to memory-bound kernels. A profiler shows which; the [running-at-scale post](/blog/model-development-running-at-scale/) covers how to read one.
+
+
+## What to remember
+
+- Training memory is weights, gradients, optimizer state and activations. Mixed-precision AdamW needs 12 bytes per parameter, or 16 with FP32 master weights.
+- Activations scale with batch × sequence × width, plus an attention term that grows with the square of the sequence; at long sequences that term dominates.
+- Training time is $6ND$ divided by GPUs × peak × MFU; 50% MFU is good.
+- Arithmetic intensity, FLOPs per byte moved, decides whether an operation is compute-bound or memory-bound; the H100's ridge is about 295.
+- Large matrix multiplications are compute-bound; matrix-vector products and elementwise operations are memory-bound.
+
+
+## Sources
+
+- Stanford CS336, [lecture 2, "PyTorch, resource accounting"](https://cs336.stanford.edu/) (lecture file `lecture_02.py`): bytes per parameter, MFU, arithmetic intensity and the 70B example.
+- V. Korthikanti, J. Casper, S. Lym, L. McAfee, M. Andersch, M. Shoeybi and B. Catanzaro (2022). "Reducing Activation Recomputation in Large Transformer Models." arXiv:2205.05198. §4.1, Eq. 1.
+- S. Rajbhandari, J. Rasley, O. Ruwase and Y. He (2020). "ZeRO: Memory Optimizations Toward Training Trillion Parameter Models." arXiv:1910.02054. §3.1.
+
+
+## Further reading
+
+- CMU 15-442, "GPU Architecture and CUDA Programming" lectures (2 and 4 Feb 2026), for how the hardware achieves these rates.
+- J. Austin et al. "How to Scale Your Model" (the JAX scaling book), chapter on rooflines.

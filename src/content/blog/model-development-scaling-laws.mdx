@@ -1,0 +1,112 @@
+---
+title: "Scaling laws: spending a compute budget on parameters and tokens"
+date: 2026-11-11
+category: deep-learning
+read_time: "14 min"
+series_order: 7
+series: model-development
+featured: false
+published: true
+excerpt: "Before a large run starts, someone has to decide how big the model should be and how many tokens it should see. Learn where the 6ND estimate of training compute comes from, what Chinchilla's experiments say about splitting a budget, why the answer changes once the model has to be served, and what small experiments can and cannot predict."
+question: "How should parameters and tokens share a compute budget, and what can small experiments predict?"
+my_work: "A concept post; compute arithmetic checked against Chinchilla's Table 3, the parametric law taken from its Appendix D.2 and the disagreement with a later replication explained; Llama 3's scaling-law method summarized from its §3.2.1."
+result: "Training costs about 6ND FLOPs; Chinchilla's experiments put the compute-optimal ratio near 20 tokens per parameter; serving cost pushes the best choice towards smaller models trained longer; loss is predictable from small runs, downstream accuracy needs a second step."
+evidence_limit: "Scaling-law fits hold for the data, architecture and range they were measured on; the parametric example uses published coefficients that a replication found biased."
+lesson: "Decide model size and token count together, from experiments on your own data, and include the cost of serving the model in the budget."
+---
+
+The [previous post](/blog/model-development-small-training-run/) trained a model with about a million parameters in minutes. A frontier run costs months and millions of dollars, and it happens once. Before it starts, someone has to decide two numbers: how many parameters the model should have, and how many tokens it should be trained on. Get the split wrong and the same compute buys a worse model.
+
+**Scaling laws** are the tool for that decision: empirical formulas, fitted to many small training runs, that predict how loss changes with model size, data and compute. This post explains the compute arithmetic, what the best-known experiments found, how serving changes the answer, and what small experiments can and cannot tell you.
+
+## Counting training compute
+
+A forward pass through a model with $N$ parameters costs about $2N$ floating-point operations per token: one multiply and one add for each weight. The backward pass costs about twice that, because it computes gradients with respect to both activations and weights. So training on $D$ tokens costs about
+
+$$
+C \approx 6 N D \ \text{FLOPs}.
+$$
+
+- $N$: parameters; $D$: training tokens; $C$: total training compute.
+- The estimate ignores attention's cost, which grows with context length, and is accurate when the context is short relative to the model width.
+
+A 1-billion-parameter model trained on 20 billion tokens needs $6 \times 10^9 \times 2 \times 10^{10} = 1.2 \times 10^{20}$ FLOPs, the figure in Chinchilla's Table 3. At an assumed sustained 400 trillion FLOPs per second per GPU, that is about **83 GPU-hours**. The same formula says what a budget buys: every factor of ten in compute can go to parameters, tokens or both.
+
+## How to split a budget
+
+[Chinchilla](https://arxiv.org/abs/2203.15556) asked the question directly. Its authors trained over 400 models, from 70 million to over 16 billion parameters, on 5 to 500 billion tokens, and estimated the best model size for each compute budget in three ways (abstract, §3):
+
+1. **Minimum over training curves:** for each budget, take the lowest loss reached by any model.
+2. **IsoFLOP profiles:** at each of several fixed budgets, train models of different sizes and find the size at the bottom of the loss curve.
+3. **A parametric fit:** fit a formula for loss as a function of $N$ and $D$ and minimize it.
+
+The first two agree: the optimal parameter count and token count should grow at about the same rate with compute, $N_{\text{opt}} \propto C^{0.50}$ and $D_{\text{opt}} \propto C^{0.50}$ (Table 2). Their projections put the optimum near **20 tokens per parameter**: 20.2 billion tokens for a 1-billion-parameter model, 205 billion for a 10-billion one (Table 3). Earlier work had recommended putting most extra compute into parameters, and many large models of the time were, by this analysis, too big for their data. The test was Chinchilla itself: 70 billion parameters trained on four times more data than the 280-billion-parameter Gopher with the same compute, and it outperformed Gopher across a large range of evaluations (abstract).
+
+With $D = 20N$, the budget formula becomes $C = 6N \times 20N = 120N^2$, so $N = \sqrt{C/120}$. A budget of $1.2 \times 10^{21}$ FLOPs gives about **3.2 billion parameters and 63 billion tokens**.
+
+**The third approach disagrees.** Chinchilla's fitted formula is
+
+$$
+L(N, D) = E + \frac{A}{N^{\alpha}} + \frac{B}{D^{\beta}},
+$$
+
+- $E$: the irreducible loss of the data, what an infinitely large model trained forever would reach;
+- $A / N^{\alpha}$: the penalty for a finite model; $B / D^{\beta}$: the penalty for finite data;
+
+with published values $E = 1.69$, $A = 406.4$, $B = 410.7$, $\alpha = 0.34$ and $\beta = 0.28$ (§3.3, App. D.2). Minimizing that formula at our budget gives about 2.0 billion parameters and **51 tokens per parameter**, not 20. A later replication traced the mismatch to the fit itself: the optimizer stopped before converging and the published coefficients were rounded in a way that biases predictions; refitting gave results consistent with the first two approaches ([Besiroglu et al., 2024](https://arxiv.org/abs/2404.10102), abstract). The [Chinchilla review](/paper-reviews/chinchilla/) looks at this in detail. For planning, the lesson is to trust the robust conclusion, that parameters and tokens should scale together, more than any one fitted constant.
+
+**Try it: compare three plans.** With $C = 1.2 \times 10^{21}$ FLOPs you could train (a) 10 billion parameters on 20 billion tokens, (b) 3.2 billion on 63 billion, or (c) 1 billion on 200 billion. All cost the same. Using the published formula only to see the shape, the predicted losses are (a) 2.39, (b) 2.32, (c) 2.33. Which would you train?
+
+**Answer.** On loss alone, (b), the compute-optimal plan, with (c) close behind and (a), the oversized model, clearly worst. The bottom of the curve is flat: being off by a factor of three in model size costs little, being off by ten costs more. Llama 3's report observed the same flatness at large budgets and used it to choose a convenient size near the predicted optimum ([Llama 3](https://arxiv.org/abs/2407.21783), §3.2.1). But loss is not the only cost. Read on.
+
+## When the model has to be served
+
+Compute-optimal means optimal for *training* compute. A deployed model then generates tokens, at about $2N$ FLOPs each. Suppose the model will serve $10^{13}$ tokens over its life:
+
+| Plan | Training | Serving $10^{13}$ tokens | Total |
+|---|---|---|---|
+| (a) 10B on 20B | $1.2 \times 10^{21}$ | $2.0 \times 10^{23}$ | $2.0 \times 10^{23}$ |
+| (b) 3.2B on 63B | $1.2 \times 10^{21}$ | $6.3 \times 10^{22}$ | $6.4 \times 10^{22}$ |
+| (c) 1B on 200B | $1.2 \times 10^{21}$ | $2.0 \times 10^{22}$ | $2.1 \times 10^{22}$ |
+
+Serving dominates, and the smaller model trained longer is three times cheaper overall for almost the same predicted loss. This is why widely deployed models are trained far beyond 20 tokens per parameter: Llama 3's 405-billion-parameter model saw 15.6 trillion tokens, about 39 per parameter, and smaller models are usually trained much further. [Sardana et al. (2024)](https://arxiv.org/abs/2401.00448) worked this out formally: with large expected inference demand, models should be smaller and trained longer than Chinchilla-optimal, and in their experiments quality kept improving up to extreme ratios of 10,000 tokens per parameter (abstract). The limit then becomes data: training longer needs more unique tokens, which brings back the repetition question from the [mixtures post](/blog/model-development-data-mixtures/).
+
+## What small experiments can predict
+
+Scaling laws are only as good as the experiments behind them, and the decision they inform is made once, at a scale nobody has measured. Three cautions:
+
+- **Loss extrapolates better than capabilities.** Validation loss follows smooth curves across orders of magnitude. Benchmark accuracy often does not: it can sit near chance and then rise sharply. Llama 3 handled this with a two-step method: predict the model's log-likelihood on benchmark answers from compute, then map log-likelihood to accuracy using both small models and older, larger ones. Extrapolating over four orders of magnitude, the forecast only slightly underestimated the final model on ARC Challenge (§3.2.1).
+- **A law holds for its setting.** Exponents and the optimal ratio depend on the data, tokenizer, architecture and training recipe. Chinchilla reproduced its IsoFLOP conclusion on two other datasets, C4 and GitHub code (App. C), but a fit on one data mix is not a fit on another. Llama 3 fitted its own law on its own data, finding an exponent of 0.53 for the optimal number of tokens.
+- **Small runs must be done right.** Each point on a scaling curve should be a well-tuned run: learning rate and schedule matched to its length. Comparing an under-tuned small model with a tuned large one fits the tuning, not the scaling.
+
+Everyday picture: a scaling law is a tide table. Fitted to past tides at one harbour, it predicts the next high water remarkably well. It is a poor guide to a different harbour, and it says nothing about whether a particular boat will float.
+
+
+## What to remember
+
+- Training compute is about $6ND$ FLOPs; serving costs about $2N$ per generated token.
+- Chinchilla's experiments found parameters and tokens should scale together, with the compute-optimal ratio near 20 tokens per parameter; its published parametric fit disagrees, and a replication attributes that to fitting problems.
+- The loss curve is flat near the optimum, so a model size within a factor of a few of optimal costs little.
+- If the model will be served heavily, train a smaller model on more tokens than compute-optimal; data availability then becomes the limit.
+- Loss extrapolates well from small runs; downstream accuracy needs a second mapping, and every law holds only for the data and recipe it was fitted on.
+
+
+## Try it yourself
+
+- **Budget.** A 7-billion-parameter model at 20 tokens per parameter needs 140 billion tokens and $6 \times 7 \times 10^9 \times 1.4 \times 10^{11} \approx$ **$5.9 \times 10^{21}$ FLOPs**.
+- **Doubling compute.** Under $D = 20N$, $C = 120N^2$, so doubling the budget grows the optimal model by $\sqrt{2} \approx$ **1.41**, and its tokens by the same factor.
+- **Serving.** A 70-billion-parameter model serving $10^{12}$ tokens costs $2 \times 7 \times 10^{10} \times 10^{12} =$ **$1.4 \times 10^{23}$ FLOPs**, more than training it on 300 billion tokens ($1.26 \times 10^{23}$).
+
+
+## Sources
+
+- J. Hoffmann, S. Borgeaud, A. Mensch et al. (2022). "Training Compute-Optimal Large Language Models." NeurIPS 2022. arXiv:2203.15556.
+- T. Besiroglu, E. Erdil, M. Barnett and J. You (2024). "Chinchilla Scaling: A replication attempt." arXiv:2404.10102.
+- N. Sardana, J. Portes, S. Doubov and J. Frankle (2024). "Beyond Chinchilla-Optimal: Accounting for Inference in Language Model Scaling Laws." arXiv:2401.00448.
+- Llama Team, AI @ Meta (2024). "The Llama 3 Herd of Models." arXiv:2407.21783. §3.2.1.
+
+
+## Further reading
+
+- Stanford CS336, [lectures 9 and 11, "Scaling laws"](https://cs336.stanford.edu/).
+- J. Kaplan et al. (2020). "Scaling Laws for Neural Language Models." arXiv:2001.08361. The earlier analysis Chinchilla revised.
