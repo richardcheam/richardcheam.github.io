@@ -477,5 +477,141 @@
     ],
     "location": "/blog/model-development-running-at-scale/",
     "conditions": "torch.profiler, PyTorch 2.6, Apple M1; timings vary run to run. scripts/course/p13_at_scale.py."
+  },
+  {
+    "id": "T1-01",
+    "status": "Reported",
+    "claim": "The Tülu 3 template renders a user/assistant pair as '<|user|>\\nWhat is 2+3?\\n<|assistant|>\\n2+3 = 5.<|end_of_text|>'; with assistant-only labels 8 of 25 tokens are trained, including the end-of-text token.",
+    "sourceIds": [
+      "tulu3-tokenizer",
+      "open-instruct"
+    ],
+    "location": "/blog/model-development-supervised-fine-tuning/",
+    "conditions": "Executed with Transformers 4.51.3; scripts/course/p14_sft.py."
+  },
+  {
+    "id": "T1-02",
+    "status": "Reported",
+    "claim": "Tülu 3 SFT ablations (8B): removing WildChat drops AlpacaEval 2 from 12.4 to 7.5; removing safety data drops safety from 93.1 to 74.7; removing math data drops GSM8K from 76.2 to 64.1; seeds vary the average by about 0.1. Averaging the loss per sample under gradient accumulation weighted samples equally; a summed loss fixed it.",
+    "sourceIds": [
+      "tulu3"
+    ],
+    "location": "/blog/model-development-supervised-fine-tuning/",
+    "conditions": "§4.2 Table 10, Table 14, §4.3.2."
+  },
+  {
+    "id": "T2-01",
+    "status": "Derived",
+    "claim": "With a verifier and independent samples, a prompt survives best-of-K with probability 1-(1-p)^K; with K=16, 1,000 prompts at p=0.5 and 1,000 at p=0.02 yield about 1,000 and 276 kept examples, so hard prompts fall from 50% to 22%.",
+    "sourceIds": [
+      "llama3"
+    ],
+    "location": "/blog/model-development-post-training-data/",
+    "conditions": "Arithmetic and simulation in scripts/course/p15_post_training_data.py; Llama 3 §4.2.2 for rejection sampling with K of 10–30."
+  },
+  {
+    "id": "T2-02",
+    "status": "Reported",
+    "claim": "DeepSeek-R1-Distill-Qwen-32B scored 72.6 on AIME 2024 against 47.0 for Qwen2.5-32B trained with large-scale RL (over 10K steps).",
+    "sourceIds": [
+      "deepseek-r1"
+    ],
+    "location": "/blog/model-development-post-training-data/",
+    "conditions": "DeepSeek-R1 arXiv v2, App. F.1, Table 16."
+  },
+  {
+    "id": "T2-03",
+    "status": "Reported",
+    "claim": "Tülu 3 decontaminates prompts with 8-gram matching: a test item matches if more than 50% of its tokens fall in 8-grams shared with one training example; datasets overlapping more than 2% of an evaluation are removed or filtered; embedding matching was hard to separate from topical similarity.",
+    "sourceIds": [
+      "tulu3"
+    ],
+    "location": "/blog/model-development-post-training-data/",
+    "conditions": "§3.2, p. 14."
+  },
+  {
+    "id": "T3-01",
+    "status": "Derived",
+    "claim": "With reference (0.5, 0.3, 0.2), rewards (0, 1, 2) and beta = 1, the KL-regularized optimum is (0.18, 0.29, 0.53); the DPO gradient on logits for a fresh pair is beta*sigma(-margin)*(e_w - e_l), (0.05, 0, -0.05) at beta = 0.1.",
+    "sourceIds": [
+      "dpo"
+    ],
+    "location": "/blog/model-development-preference-optimization/",
+    "conditions": "DPO §4 Eqs. 4–7; checked with autograd in scripts/course/p16_preferences.py."
+  },
+  {
+    "id": "T3-02",
+    "status": "Reported",
+    "claim": "Tülu 3 found only length-normalized DPO beat its SFT starting point among DPO, SimPO and length-normalized DPO; final 8B beta 5, lr 5e-7. Llama 3 used DPO with lr 1e-5, beta 0.1, masked formatting tokens and an NLL term with coefficient 0.2.",
+    "sourceIds": [
+      "tulu3",
+      "llama3"
+    ],
+    "location": "/blog/model-development-preference-optimization/",
+    "conditions": "Tülu 3 §5.4, Tables 18 and 20; Llama 3 §4.1.4."
+  },
+  {
+    "id": "T4-01",
+    "status": "Reported",
+    "claim": "GRPO normalizes rewards within a group of samples per question, uses no value model and adds KL to the loss; DeepSeekMath used 64 samples, KL 0.04, lr 1e-6 and raised MATH from 46.8% to 51.7%. RL raised Maj@K but not Pass@K.",
+    "sourceIds": [
+      "deepseekmath"
+    ],
+    "location": "/blog/model-development-reinforcement-learning/",
+    "conditions": "§4.1–4.2, Table 5, §5.2.2 Fig. 7."
+  },
+  {
+    "id": "T4-02",
+    "status": "Reported",
+    "claim": "DeepSeek-R1-Zero used rule-based accuracy and format rewards with GRPO, avoided neural reward models for reasoning because of reward hacking, and rose from 15.6% to 77.9% pass@1 on AIME 2024. Tülu 3 RLVR gives reward 10 for verified answers with PPO.",
+    "sourceIds": [
+      "deepseek-r1",
+      "tulu3"
+    ],
+    "location": "/blog/model-development-reinforcement-learning/",
+    "conditions": "R1 §§2.2–2.3; Tülu 3 §6 Eqs. 7–8."
+  },
+  {
+    "id": "T4-03",
+    "status": "Derived",
+    "claim": "On a four-answer toy, a baseline of 0.2 lowered the variance of a one-sample gradient estimate from 0.102 to 0.057 with the same mean; a group of 8 has mixed rewards with probability 1-p^8-(1-p)^8 (0.34 at p = 0.95).",
+    "sourceIds": [
+      "ppo"
+    ],
+    "location": "/blog/model-development-reinforcement-learning/",
+    "conditions": "Simulation in scripts/course/p17_rl.py."
+  },
+  {
+    "id": "T5-01",
+    "status": "Reported",
+    "claim": "Tülu 3 persona instruction-following data raised IFEval from 53.6 to 72.8 while IFEval-OOD went from 18.0 to 17.6; length-controlled AlpacaEval raised Spearman correlation with Chatbot Arena from 0.94 to 0.98; optimizing against a proxy reward can lower a gold reward (Gao et al.).",
+    "sourceIds": [
+      "tulu3",
+      "lc-alpacaeval",
+      "gao-2022"
+    ],
+    "location": "/blog/model-development-post-training-failures/",
+    "conditions": "Tülu 3 Table 32; abstracts of Dubois et al. and Gao et al."
+  },
+  {
+    "id": "T5-02",
+    "status": "Derived",
+    "claim": "In a simulation where a judge rewards quality + 2 x length and the truth is quality - 0.5 x length^2, best-of-n raises the judge score at every n while true quality peaks at n = 2.",
+    "sourceIds": [
+      "gao-2022"
+    ],
+    "location": "/blog/model-development-post-training-failures/",
+    "conditions": "Illustrative constants; scripts/course/p18_failures.py."
+  },
+  {
+    "id": "R-DPO-01",
+    "status": "Reported",
+    "claim": "DPO reached about 61% GPT-4 win rate on TL;DR against 57% for PPO; humans preferred DPO samples 58% of the time; on Anthropic HH no public PPO model beat the base model, so best-of-128 stood in for PPO.",
+    "sourceIds": [
+      "dpo",
+      "ivison-2024"
+    ],
+    "location": "/paper-reviews/dpo/",
+    "conditions": "§6.2–6.4, Tables 1–2."
   }
 ]

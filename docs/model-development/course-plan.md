@@ -128,7 +128,7 @@ The first version taught only systems topics (training memory, collectives, a pa
 
 Working branch `feat/md-series`, stacked on `feat/p2-corpus` (PR #6). Merging and deployment need Richard's separate authorization.
 
-- **Done (drafted and verified):** Build 1–7 and Scale 8–13, with reviews Chinchilla and FlashAttention. Every post's numbers are reproduced by `scripts/course/p3_…p13_*.py`; executed checks include five CPU training runs (p6), two-process DDP normalization (p9), ZeRO-1 with `ZeroRedundancyOptimizer` (p10), a tensor-parallel MLP (p11) and tiled attention and FP8 scaling (p12). FLORES-200 and three tokenizers' files were downloaded for p4 (FLORES_DIR needed to rerun).
-- **Not executed:** FSDP2 `fully_shard` (PyTorch 2.6 needs accelerator streams on this machine); any GPU throughput measurement; anything at scale.
-- **Open forward links:** posts 14, 18, 23 and 24 are linked from Build/Scale posts and must exist before the check passes.
-- **Exact next action:** write post 14 (`model-development-supervised-fine-tuning`), then the rest of the Adapt track.
+- **Done (drafted and verified):** Build 1–7, Scale 8–13, Adapt 14–18; reviews Chinchilla, FlashAttention, Tülu 3, DPO, DeepSeekMath/GRPO. Scripts `scripts/course/p3…p18_*.py` reproduce every number; executed checks include CPU training runs (p6), DDP normalization (p9), ZeRO-1 (p10), tensor-parallel MLP (p11), tiled attention and FP8 scaling (p12), the Tülu 3 chat template and labels (p14), DPO gradients (p16), policy gradients and GRPO on toys (p17), an overoptimization simulation (p18).
+- **Not executed:** FSDP2 (needs accelerator streams here); any GPU measurement; any model training beyond the 1M-parameter CPU runs; PPO/GRPO on a real language model.
+- **Open forward links:** posts 23 and 24 (inference, application evaluation).
+- **Exact next action:** write the Use track, posts 19–24, then posts 25–26.

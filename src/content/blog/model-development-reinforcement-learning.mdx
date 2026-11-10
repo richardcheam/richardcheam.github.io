@@ -1,0 +1,109 @@
+---
+title: "Reinforcement learning for language models: policy gradients, PPO, GRPO and verifiable rewards"
+date: 2026-11-11
+category: deep-learning
+read_time: "17 min"
+series_order: 17
+series: model-development
+featured: false
+published: true
+excerpt: "Supervised fine-tuning and DPO learn from fixed examples. Reinforcement learning lets a model learn from its own attempts, scored by a reward. Derive the policy gradient on a four-answer toy, see why baselines matter, learn what PPO's clipping and value model do and what GRPO replaces them with, and why verifiable rewards changed reasoning training."
+question: "How do policy gradients, KL regularization and verifiable rewards improve a model, and how do PPO and GRPO differ?"
+my_work: "A concept post; the policy gradient, baselines, GRPO advantages and PPO clipping computed and simulated on toy examples in PyTorch; methods and settings read from the PPO, InstructGPT, DeepSeekMath, Tülu 3 and DeepSeek-R1 papers."
+result: "A baseline of 0.2 cut the variance of a one-sample gradient from 0.10 to 0.057 without changing its mean; GRPO's group-normalized advantages give no signal when all samples agree, so a group of 8 on a prompt solved 95% of the time carries signal only 34% of the time; DeepSeek-R1-Zero's AIME 2024 accuracy rose from 15.6% to 77.9% with rule-based rewards."
+evidence_limit: "Toy examples illustrate the mechanics; large-scale results are the papers' own and depend on their base models and data."
+lesson: "Reinforcement learning raises the probability of the model's own high-reward outputs. Baselines, clipping and a KL penalty keep it stable; the reward decides what is actually learned."
+---
+
+The [preference post](/blog/model-development-preference-optimization/) ended with an objective, maximize reward while staying close to a reference policy, and one way to approach it, DPO, which learns from fixed pairs. **Reinforcement learning** (RL) attacks the objective directly: the model generates responses, a reward scores them, and the model is updated to make high-reward responses more likely. Because it learns from its own current outputs, it can improve beyond the examples it was given. This post builds the method from one equation, with only the SFT and preference posts as background.
+
+## The policy gradient
+
+Treat the model as a **policy** $\pi_\theta$: given a prompt, a probability distribution over responses. We want to maximize the expected reward $J(\theta) = \mathbb{E}_{y \sim \pi_\theta}[R(y)]$. The difficulty is that $y$ is sampled, and sampling has no gradient. The **policy gradient theorem** gets around it:
+
+$$
+\nabla_\theta J = \mathbb{E}_{y \sim \pi_\theta}\big[R(y)\,\nabla_\theta \log \pi_\theta(y)\big].
+$$
+
+- $\nabla_\theta \log \pi_\theta(y)$: the direction that makes response $y$ more likely, the same gradient as the SFT loss on $y$.
+- $R(y)$: how much to move in that direction.
+
+In words: sample responses, and do SFT on each one weighted by its reward. For a language model, $\log \pi_\theta(y)$ is the sum of the log-probabilities of $y$'s tokens.
+
+Make it concrete with a policy over four answers to one question, probabilities $(0.4, 0.3, 0.2, 0.1)$, where only answer 3 is correct (reward 1). On the logits, $\nabla \log \pi(y)$ is $e_y - \pi$, so the exact gradient is $0.2 \times (e_3 - \pi) = (-0.08, -0.06, +0.16, -0.02)$: raise the correct answer, lower the others in proportion to their probability. Averaging the one-sample estimate $R(y)(e_y - \pi)$ over 20,000 sampled answers gives the same vector to within 0.001. The method is unbiased, but each single sample is noisy.
+
+## Baselines and advantages
+
+Any constant $b$ can be subtracted from the reward without changing the expected gradient, because $\mathbb{E}[\nabla \log \pi_\theta(y)] = 0$. Subtracting a good **baseline** reduces the noise. With $b$ set to the average reward, 0.2, the variance of the single-sample estimate for the correct answer's logit falls from 0.102 to 0.057, with the same mean. The quantity $A(y) = R(y) - b$ is called the **advantage**: how much better this response was than expected. Correct answers get positive advantage, incorrect ones negative, and the gradient pushes each accordingly.
+
+Choosing the baseline is where the main algorithms differ.
+
+## PPO: a value model and a clipped step
+
+**Proximal Policy Optimization** (PPO), used in InstructGPT, adds two ideas ([Schulman et al., 2017](https://arxiv.org/abs/1707.06347); [Ouyang et al., 2022](https://arxiv.org/abs/2203.02155)):
+
+- **A learned value model** predicts the expected reward from each point in a response, giving a per-token baseline. Advantages are computed from rewards and value predictions with generalized advantage estimation. The value model is typically another network as large as the policy.
+- **A clipped objective** allows several gradient steps on each batch of samples without moving too far. With $\rho = \pi_\theta(y_t)/\pi_{\text{old}}(y_t)$, the probability ratio of a token under the current and the sampling policy, PPO maximizes $\min\big(\rho A,\ \text{clip}(\rho, 1-\varepsilon, 1+\varepsilon)\,A\big)$, with $\varepsilon = 0.2$ suggested (Eq. 7). For a good token ($A = +1$) whose probability has already risen 50% ($\rho = 1.5$), the objective is capped at 1.2: no further push. For a bad token ($A = -1$) whose probability has halved ($\rho = 0.5$), it is held at −0.8. A bad token whose probability *rose* ($\rho = 1.5$, $A = -1$) is not clipped: −1.5, so the correction stays.
+
+The KL term from the preference post enters as a per-token penalty on the reward, $r_t = r - \beta \log(\pi_\theta/\pi_{\text{ref}})$, keeping the policy near the reference ([DeepSeekMath](https://arxiv.org/abs/2402.03300), Eq. 2). PPO therefore runs four models: the policy, the frozen reference, the reward model and the value model.
+
+## GRPO: the group is the baseline
+
+**Group Relative Policy Optimization** (GRPO) drops the value model (DeepSeekMath, §4.1). For each prompt it samples a group of $G$ responses, scores them, and uses the group itself as the baseline. Each response's advantage is its reward normalized within the group, $\hat A_i = (r_i - \text{mean}(r))/\text{std}(r)$, applied to every token of that response (§4.1.2). It keeps PPO's clipping, and adds the KL divergence to the reference directly to the loss instead of to the reward.
+
+With a group of 4:
+
+| Rewards | Advantages |
+|---|---|
+| 1, 0, 0, 1 | +1, −1, −1, +1 |
+| 1, 0, 0, 0 | +1.73, −0.58, −0.58, −0.58 |
+| 0, 0, 0, 0 | 0, 0, 0, 0 |
+| 1, 1, 1, 1 | 0, 0, 0, 0 |
+
+A lone success among failures gets a large advantage, and groups where every response gets the same reward contribute **nothing**: no difference, no signal. DeepSeekMath used 64 samples per question, a KL coefficient of 0.04 and a learning rate of $10^{-6}$, and GRPO raised its 7B model's MATH accuracy from 46.8% to 51.7% (§4.2, Table 5). Without the value model, GRPO saves the memory and compute of a second large network; in exchange, it needs several samples per prompt.
+
+On the four-answer toy, 60 GRPO steps with groups of 8 raise the probability of the correct answer from 0.20 to 0.99 without a KL penalty, and to 0.94 with one ($\beta = 0.5$), which keeps the policy measurably closer to where it started.
+
+**Try it: where is the signal?** You train with GRPO, groups of 8, on three kinds of prompt: ones the model never solves, ones it solves half the time, and ones it solves 95% of the time. What fraction of groups give any learning signal?
+
+**Answer.** A group gives signal only if its rewards are mixed: $1 - p^8 - (1-p)^8$. Never solved: **0**, every group is all failures. Half the time: **0.99**. Solved 95% of the time: **0.34**, most groups are all successes. Learning concentrates on prompts at the edge of the model's ability. This is the RL counterpart of the [rejection-sampling bias](/blog/model-development-post-training-data/#rejection-sampling-choosing-among-the-models-own-answers) in the previous post, and it is why RL datasets are often filtered to prompts of intermediate difficulty.
+
+## Verifiable rewards
+
+Everything above depends on the reward. A learned reward model is an imperfect judge that the policy can learn to exploit, the subject of the [next post](/blog/model-development-post-training-failures/). Where correctness can be checked by a program, the reward can come from the check instead:
+
+- **Tülu 3's RLVR** gives a reward of 10 if a math answer matches the reference or an instruction's verifiable constraints are met, and 0 otherwise, optimized with PPO under a KL penalty. It improved the targeted evaluations (GSM8K, MATH, IFEval), and more KL budget did not necessarily raise the verifiable reward ([Tülu 3](https://arxiv.org/abs/2411.15124), §6, Eqs. 7–8).
+- **DeepSeek-R1-Zero** trained a base model with GRPO and only rule-based rewards: an accuracy reward for verifiably correct answers and a format reward for putting the reasoning between designated tags. The team avoided neural reward models for reasoning because they found them susceptible to reward hacking at scale. Pass@1 on AIME 2024 rose from 15.6% to 77.9%, and responses grew steadily longer as the model learned to spend more tokens reasoning ([DeepSeek-R1](https://arxiv.org/abs/2501.12948), §§2.2–2.3). Readability and language mixing suffered, which the final DeepSeek-R1 pipeline addressed with additional SFT stages and a language-consistency reward.
+
+Verifiable rewards are only as good as the verifier. A checker that accepts a correct final number with wrong reasoning rewards guessing; one that checks format can be satisfied without substance.
+
+## What RL costs
+
+Most of the time in an RL step is **generation**: producing $G$ responses per prompt, often long ones, before any gradient is computed. Training systems therefore pair the trainer with a fast inference engine and move updated weights between them, and the [inference post](/blog/model-development-inference-serving/) explains what makes generation fast. Because responses come from a slightly older policy than the one being trained, the probability ratio and clipping matter more as the gap grows.
+
+Everyday picture: a student doing practice problems. Supervised learning is copying worked solutions; RL is attempting problems and being told only "right" or "wrong", then doing more of whatever worked. The baseline is the student's average score: a correct answer on a problem everyone gets right teaches little, a correct answer on a hard one teaches a lot.
+
+
+## What to remember
+
+- The policy gradient is $\mathbb{E}[R\,\nabla \log \pi(y)]$: sample, then do reward-weighted SFT on the samples.
+- Subtracting a baseline gives the advantage $A = R - b$ and reduces variance without bias.
+- PPO uses a learned value model for advantages, clips probability ratios at $1 \pm \varepsilon$, and adds a per-token KL penalty: four models in all.
+- GRPO uses the group of samples as the baseline, $(r - \text{mean})/\text{std}$; groups with identical rewards give no signal, so prompts of intermediate difficulty matter most.
+- Verifiable rewards (answer checks, constraint checks) avoid reward-model exploitation where correctness can be computed; the verifier then defines what is learned.
+
+
+## Sources
+
+- J. Schulman, F. Wolski, P. Dhariwal, A. Radford and O. Klimov (2017). "Proximal Policy Optimization Algorithms." arXiv:1707.06347. §3, Eq. 7.
+- Z. Shao, P. Wang, Q. Zhu, R. Xu, J. Song et al. (2024). "DeepSeekMath: Pushing the Limits of Mathematical Reasoning in Open Language Models." arXiv:2402.03300. §4.
+- N. Lambert et al. (2024). "Tülu 3." arXiv:2411.15124. §6.
+- DeepSeek-AI (2025). "DeepSeek-R1." arXiv:2501.12948. §2.
+- L. Ouyang et al. (2022). "Training language models to follow instructions with human feedback." arXiv:2203.02155.
+
+
+## Further reading
+
+- [GRPO and DeepSeekMath paper review](/paper-reviews/deepseekmath-grpo/).
+- Stanford CS336, [lecture 16, "Post-training: RLVR"](https://cs336.stanford.edu/).
+- Berkeley CS294-280 (Spring 2025), [lectures on reasoning and open training recipes](https://rdi.berkeley.edu/adv-llm-agents/sp25) (Hanna Hajishirzi, 24 Feb: Tülu 3).
