@@ -11,7 +11,7 @@ const latestPosts = (await publishedPosts())
   .slice(0, 4);
 const latestReviews = (await publishedReviews()).slice(0, 3);
 ---
-<Base title="Richard Cheam">
+<Base>
   <Fragment set:html={top} />
 
   <section id="blog" class="section-block" data-reveal>

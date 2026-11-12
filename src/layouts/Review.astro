@@ -22,7 +22,7 @@ const sourceLabel = d.source_label || (d.type === "tech-report" ? "Read the repo
 const inline = (md: string) => (marked.parseInline(md) as string).trim();
 import SignatureMark from "../components/SignatureMark.astro";
 ---
-<Base title={d.title} description={d.excerpt ? stripHtml(d.excerpt) : undefined} image={`/og/paper-reviews/${review.id}.png`}>
+<Base title={d.title} description={d.excerpt ? stripHtml(d.excerpt) : undefined} image={`/og/paper-reviews/${review.id}.png`} schema={[{ "@type": "Article", headline: d.title, description: d.excerpt ? stripHtml(d.excerpt) : undefined, datePublished: d.date.toISOString().slice(0, 10), url: `https://richardcheam.github.io/paper-reviews/${review.id}/`, image: `https://richardcheam.github.io/og/paper-reviews/${review.id}.png`, author: { "@id": "https://richardcheam.github.io/#person", "@type": "Person", name: "Richard Cheam", url: "https://richardcheam.github.io/" }, ...(d.source_url ? { citation: d.source_url } : {}) }]}>
   <article class="review">
     <div class="review-back">
       <a class="notes-backlink" href="/paper-reviews/">Back to Paper Reviews</a>
