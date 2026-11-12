@@ -102,7 +102,11 @@ if __name__ == "__main__":
     print(f" stage 3 floor with 64 GPUs: {16 * P / 64 / 1e9:.2f} GB")
 
     section("communication per step, in units of the BF16 parameter bytes (2 bytes x N)")
-    print(" DP / stage 1 / stage 2: reduce-scatter + all-gather = all-reduce, about 2x; stage 3: 3x (1.5 times)")
+    print(" one pass per update: DP / stage 1 / stage 2 = 2 psi; stage 3 = 3 psi (1.5 times)")
+    m = 2  # microbatches per update
+    totals = {"DP": 2, "stage 1": 2, "stage 2": m * 1 + 1, "stage 3": m * 3}
+    print(f" {m} microbatches per update: " + ", ".join(f"{k} {v} psi" for k, v in totals.items()))
+    assert totals == {"DP": 2, "stage 1": 2, "stage 2": 3, "stage 3": 6}
 
     section("recomputation compute")
     print(f" training 6N per token; full recomputation adds a forward pass, 2N: 8N/6N = {8 / 6:.2f}")

@@ -1,6 +1,6 @@
 ---
 title: "Supervised fine-tuning: teaching a base model to answer"
-date: 2026-11-11
+date: 2026-11-10
 category: deep-learning
 read_time: "13 min"
 series_order: 14
@@ -77,7 +77,7 @@ Three lessons generalize:
 
 Fine-tuning is short and sensitive. Tülu 3's 8B model trained for 2 epochs at a learning rate of $5 \times 10^{-6}$, with an effective batch of 128 sequences of up to 4,096 tokens (Table 11). Changing only the random seed moved the average between 59.8 and 59.9, and averaging the weights of two runs ("model soup") gave 60.2, not reliably better than the best single run (Table 14). Differences smaller than a few tenths of a point are within noise.
 
-The base model still sets the ceiling. The same SFT mix gave 31.5 on MATH from Llama 3.1 8B but 56.4 from Qwen 2.5 Math 7B, a model whose pre-training emphasized mathematics (Table 12). SFT draws out and formats what pre-training learned; it adds less than it seems.
+The base model matters a great deal. The same SFT mix gave 31.5 on MATH from Llama 3.1 8B but 56.4 from Qwen 2.5 Math 7B, a model whose pre-training emphasized mathematics (Table 12). In Tülu 3's setting, a short SFT run mostly drew out and formatted what pre-training had learned; that is not a hard ceiling, since larger or longer fine-tuning, distillation from a stronger model and later RL can all add capability, but it is why choosing the base model is usually the biggest decision.
 
 Everyday picture: SFT is an apprenticeship by example. The apprentice already knows a great deal; watching how answers are given teaches them the shop's format and manners, not the trade itself.
 
@@ -95,7 +95,7 @@ Everyday picture: SFT is an apprenticeship by example. The apprentice already kn
 - Assistant-only masking trains the replies and their stop tokens; masked prompts still shape the gradient through attention. Training on prompts can also help in some settings.
 - Average per token across the whole batch, not per conversation; otherwise short replies are overweighted and results depend on accumulation and GPU count.
 - Data decides skills: in Tülu 3, removing math data cost 12 points of GSM8K. Seed noise is a few tenths of a point.
-- The base model sets the ceiling; SFT mostly teaches format and behaviour.
+- The base model largely determines what a short SFT run can reach; SFT mostly teaches format and behaviour, though more data, distillation and RL can add capability.
 
 
 ## Sources

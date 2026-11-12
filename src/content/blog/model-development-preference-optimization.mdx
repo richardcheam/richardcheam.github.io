@@ -1,6 +1,6 @@
 ---
 title: "Learning from preferences: reward models and DPO"
-date: 2026-11-11
+date: 2026-11-10
 category: deep-learning
 read_time: "15 min"
 series_order: 16
@@ -19,7 +19,7 @@ After [supervised fine-tuning](/blog/model-development-supervised-fine-tuning/),
 
 ## From comparisons to a reward
 
-The data is a set of triples: a prompt $x$, a preferred response $y_w$ and a rejected one $y_l$. InstructGPT showed labelers 4 to 9 responses at a time and had them rank them; each ranking yields many pairs ([Ouyang et al., 2022](https://arxiv.org/abs/2203.02155), §3.5). Judgements are noisy: InstructGPT's trained labelers agreed with each other 72.6% of the time (§3.4). No model can be more consistent with the labels than the labels are with themselves.
+The data is a set of triples: a prompt $x$, a preferred response $y_w$ and a rejected one $y_l$. InstructGPT showed labelers 4 to 9 responses at a time and had them rank them; each ranking yields many pairs ([Ouyang et al., 2022](https://arxiv.org/abs/2203.02155), §3.5). Judgements are noisy: InstructGPT's trained labelers agreed with each other 72.6% of the time (§3.4). That is not a ceiling on a model's agreement with an individual labeler. If two labelers each pick the truly better answer 80% of the time, independently, they agree $0.8^2 + 0.2^2 = 68\%$ of the time, while a model that always knows the better answer agrees with either one 80% of the time. Noise does limit how well we can *measure* a reward model, and it blurs the training signal.
 
 The standard way to turn pairs into a number is the **Bradley–Terry model**: each response has a hidden score, a **reward** $r(x, y)$, and
 
@@ -93,7 +93,7 @@ Everyday picture: a wine tasting where judges only say which of two glasses they
 
 ## What to remember
 
-- Bradley–Terry: $P(y_w \succ y_l) = \sigma(r_w - r_l)$. A reward model is trained as logistic regression on reward differences; label agreement (about 73% in InstructGPT) caps what it can learn.
+- Bradley–Terry: $P(y_w \succ y_l) = \sigma(r_w - r_l)$. A reward model is trained as logistic regression on reward differences; labels are noisy (InstructGPT's labelers agreed 73% of the time), which blurs training and evaluation, though agreement between labelers is not a ceiling on a model's agreement with each of them.
 - The KL-regularized objective trades reward against distance from a reference; its optimum is $\pi^* \propto \pi_{\text{ref}}\exp(r/\beta)$.
 - DPO substitutes the policy's log-ratio for the reward; the normalizer cancels, leaving a logistic loss on the difference of log-ratios of chosen and rejected responses.
 - DPO only constrains the difference: both responses can become less likely. Monitor the chosen response's probability.

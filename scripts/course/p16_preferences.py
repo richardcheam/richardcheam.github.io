@@ -63,3 +63,8 @@ assert round(-math.log(sig(0.03)), 3) == 0.678 and round(-math.log(sig(0.1)), 3)
 section("length normalization: summed log-probabilities scale with length")
 print(" a 100-token answer at -0.5 per token: -50; a 20-token answer at -1.0 per token: -20")
 print(" per token: -0.5 vs -1.0, so the longer answer is more likely per token though less likely in total")
+
+section("agreement between noisy annotators is not a ceiling")
+acc = 0.8
+print(f" two independent annotators, each right {acc:.0%}: agree {acc ** 2 + (1 - acc) ** 2:.0%}; an oracle agrees with each {acc:.0%}")
+assert round(acc ** 2 + (1 - acc) ** 2, 2) == 0.68

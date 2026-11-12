@@ -332,6 +332,7 @@
 
           var filterInput = document.querySelector("[data-filter-input]");
           var filterCards = Array.prototype.slice.call(document.querySelectorAll("[data-filter-card]"));
+          var filterList = document.querySelector(".blog-post-list");
           var filterEmpty = document.querySelector("[data-filter-empty]");
 
           var reviewContent = document.querySelector("[data-review-content]");
@@ -498,6 +499,24 @@
 
               if (filterEmpty) {
                 filterEmpty.hidden = matches > 0;
+              }
+
+              // A series view reads in series order and shows its shared launch date once; other views stay chronological.
+              var activeSeries = facetState.series || "";
+              var intro = null;
+              document.querySelectorAll("[data-series-intro]").forEach(function (el) {
+                var on = el.getAttribute("data-series-intro") === activeSeries;
+                el.hidden = !on;
+                if (on) intro = el;
+              });
+              if (filterList) {
+                var ordered = activeSeries
+                  ? filterCards.slice().sort(function (a, b) {
+                      return (Number(a.getAttribute("data-series-order")) || 0) - (Number(b.getAttribute("data-series-order")) || 0);
+                    })
+                  : filterCards;
+                ordered.forEach(function (card) { filterList.appendChild(card); });
+                filterList.classList.toggle("blog-post-list--shared-date", !!(intro && intro.hasAttribute("data-shared-date")));
               }
 
               if (filterCount) {

@@ -132,3 +132,10 @@ Working branch `feat/md-series`, stacked on `feat/p2-corpus` (PR #6). Merging an
 - **Not executed:** FSDP2 (needs accelerator streams here); any GPU measurement; any model training beyond the 1M-parameter CPU runs; PPO/GRPO on a real language model.
 - **Open forward links:** posts 23 and 24 (inference, application evaluation).
 - **Exact next action:** write the Use track, posts 19–24, then posts 25–26.
+
+### 2026-11-12 correction pass (`fix/md-corrections`)
+
+- Technical corrections: resume test now bitwise (losses, weights, AdamW state; p6 rerun on CPU, passed); pipeline overhead vs idle share; ZeRO traffic assumptions and accumulation schedule, ZeroRedundancyOptimizer's actual collectives; policy-gradient sign and token-level advantages, zero-advantage groups keep KL; annotator agreement is not a ceiling; corpus repetition wording and FineWeb budget scope; Mimi symbols vs Moshi positions; serving bounds labelled; SFT ceiling, BF16 underflow, A/B vs paired, byte-level round trips qualified.
+- Dates: every model-development post and its reviews set to 2026-11-10, the first successful Pages deploy containing them (b840da8 at 11:42 UTC for post 1; 367ad9c at 20:50 UTC for the rest, since d4d8f66's deploy was cancelled). No `updated` field exists, so none was added.
+- Series view reads in `series_order`, shows the shared date once and a start link; posts have previous/next and optional paper-review links.
+- Not rerun: FSDP2 (needs accelerator streams); no GPU measurement.

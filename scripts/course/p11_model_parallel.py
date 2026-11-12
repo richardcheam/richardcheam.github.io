@@ -48,17 +48,19 @@ if __name__ == "__main__":
     wrong = F.gelu(X[:, :half] @ A[:half]) + F.gelu(X[:, half:] @ A[half:])
     print(f" splitting A by rows instead: max error {(wrong - F.gelu(X @ A)).abs().max():.2f} (GeLU is not linear)")
 
-    print("\n== pipeline bubble fraction (p - 1) / m, and / v when interleaved")
+    print("\n== pipeline bubble overhead (p - 1) / m relative to work; idle share (p - 1) / (m + p - 1)")
     for p, m in ((4, 4), (4, 16), (4, 64), (8, 64)):
         print(f" p = {p}, m = {m}: {(p - 1) / m:.3f}")
     assert (4 - 1) / 4 == 0.75 and (4 - 1) / 16 == 0.1875 and round((8 - 1) / 64, 3) == 0.109
     print(f" p = 8, m = 64, v = 2: {(8 - 1) / 64 / 2:.3f}")
-    print(f" try it: p = 16, m = 32 -> {15 / 32:.2f}; with v = 4 -> {15 / 32 / 4:.2f}")
+    print(f" try it: p = 16, m = 32 -> overhead {15 / 32:.2f}, idle share {15 / 47:.2f}; with v = 4 -> overhead {15 / 32 / 4:.3f}, idle share {3.75 / 35.75:.3f}")
+    print(f" p = 4, m = 4: overhead {3 / 4:.2f}, idle share of elapsed time {3 / 7:.3f}; p = 4, m = 64: {3 / 64:.3f}, {3 / 67:.3f}")
+    assert round(3 / 7, 2) == 0.43 and round(15 / 47, 2) == 0.32 and round(3.75 / 35.75, 2) == 0.10
     assert round(15 / 32, 2) == 0.47 and round(15 / 32 / 4, 2) == 0.12
 
     print("\n== tensor-parallel communication per layer (forward): 2 all-reduces of b*s*h activations")
     b, s, h = 1, 4096, 8192
-    print(f" one all-reduce of {b * s * h * 2 / 1e6:.0f} MB (BF16) per sub-layer, 2 per layer forward, 2 backward")
+    print(f" one all-reduce of {b * s * h * 2 / 1e6:.0f} MB (BF16) per sub-layer, 2 per layer forward, 2 backward, for every microbatch")
     assert b * s * h * 2 == 67_108_864
 
     print("\n== layout activity: 64 GPUs in servers of 8, model needs 8-way splitting")
