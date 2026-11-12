@@ -25,7 +25,7 @@ const canonical = new URL(Astro.url.pathname, Astro.site).href;
 const imageUrl = new URL(image ?? "/og/site.png", Astro.site).href;
 const path = Astro.url.pathname;
 const isHome = path === "/";
-const headTitle = isHome ? `${site.name} | AI / Machine Learning Engineer` : title ? `${title} | ${site.name}` : site.name;
+const headTitle = isHome ? `${site.name} | AI/ML Engineer and Machine Learning Researcher` : title ? `${title} | ${site.name}` : site.name;
 const graph = [...(isHome ? [person, { "@type": "WebSite", "@id": `${site.url}/#website`, url: `${site.url}/`, name: site.name, publisher: { "@id": person["@id"] } }] : []), ...schema];
 const megaPosts = await publishedPosts();
 const latest = [...megaPosts].sort((a, b) => b.data.date.getTime() - a.data.date.getTime() || b.data.series_order - a.data.series_order)[0];

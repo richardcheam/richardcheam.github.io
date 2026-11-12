@@ -2,7 +2,7 @@ export const site = {
   title: "RICHARD CHEAM",
   /** Name as written in browser tabs and search results. */
   name: "Richard Cheam",
-  description: "Richard Cheam is an AI and machine learning engineer working on speech AI, LLMs and ML research. Projects, technical blog and paper reviews.",
+  description: "Portfolio of Richard Cheam, AI/ML engineer in speech AI, deep learning, foundation models and ML research: projects, technical blog and paper reviews.",
   url: "https://richardcheam.github.io",
 };
 
