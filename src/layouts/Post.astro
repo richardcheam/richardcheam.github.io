@@ -28,7 +28,7 @@ const reviews = post.data.series
   : [];
 import SignatureMark from "../components/SignatureMark.astro";
 ---
-<Base title={title} description={excerpt} mainClass="site-main site-main--article" image={`/og/blog/${post.id}.png`}>
+<Base title={title} description={excerpt} mainClass="site-main site-main--article" image={`/og/blog/${post.id}.png`} schema={[{ "@type": "BlogPosting", headline: title, description: excerpt, datePublished: date.toISOString().slice(0, 10), url: `https://richardcheam.github.io/blog/${post.id}/`, image: `https://richardcheam.github.io/og/blog/${post.id}.png`, author: { "@id": "https://richardcheam.github.io/#person", "@type": "Person", name: "Richard Cheam", url: "https://richardcheam.github.io/" } }]}>
   <header class="page-heading blog-heading" data-reveal>
     <p class="blog-all-posts"><a href="/blog/">← All posts</a></p>
     <p class="blog-kicker">{seriesTitle}</p>
