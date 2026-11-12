@@ -25,7 +25,7 @@ $$
 \nabla_\theta J = \mathbb{E}_{y \sim \pi_\theta}\big[R(y)\,\nabla_\theta \log \pi_\theta(y)\big].
 $$
 
-- $\nabla_\theta \log \pi_\theta(y)$: the direction that makes response $y$ more likely, the same gradient as the SFT loss on $y$.
+- $\nabla_\theta \log \pi_\theta(y)$: the direction that makes response $y$ more likely. The SFT loss on $y$ is $-\log \pi_\theta(y)$, so its gradient points the opposite way; a step along $\nabla_\theta \log \pi_\theta(y)$ is the same as a gradient-descent step on the SFT loss for that response.
 - $R(y)$: how much to move in that direction.
 
 In words: sample a response, and weight the gradient of that response's log-probability by its reward (or, below, its advantage). Written as a loss to minimize, it is $-R(y)\log \pi_\theta(y)$, a negative log-likelihood like SFT's, weighted by reward and on the model's own samples. For a language model, a terminal reward is assigned once per response, and $\log \pi_\theta(y)$ is the sum of the log-probabilities of $y$'s tokens, so the same reward weights every token's term.

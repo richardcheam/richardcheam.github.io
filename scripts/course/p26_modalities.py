@@ -21,5 +21,5 @@ assert per_s == 100
 
 section("activity: an 8,192-position context")
 print(f" {8192 // 196} images of 224 x 224; about {8192 / 1.3:,.0f} words of English text")
-print(f" audio, hypothetical flattened stream of 100 symbols/s: {8192 / 100:.0f} s; Moshi temporal layout, 12.5 positions/s: {8192 / 12.5:.0f} s")
+print(f" audio, hypothetical flattened stream of 100 symbols/s: {8192 / 100:.0f} s; hypothetical 8,192 temporal positions at 12.5/s: {8192 / 12.5:.0f} s")
 assert 8192 // 196 == 41 and round(8192 / 100) == 82 and round(8192 / 12.5) == 655

@@ -713,7 +713,7 @@
   {
     "id": "X2-01",
     "status": "Derived",
-    "claim": "A 224 x 224 image is 196 ViT patches; Mimi in Moshi produces 12.5 frames x 8 codebooks = 100 codec symbols per second, but Moshi's temporal transformer sees 12.5 positions per second, with a depth transformer generating each frame's codebooks; an 8,192-position window is about 82 s only for a hypothetical flattened stream, 655 s in Moshi's layout.",
+    "claim": "A 224 x 224 image is 196 ViT patches; Mimi in Moshi produces 12.5 frames x 8 codebooks = 100 codec symbols per second, but Moshi's temporal transformer sees 12.5 positions per second, with a depth transformer generating each frame's codebooks; an 8,192-position window is about 82 s only for a hypothetical flattened stream, 655 s for a hypothetical window of 8,192 temporal positions in Moshi's layout (arithmetic, not Moshi's supported context).",
     "sourceIds": [
       "vit",
       "clip",
