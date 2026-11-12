@@ -1,16 +1,16 @@
 ---
 title: "A complete small training run: from raw text to a checkpoint you can trust"
-date: 2026-11-11
+date: 2026-11-10
 category: deep-learning
 read_time: "17 min"
 series_order: 6
 series: model-development
 featured: false
 published: true
-excerpt: "Train a one-million-parameter language model on a laptop CPU, end to end: tokenizer, data splits, model, AdamW with warmup and cosine decay, gradient clipping, validation, checkpoints that resume exactly, and a precision check. Then break it on purpose and read the curves."
+excerpt: "Train a one-million-parameter language model on a laptop CPU, end to end: tokenizer, data splits, model, AdamW with warmup and cosine decay, gradient clipping, validation, checkpoints that resume bit for bit, and a precision check. Then break it on purpose and read the curves."
 question: "What does a complete small training run involve, and how do you know it is working?"
 my_work: "Five real training runs of a 1.07M-parameter decoder on Tiny Shakespeare on an Apple M1 CPU (about 75 seconds each), plus a stop-and-resume test and a BF16 evaluation check; every number on the page comes from scripts/course/p6_train.py."
-result: "The initial loss matched ln V (7.65 against 7.62); the baseline reached 4.13 validation loss; skipping warmup cost 0.31 nats and a ten times larger learning rate 0.65; resuming from a checkpoint reproduced the run exactly; BF16 evaluation matched FP32."
+result: "The initial loss matched ln V (7.65 against 7.62); the baseline reached 4.13 validation loss; skipping warmup cost 0.31 nats and a ten times larger learning rate 0.65; resuming from a checkpoint at step 300 reproduced the uninterrupted run bit for bit: every unrounded loss, the final weights and the AdamW state; BF16 evaluation matched FP32."
 evidence_limit: "One tiny model on 1 MB of text for about 3.5 passes; behaviour at scale (loss spikes, divergence) is described from the other posts, not reproduced here."
 lesson: "A trustworthy run checks itself: initial loss, a held-out curve, exact resumption and a precision check are cheap and catch most silent errors."
 ---
@@ -96,7 +96,7 @@ It has learned the layout of a play, line lengths, punctuation and a vocabulary 
 
 A checkpoint must contain everything that determines what happens next: the model weights, the optimizer's moments and step count, the position in the learning-rate schedule, and the state of the data sampler and random number generators. Leave out the optimizer state and the run restarts Adam from zero moments, which behaves like a sudden warmup-free jump; leave out the data state and it re-reads data it has already seen.
 
-The test is simple and worth automating: stop a run halfway, save, rebuild everything from the checkpoint and continue, then compare with a run that never stopped. Stopping this run at step 300 and resuming reproduced the uninterrupted run's training loss **exactly**, at every one of the remaining 300 steps. On GPUs, nondeterministic kernels make bitwise identity harder, but the curves should agree within noise.
+The test is simple and worth automating: stop a run halfway, save, rebuild everything from the checkpoint and continue, then compare with a run that never stopped. Stopping this run at step 300 and resuming reproduced the uninterrupted run **bit for bit**: the unrounded training loss at every one of the remaining 300 steps, every weight tensor at the end, and AdamW's moment estimates and step counts. Comparing rounded losses would not be enough, because two runs can agree to four decimals while their states drift apart; comparing the final model and optimizer state is what shows nothing was lost. On CPU, with one process and fixed seeds, the computation is deterministic, so bitwise equality is the right test. On GPUs, nondeterministic kernels make bitwise identity harder, but the curves should agree within noise.
 
 ## 8. Read the curves
 

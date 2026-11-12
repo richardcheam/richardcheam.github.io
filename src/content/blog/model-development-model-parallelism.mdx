@@ -1,6 +1,6 @@
 ---
 title: "Model parallelism: splitting layers, sequences and experts across GPUs"
-date: 2026-11-11
+date: 2026-11-10
 category: deep-learning
 read_time: "15 min"
 series_order: 11
@@ -10,7 +10,7 @@ published: true
 excerpt: "When one layer's matrices, one sequence's activations or one model's experts no longer fit or run fast enough on a GPU, the model itself is split. Learn how tensor parallelism splits a matrix multiplication exactly, why pipelines have bubbles and how microbatches shrink them, and what sequence, context and expert parallelism add."
 question: "How are layers, sequences and experts split across GPUs, and what does each split cost?"
 my_work: "A concept post; tensor-parallel MLP splitting executed on two CPU processes against the unsplit layer; pipeline bubble formulas and layout guidance from Narayanan et al. (2021); sequence parallelism from Korthikanti et al. (2022); expert parallelism from the DeepSeek-V3 report."
-result: "Splitting the first MLP matrix by columns and the second by rows needs one all-reduce per sub-layer and reproduces the unsplit output; a pipeline of p stages with m microbatches idles a fraction (p − 1)/m of the time; tensor parallelism belongs within a server, pipeline parallelism across servers."
+result: "Splitting the first MLP matrix by columns and the second by rows needs one all-reduce per sub-layer and reproduces the unsplit output; a pipeline of p stages with m microbatches spends (p − 1)/m as much time idle as working, so (p − 1)/(m + p − 1) of elapsed time is idle; tensor parallelism belongs within a server, pipeline parallelism across servers."
 evidence_limit: "Toy executed checks on CPU; bubble formulas assume equal stage times; layout guidance is the Megatron-LM authors' for their hardware."
 lesson: "Each way of splitting a model trades a different communication pattern for memory; place the most communication-heavy split on the fastest links."
 ---
@@ -27,7 +27,7 @@ The feed-forward network computes $Z = \text{GeLU}(XA)\,B$, with $X$ the token r
 
 The order matters. Splitting $A$ by rows instead would leave each GPU with part of a sum *inside* the activation, and $\text{GeLU}(u + v) \neq \text{GeLU}(u) + \text{GeLU}(v)$. Running both versions on two processes makes the point: the column-then-row split matches the unsplit layer to within $4 \times 10^{-6}$, while the row split is wrong by up to 2.55.
 
-Attention splits the same way, with each GPU taking whole heads. So each layer needs one all-reduce after attention and one after the MLP in the forward pass, and two more in the backward pass (Narayanan et al., §2.3). Those all-reduces carry activations, $b \times s \times h$ values: for one sequence of 4,096 tokens at width 8,192, about 67 MB in BF16, four times per layer per step. That frequency is why tensor parallelism needs very fast links.
+Attention splits the same way, with each GPU taking whole heads. So each layer needs one all-reduce after attention and one after the MLP in the forward pass, and two more in the backward pass (Narayanan et al., §2.3). Those all-reduces carry activations, $b \times s \times h$ values: for one sequence of 4,096 tokens at width 8,192, about 67 MB in BF16, four times per layer for every microbatch. That frequency is why tensor parallelism needs very fast links.
 
 ## Pipeline parallelism: splitting the layers
 
@@ -36,10 +36,10 @@ Attention splits the same way, with each GPU taking whole heads. So each layer n
 Splitting the batch into $m$ microbatches lets stages work on different microbatches at once, but filling and draining the pipeline still leaves idle time, the **bubble**. With forward and backward times $t_f$ and $t_b$ per microbatch per stage, the bubble lasts $(p-1)(t_f + t_b)$ against useful work of $m(t_f + t_b)$ (Narayanan et al., §2.2.1):
 
 $$
-\text{bubble fraction} = \frac{p - 1}{m}.
+\text{bubble overhead} = \frac{p - 1}{m}\ \text{(idle time relative to useful work)}, \qquad \text{idle share of elapsed time} = \frac{p - 1}{m + p - 1}.
 $$
 
-With 4 stages and 4 microbatches the pipeline idles 75% as long as it works; with 64 microbatches, 4.7%. Many microbatches make the bubble small, but in the original GPipe schedule every microbatch's activations stay in memory until its backward pass. The **1F1B** schedule fixes that: after a warm-up, each stage alternates one forward and one backward pass, so at most $p$ microbatches are in flight. **Interleaving** goes further: each GPU holds $v$ smaller, non-contiguous chunks of layers, shrinking the bubble to $\frac{1}{v}\cdot\frac{p-1}{m}$ at the cost of more communication (§2.2.2).
+The paper's "bubble fraction" is the first: overhead measured against useful work. With 4 stages and 4 microbatches, a simplified schedule gives each stage 4 work slots and 3 idle slots: an overhead of $3/4 = 75\%$, and $3/7 \approx 43\%$ of elapsed time spent idle. With 64 microbatches, the overhead is 4.7% and the idle share 4.5%; the two measures converge as the bubble shrinks. Many microbatches make the bubble small, but in the original GPipe schedule every microbatch's activations stay in memory until its backward pass. The **1F1B** schedule fixes that: after a warm-up, each stage alternates one forward and one backward pass, so at most $p$ microbatches are in flight. **Interleaving** goes further: each GPU holds $v$ smaller, non-contiguous chunks of layers, shrinking the overhead to $\frac{1}{v}\cdot\frac{p-1}{m}$ at the cost of more communication (§2.2.2).
 
 ## Sequence and context parallelism
 
@@ -57,8 +57,8 @@ Real runs combine data, tensor, pipeline and sometimes context and expert parall
 
 | Split | Communicates | How often |
 |---|---|---|
-| Data (with ZeRO) | gradients, gathered weights | once per step (stage 3: per layer) |
-| Tensor | activations, all-reduce | 4 times per layer per step |
+| Data (with ZeRO) | gradients, gathered weights | gradients once per optimizer step if accumulation skips synchronization; stage 3 also gathers weights per layer for every microbatch |
+| Tensor | activations, all-reduce | 4 times per layer for every microbatch |
 | Pipeline | activations at stage boundaries | per microbatch, point to point |
 | Context | key-value blocks around a ring | per attention layer |
 | Expert | tokens, all-to-all | 2 per MoE layer, each direction |
@@ -67,15 +67,15 @@ Narayanan et al.'s first rule of thumb follows from that table: use tensor paral
 
 Everyday picture: a factory. Data parallelism is several identical factories. Tensor parallelism is several workers sharing one heavy part at the same bench, constantly passing it between them. Pipeline parallelism is an assembly line between halls. You put the bench-sharers in the same room and let the assembly line cross the yard.
 
-**Try it: size a bubble.** A model is split into 16 pipeline stages, and the global batch gives each pipeline 32 microbatches. What fraction of time is lost to the bubble? What if each GPU holds 4 interleaved chunks?
+**Try it: size a bubble.** A model is split into 16 pipeline stages, and the global batch gives each pipeline 32 microbatches. How large is the bubble overhead, and what share of elapsed time is idle? What if each GPU holds 4 interleaved chunks?
 
-**Answer.** $(16-1)/32 \approx$ **0.47**: nearly half as much idle time as useful work, a poor configuration. With 4 interleaved chunks, $0.47/4 \approx$ **0.12**, at the price of four times as many stage-boundary transfers. The alternatives are more microbatches (a larger global batch, which may not be wanted), fewer stages (more tensor parallelism or sharding instead), or both.
+**Answer.** Overhead $(16-1)/32 \approx$ **0.47**: nearly half as much idle time as useful work, so $15/47 \approx$ **32%** of elapsed time is idle, a poor configuration. With 4 interleaved chunks the overhead is $0.47/4 \approx 0.12$ and the idle share $3.75/35.75 \approx$ **10%**, at the price of four times as many stage-boundary transfers. The alternatives are more microbatches (a larger global batch, which may not be wanted), fewer stages (more tensor parallelism or sharding instead), or both.
 
 
 ## What to remember
 
 - Tensor parallelism splits the first matrix by columns and the second by rows, so the activation applies locally and one all-reduce per sub-layer restores the exact result; it needs the fastest links.
-- A pipeline of $p$ stages with $m$ microbatches idles a fraction $(p-1)/m$; 1F1B bounds in-flight activations; interleaving divides the bubble by the number of chunks.
+- A pipeline of $p$ stages with $m$ microbatches has bubble overhead $(p-1)/m$ relative to useful work, so $(p-1)/(m+p-1)$ of elapsed time is idle; 1F1B bounds in-flight activations; interleaving divides the overhead by the number of chunks.
 - Sequence parallelism splits norm and dropout activations along the sequence at no extra communication; context parallelism splits attention itself in a ring.
 - Expert parallelism moves tokens to experts with all-to-all exchanges, and load balance decides its speed.
 - Put tensor parallelism within a server and pipeline parallelism across servers.

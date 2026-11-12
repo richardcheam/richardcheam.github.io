@@ -1,6 +1,6 @@
 ---
 title: "Evaluating an application: test sets, judges, error bars, feedback and security"
-date: 2026-11-11
+date: 2026-11-10
 category: deep-learning
 read_time: "14 min"
 series_order: 24
@@ -60,7 +60,7 @@ The test set is a snapshot; users keep changing. Production adds information the
 - **Explicit feedback** (ratings, corrections) is sparse and biased towards strong reactions; **implicit signals** (a rephrased question, a copied answer, an escalation to a human) are plentiful but noisy.
 - **Regression testing:** every model swap, prompt edit or retrieval change is run against the fixed test set before release, so improvements in one place do not break another.
 - **Closing the loop:** production failures, once understood, become new test items. Over time the test set grows towards the real distribution of hard cases.
-- **Controlled comparisons** (A/B tests) measure effects on real users when offline metrics are not enough, with the same paired logic and error bars.
+- **Controlled comparisons** (A/B tests) measure effects on real users when offline metrics are not enough. They differ from the paired offline comparison above: users or sessions are randomly assigned to one system or the other, so the two groups are independent, and the analysis compares group outcomes with error bars for independent samples. Randomization is what makes the comparison fair; it typically needs many more observations than a paired test on shared items.
 
 ## Security and privacy
 

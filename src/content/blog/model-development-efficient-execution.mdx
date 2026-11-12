@@ -1,6 +1,6 @@
 ---
 title: "Efficient execution: IO-aware attention, mixed precision and FP8"
-date: 2026-11-11
+date: 2026-11-10
 category: deep-learning
 read_time: "14 min"
 series_order: 12
@@ -57,7 +57,7 @@ The name E4M3 covers two variants, which is a common source of confusion: the OC
 
 **FP16 and loss scaling.** FP16 has decent precision but a narrow range. Gradients are often tiny: in FP16 anything below about $2^{-24} \approx 6 \times 10^{-8}$ becomes zero. Micikevicius et al. found about 5% of weight-gradient values in that region for one speech model, and much of an object-detection network's activation-gradient histogram below FP16's range ([Micikevicius et al., 2018](https://arxiv.org/abs/1710.03740), §§3.1–3.2). Their fix was **loss scaling**: multiply the loss by a large factor before the backward pass, so gradients are shifted into FP16's range, and divide by the same factor before the update. A gradient of $2^{-25}$ is zero in FP16, but scaled by 1,024 it survives and is recovered exactly. They also kept an FP32 master copy of the weights, so small updates are not lost (§3.1).
 
-**BF16** has the same range as FP32, with less precision. Gradients do not underflow, so loss scaling is unnecessary, and BF16 has largely replaced FP16 for training. Its coarse precision is why accumulation still happens in FP32: as the [small training run](/blog/model-development-small-training-run/#5-precision) showed, $1 + 0.001$ is exactly 1 in BF16. In practice, matrix multiplications take BF16 inputs and accumulate in FP32; optimizer state and often master weights stay in FP32.
+**BF16** has the same exponent range as FP32, with less precision. Gradients of the sizes that defeat FP16 fit comfortably, so loss scaling is generally unnecessary, and BF16 has largely replaced FP16 for training. Underflow is still possible below about $10^{-38}$, and small values lose precision long before that, so it is rare rather than impossible. Its coarse precision is why accumulation still happens in FP32: as the [small training run](/blog/model-development-small-training-run/#5-precision) showed, $1 + 0.001$ is exactly 1 in BF16. In practice, matrix multiplications take BF16 inputs and accumulate in FP32; optimizer state and often master weights stay in FP32.
 
 ## FP8 and the outlier problem
 
@@ -71,7 +71,7 @@ Everyday picture: one ruler for a whole drawing that includes a skyscraper and a
 
 **Try it: will it underflow?** A gradient of $3 \times 10^{-9}$ is computed in FP16. Does it survive? With a loss scale of 4,096? In BF16?
 
-**Answer.** In FP16 it is below about $6 \times 10^{-8}$ and becomes **zero**. Scaled by 4,096 it becomes about $1.2 \times 10^{-5}$, which FP16 represents (as a subnormal, with reduced precision), so it **survives** and is divided back after the backward pass. In BF16, with FP32's range, it **survives** without any scaling, though only to about two or three significant digits.
+**Answer.** In FP16 it is below about $6 \times 10^{-8}$ and becomes **zero**. Scaled by 4,096 it becomes about $1.2 \times 10^{-5}$, which FP16 represents (as a subnormal, with reduced precision), so it **survives** and is divided back after the backward pass. In BF16, with FP32's exponent range, it **survives** without any scaling, though only to about two or three significant digits; BF16 would underflow only far below that, around $10^{-38}$.
 
 
 ## What to remember

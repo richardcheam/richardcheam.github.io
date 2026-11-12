@@ -1,6 +1,6 @@
 ---
 title: "Beyond text: what transfers to vision, speech and multimodal models"
-date: 2026-11-11
+date: 2026-11-10
 category: deep-learning
 read_time: "12 min"
 series_order: 26
@@ -10,7 +10,7 @@ published: true
 excerpt: "Almost everything in this series was taught with language models. Much of it transfers directly to images, speech and multimodal systems; some of it does not. Learn which principles carry over, how images and sound become tokens, where objectives and architectures differ, and why a minute of audio can cost thirty times more tokens than its transcript."
 question: "Which principles carry over to vision, speech and multimodal models, and where do objectives and architectures differ?"
 my_work: "A concept post connecting this series to the site's speech and Foundations posts; token counts computed from ViT's patch size and Mimi's frame rate; method summaries from the ViT, CLIP and LLaVA papers."
-result: "A 224 × 224 image becomes 196 ViT patches; a second of speech becomes 100 audio-codec tokens (12.5 frames × 8 codebooks), about 31 times the tokens of its transcript; vision–language models connect a vision encoder to a language model through a learned projection."
+result: "A 224 × 224 image becomes 196 ViT patches; a second of speech becomes 100 Mimi codec symbols (12.5 frames × 8 codebooks), which Moshi models as 12.5 positions per second of its main transformer, with a smaller depth transformer handling the 8 codebooks within each frame; vision–language models connect a vision encoder to a language model through a learned projection."
 evidence_limit: "Token rates are for the specific tokenizers cited; the speaking rate is illustrative."
 lesson: "The training machinery transfers: tokens, next-token or denoising objectives, scaling, distributed training, post-training and evaluation discipline. What changes is how the signal is tokenized, how many tokens it costs, which objective fits it, and how quality is judged."
 ---
@@ -32,13 +32,13 @@ Text arrives as discrete symbols. Images and sound are continuous and much large
 
 **Images.** The Vision Transformer cuts an image into fixed-size patches, 16 × 16 pixels, flattens each into a vector and treats the patches as a sequence ([Dosovitskiy et al., 2021](https://arxiv.org/abs/2010.11929)). A 224 × 224 image becomes **196** patches; a 1,024 × 1,024 image becomes 4,096, and because attention cost grows with the square of sequence length, resolution is expensive. Earlier vision models used [convolutions](/blog/foundations-convolutions/), which build in the assumption that nearby pixels matter together; ViT drops that assumption and needs more data to compensate, but then scales well.
 
-**Speech.** Audio is sampled thousands of times per second (24,000 for the codecs on this site), far too long a sequence to model directly. A **neural audio codec** compresses it: Mimi turns speech into 12.5 frames per second, and with [residual vector quantization](/blog/residual-vector-quantization/) each frame becomes 8 discrete codes in Moshi's setting, **100 tokens per second** ([Mimi post](/blog/mimi-codec-explained/); [Moshi review](/paper-reviews/moshi/)). Other systems skip discrete tokens and model continuous latents, as [Pocket TTS](/blog/pocket-tts-calm-explained/) does.
+**Speech.** Audio is sampled thousands of times per second (24,000 for the codecs on this site), far too long a sequence to model directly. A **neural audio codec** compresses it: Mimi turns speech into 12.5 frames per second, and with [residual vector quantization](/blog/residual-vector-quantization/) each frame becomes 8 discrete codes in Moshi's setting: **100 codec symbols per second**, but only **12.5 positions per second** for Moshi's main (temporal) transformer, because a small depth transformer generates the 8 codebooks within each frame ([Mimi post](/blog/mimi-codec-explained/); [Moshi review](/paper-reviews/moshi/)). Other systems skip discrete tokens and model continuous latents, as [Pocket TTS](/blog/pocket-tts-calm-explained/) does.
 
 The token rate decides cost, exactly as tokenizer premiums did for languages in the [tokenization post](/blog/model-development-tokenization/#what-the-same-text-costs).
 
-**Try it: what fits in a context?** An 8,192-token context holds how many 224 × 224 images at one token per patch? How many seconds of audio at 100 tokens per second? How much English text, at about 1.3 tokens per word?
+**Try it: what fits in a context?** An 8,192-token context holds how many 224 × 224 images at one token per patch? How many seconds of audio if the 100 codec symbols per second were flattened into one sequence, and how many as Moshi actually lays them out, 12.5 positions per second? How much English text, at about 1.3 tokens per word?
 
-**Answer.** $8{,}192 / 196 \approx$ **41 images**; $8{,}192 / 100 \approx$ **82 seconds** of audio; about **6,300 words** of text. A minute of speech, about 150 words, is roughly 195 text tokens but 6,000 codec tokens: **31 times more**. Long audio or high-resolution images strain context, KV cache and compute in a way text rarely does, which is why multimodal systems compress aggressively and why the [inference arithmetic](/blog/model-development-inference-serving/) bites harder there.
+**Answer.** $8{,}192 / 196 \approx$ **41 images**; about **6,300 words** of text. For audio, a hypothetical flattened stream of all 100 symbols per second fills the window in $8{,}192 / 100 \approx$ **82 seconds**; Moshi's layout, one temporal position per 80 ms frame, covers $8{,}192 / 12.5 \approx$ **655 seconds**. How the codebooks are arranged changes the sequence length by a factor of eight, so symbol counts alone do not give compute or KV-cache cost: those depend on the architecture (here, a large temporal transformer over 12.5 positions per second plus a small depth transformer per frame). High-resolution images and long audio still strain context in ways text rarely does, which is why multimodal systems compress aggressively.
 
 ## What changes: the objective
 
@@ -65,8 +65,8 @@ Everyday picture: a factory that once made only books retooling for photographs 
 ## What to remember
 
 - Transformers, training mechanics, distributed training, data discipline, scaling laws and post-training transfer across modalities.
-- The first design question for a new modality is tokenization: patches for images (196 for a 224 × 224 image), codec frames for speech (100 tokens per second for Mimi in Moshi).
-- Token rates set cost: a minute of speech is about 31 times as many tokens as its transcript.
+- The first design question for a new modality is tokenization: patches for images (196 for a 224 × 224 image), codec frames for speech (Mimi: 12.5 frames per second, 100 codec symbols per second over 8 codebooks).
+- Sequence length depends on layout as well as on the codec: Moshi models 12.5 positions per second and generates each frame's 8 codebooks with a depth transformer, so symbol counts are not a direct compute or KV-cache multiplier.
 - Objectives follow the data: next-token prediction, contrastive alignment of pairs (CLIP), denoising (diffusion, flow) or transcription (Whisper).
 - Vision–language models often join a vision encoder to a language model through a learned projection, then instruction-tune.
 - Quality is judged differently per modality; the evaluation discipline is the same.

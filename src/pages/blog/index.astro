@@ -11,6 +11,12 @@ const posts = (await publishedPosts()).sort((a, b) => b.data.date.getTime() - a.
 const topics = series.map((t) => ({ ...t, n: posts.filter((p) => p.data.series === t.key).length })).filter((t) => t.n > 0);
 // Reading path for newcomers: the featured series in its intended order.
 const path = posts.filter((p) => p.data.series === series[0].key).sort((a, b) => a.data.series_order - b.data.series_order);
+// Each series view starts with its first post and, when the whole series launched together, its one shared date.
+const seriesIntros = topics.map((t) => {
+  const inSeries = posts.filter((p) => p.data.series === t.key).sort((a, b) => a.data.series_order - b.data.series_order);
+  const days = new Set(inSeries.map((p) => isoDay(p.data.date)));
+  return { key: t.key, first: inSeries[0], sharedDate: days.size === 1 && inSeries.length > 1 ? inSeries[0].data.date : null, n: inSeries.length };
+});
 const position = (p: (typeof posts)[number]) => {
   const inSeries = posts.filter((q) => q.data.series === p.data.series).sort((a, b) => a.data.series_order - b.data.series_order);
   return { at: inSeries.indexOf(p) + 1, of: inSeries.length };
@@ -49,6 +55,13 @@ const position = (p: (typeof posts)[number]) => {
       })}
     </nav>
 
+    {seriesIntros.map((s) => (
+      <p class="blog-series-start" data-series-intro={s.key} data-shared-date={s.sharedDate ? "" : undefined} hidden>
+        Start with <a href={postUrl(s.first)}>Post 1: {s.first.data.title}</a>, then read in order.
+        {s.sharedDate && <> All {s.n} posts were published <time datetime={isoDay(s.sharedDate)}>{shortDate(s.sharedDate)}</time>.</>}
+      </p>
+    ))}
+
     <p class="blog-filter-count" data-filter-count data-filter-noun="posts" aria-live="polite">Showing {posts.length} of {posts.length} posts</p>
 
     {posts.length > 0 ? (
@@ -58,7 +71,7 @@ const position = (p: (typeof posts)[number]) => {
             const label = categoryLabel(post.data.category);
             const pos = position(post);
             return (
-              <li class="blog-post-row" data-filter-card data-filter-facets={`category:${post.data.category}${post.data.series ? ` series:${post.data.series}` : ""}`} data-filter-text={`${post.data.title.toLowerCase()} ${label.toLowerCase()} ${post.data.category} ${stripHtml(post.data.excerpt).toLowerCase()}`}>
+              <li class="blog-post-row" data-filter-card data-series-order={post.data.series ? post.data.series_order : undefined} data-filter-facets={`category:${post.data.category}${post.data.series ? ` series:${post.data.series}` : ""}`} data-filter-text={`${post.data.title.toLowerCase()} ${label.toLowerCase()} ${post.data.category} ${stripHtml(post.data.excerpt).toLowerCase()}`}>
                 <div class="blog-post-main">
                   {post.data.series && <p class="blog-reading-order">Post {pos.at} of {pos.of}</p>}
                   <div class="blog-post-titleline">

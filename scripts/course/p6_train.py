@@ -125,7 +125,7 @@ def train(peak, warmup, start=None, stop=STEPS, log=True, clip=True):
     first = 0
     if start:  # resume from a checkpoint dictionary
         model.load_state_dict(start["model"]); opt.load_state_dict(start["opt"]); gen.set_state(start["gen"]); first = start["step"]
-    curve = {"step": [], "train": [], "val": [], "lr": [], "grad_norm": []}
+    curve = {"step": [], "train": [], "train_raw": [], "val": [], "lr": [], "grad_norm": []}
     for step in range(first, stop):
         if step % EVAL_EVERY == 0 or step == STEPS - 1:
             model.eval(); curve["val"].append([step, round(evaluate(model), 4)]); model.train()
@@ -137,7 +137,7 @@ def train(peak, warmup, start=None, stop=STEPS, log=True, clip=True):
         loss.backward()
         norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0 if clip else float("inf"))
         opt.step()
-        curve["step"].append(step); curve["train"].append(round(loss.item(), 4))
+        curve["step"].append(step); curve["train"].append(round(loss.item(), 4)); curve["train_raw"].append(loss.item())
         curve["lr"].append(lr_at(step, peak, warmup)); curve["grad_norm"].append(round(norm.item(), 4))
         if log and step % 100 == 0:
             print(f"  step {step}: train {loss.item():.3f}, lr {lr_at(step, peak, warmup):.2e}, grad norm {norm.item():.2f}")
@@ -160,16 +160,25 @@ if __name__ == "__main__":
         runs[name] = curve
         print(f"  final train {curve['train'][-1]:.3f}, val {curve['val'][-1][1]:.3f}, {time.time() - t0:.0f}s")
         if name == "baseline":
-            base_curve, base_model = curve, m
+            base_curve, base_model, base_ckpt = curve, m, ckpt
     # Resume test: stop at step 300, save, rebuild everything, continue to 600.
     _, first_half, ckpt = train(3e-3, 50, stop=300, log=False)
     path = os.path.join(os.path.dirname(OUT), "p6_ckpt.pt")
     torch.save(ckpt, path); ckpt = torch.load(path, weights_only=False); os.remove(path)
-    _, second_half, _ = train(3e-3, 50, start=ckpt, log=False)
-    resumed = first_half["train"] + second_half["train"]
-    same = resumed == base_curve["train"]
-    print(f"resume at 300 reproduces the uninterrupted run exactly: {same}")
+    _, second_half, end_ckpt = train(3e-3, 50, start=ckpt, log=False)
+    # Strict comparison: unrounded float losses at every step, and every tensor of the final
+    # model and optimizer state, compared bit for bit with the uninterrupted run.
+    losses_equal = first_half["train_raw"] + second_half["train_raw"] == base_curve["train_raw"]
+    model_equal = all(torch.equal(a, b) for a, b in zip(end_ckpt["model"].values(), base_ckpt["model"].values()))
+    sa, sb = end_ckpt["opt"]["state"], base_ckpt["opt"]["state"]
+    opt_equal = sa.keys() == sb.keys() and all(torch.equal(sa[k][n], sb[k][n]) for k in sa for n in sa[k])
+    same = losses_equal and model_equal and opt_equal
+    print(f"resume at 300: unrounded losses identical {losses_equal}, final weights identical {model_equal}, optimizer state identical {opt_equal}")
+    assert same
     runs["meta"]["resume_identical"] = same
+    for c in runs.values():
+        if isinstance(c, dict):
+            c.pop("train_raw", None)
     # Precision: what BF16 does to a small update and to the validation loss.
     w = torch.tensor(1.0, dtype=torch.bfloat16)
     print(f"bf16: 1.0 + 0.001 = {(w + 0.001).item()}, spacing above 1 = {2 ** -7}; fp32: {(torch.tensor(1.0) + 0.001).item():.4f}")

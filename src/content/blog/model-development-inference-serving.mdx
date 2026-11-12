@@ -1,6 +1,6 @@
 ---
 title: "Inference and serving: latency, throughput, KV cache and quantization"
-date: 2026-11-11
+date: 2026-11-10
 category: deep-learning
 read_time: "15 min"
 series_order: 23
@@ -10,7 +10,7 @@ published: true
 excerpt: "Serving a model is a different problem from training it: generation is sequential and limited by memory bandwidth, not arithmetic. Work out why one sequence cannot exceed about 200 tokens per second on an H100, how batching trades latency for throughput, why the KV cache sets how many users fit, and what quantization, paged memory and speculative decoding change."
 question: "What determines latency, throughput and cost when serving a model, and what does quantization trade?"
 my_work: "A concept post; bounds computed for Llama 3 8B with the H100 figures used in CS336 lecture 10; INT8 per-tensor and per-channel quantization compared on a toy matrix; results from the vLLM, speculative decoding, GPTQ and AWQ papers."
-result: "Reading 16 GB of BF16 weights per step limits one sequence to about 209 tokens per second; batching 64 sequences raises total throughput about 30 times while each step slows from 4.9 to 9.9 ms; per-channel INT8 scales cut the smallest channel's error from 74% to under 1%."
+result: "Counting memory traffic alone, reading 16 GB of BF16 weights per step bounds one sequence at about 209 tokens per second; in the same bandwidth-only model, batching 64 sequences raises the throughput bound about 30 times while the lower bound on step time rises from 4.9 to 9.9 ms; per-channel INT8 scales cut the smallest channel's error from 74% to under 1%."
 evidence_limit: "Bounds ignore overheads and assume perfect overlap; real systems reach a fraction of them. Paper results are on their models and hardware."
 lesson: "Prefill is compute-bound and sets time to first token; decode is memory-bound and sets time per token. Batching, KV-cache management, quantization and speculative decoding each attack the memory traffic of decode."
 ---
@@ -32,9 +32,9 @@ At each decode step the GPU must read every weight once. Llama 3 8B in BF16 is 1
 
 ## Batching: throughput against latency
 
-The weights are the same for every sequence, so a step can process many sequences while reading the weights once. Each sequence adds only its own KV cache (128 KiB per token for Llama 3 8B). At 2,048 tokens of context:
+The weights are the same for every sequence, so a step can process many sequences while reading the weights once. Each sequence adds only its own KV cache (128 KiB per token for Llama 3 8B). The table counts only the bytes read per step (weights once, plus each sequence's KV cache at 2,048 tokens of context) at the full 3.35 TB/s, with no compute, kernel overhead or scheduling time, so its step times are **lower bounds** and its throughputs **upper bounds**:
 
-| Batch | Time per step | Total tokens per second |
+| Batch | Step time (lower bound) | Total tokens per second (upper bound) |
 |---|---|---|
 | 1 | 4.9 ms | 205 |
 | 8 | 5.4 ms | 1,472 |
@@ -47,7 +47,7 @@ Requests arrive and finish at different times. **Continuous batching** adds new 
 
 ## The KV cache decides how many users fit
 
-Large batches need memory for every sequence's KV cache. With BF16 weights taking 16 GB, an 80 GB GPU has about 64 GB left: room for about **60 sequences of 8,192 tokens** at 128 KiB per token. The KV cache, not the weights, caps the batch. That is why [grouped-query attention](/blog/model-development-decoder-architecture/#grouped-query-attention-and-the-kv-cache), which shrank the cache fourfold, matters so much for serving.
+Large batches need memory for every sequence's KV cache. With BF16 weights taking 16 GB, an 80 GB GPU has about 64 GB left: room for at most about **60 sequences of 8,192 tokens** at 128 KiB per token, before activations, temporary buffers and fragmentation take their share. The KV cache, not the weights, caps the batch. That is why [grouped-query attention](/blog/model-development-decoder-architecture/#grouped-query-attention-and-the-kv-cache), which shrank the cache fourfold, matters so much for serving.
 
 Managing that memory is its own problem. Sequences grow unpredictably, and reserving each one's maximum length in advance wastes most of the memory. **PagedAttention** stores each sequence's KV cache in fixed-size blocks allocated on demand, like pages of virtual memory, and lets sequences share blocks, for example a common system prompt or the prompt behind several samples. Its system, vLLM, achieves near-zero waste in KV-cache memory and improves throughput 2 to 4 times over earlier systems at the same latency ([Kwon et al., 2023](https://arxiv.org/abs/2309.06180), abstract). Llama 3's team used it to more than double the throughput of [rejection sampling](/blog/model-development-post-training-data/#rejection-sampling-choosing-among-the-models-own-answers). When memory runs out, caches can be moved to CPU memory and back, which has its own correctness hazards; see the post on [making KV offload correct](/blog/kv-offload-correctness/).
 

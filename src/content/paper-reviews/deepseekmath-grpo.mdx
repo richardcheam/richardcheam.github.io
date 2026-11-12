@@ -2,7 +2,7 @@
 title: "DeepSeekMath and GRPO: a cheaper RL algorithm, and what RL actually changed"
 title_key: "DeepSeekMath and GRPO"
 published: true
-date: 2026-11-11
+date: 2026-11-10
 question: "Can reinforcement learning without a value model improve mathematical reasoning, and does it add new capability or sharpen what the model already has?"
 excerpt: "DeepSeekMath introduced GRPO, which replaces PPO's value model with the average reward of a group of samples. The paper's lasting value is twice over: a simpler algorithm that became standard for reasoning RL, and an analysis suggesting its RL made correct answers more reliable rather than making new answers possible."
 type: paper
@@ -34,7 +34,7 @@ Open models trailed closed ones by a wide margin on competition mathematics in e
 
 **Data** (Sec 2). Starting from a seed set of mathematical web pages, a fastText classifier recalls math pages from deduplicated Common Crawl; pages from domains with many recalled hits are inspected and added as positives, and the classifier is retrained. After four iterations the corpus has 35.5M pages and 120B tokens. A 7B model continued from DeepSeek-Coder-Base-v1.5 on it becomes DeepSeekMath-Base.
 
-**GRPO** (Sec 4.1). For each question, sample a group of $G$ outputs from the current policy, score them, and give each output the advantage $\hat A_i = (r_i - \text{mean}(r))/\text{std}(r)$ for all its tokens (outcome supervision). Optimize PPO's clipped objective with these advantages, and add the KL divergence to the reference policy as a separate term in the loss rather than inside the reward (Eq. 3). With process supervision, rewards at each reasoning step are normalized the same way and an output's advantage at a token sums the normalized rewards of the steps that follow (Sec 4.1.3). The RL run used 64 samples per question, a KL coefficient of 0.04 and a learning rate of $10^{-6}$ on about 144K GSM8K- and MATH-style questions (Sec 4.2). The [RL post](/blog/model-development-reinforcement-learning/#grpo-the-group-is-the-baseline) works the advantages through on toy groups.
+**GRPO** (Sec 4.1). For each question, sample a group of $G$ outputs from the current policy, score them, and give each output the advantage $\hat A_i = (r_i - \text{mean}(r))/\text{std}(r)$ (outcome supervision). The reward is assigned once per output; the same response-level advantage is used for every token in the token-level objective. Optimize PPO's clipped objective with these advantages, and add the KL divergence to the reference policy as a separate term in the loss rather than inside the reward (Eq. 3). With process supervision, rewards at each reasoning step are normalized the same way and an output's advantage at a token sums the normalized rewards of the steps that follow (Sec 4.1.3). The RL run used 64 samples per question, a KL coefficient of 0.04 and a learning rate of $10^{-6}$ on about 144K GSM8K- and MATH-style questions (Sec 4.2). The [RL post](/blog/model-development-reinforcement-learning/#grpo-the-group-is-the-baseline) works the advantages through on toy groups.
 
 ## The evidence
 
@@ -60,7 +60,7 @@ Open models trailed closed ones by a wide margin on competition mathematics in e
 - **In-domain training.** RL questions are GSM8K- and MATH-style, so the two headline benchmarks are in-domain; the out-of-domain gains are smaller but present.
 - **No head-to-head PPO run** at equal compute in the main results; the comparison to PPO is conceptual and through the unified framework.
 
-**Left open.** How GRPO's normalization behaves when group rewards are nearly constant (groups where all answers agree contribute nothing, which makes prompt difficulty selection important); the effect of dividing by the standard deviation, which upweights low-variance questions; and how the length of outputs evolves.
+**Left open.** How GRPO's normalization behaves when group rewards are nearly constant (groups where all answers get the same reward have zero advantage, so only the KL term acts on them, which makes prompt difficulty selection important); the effect of dividing by the standard deviation, which upweights low-variance questions; and how the length of outputs evolves.
 
 ## How it changes decisions
 

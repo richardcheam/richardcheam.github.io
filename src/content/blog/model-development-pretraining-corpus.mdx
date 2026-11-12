@@ -128,7 +128,7 @@ Statistics about the data cannot tell you whether a stage helped. FineWeb's meth
 
 **Try it: predict token exposure.** You will train for **100 billion** tokens. After basic filtering you have **300 billion**. A quality classifier offers two thresholds: keep the top 30% (90 billion tokens) or the top 10% (30 billion). How many times will the model see each kept document? Now change the budget to **1 trillion** tokens.
 
-**Answer.** At 100 billion tokens, the 30% threshold gives 100 / 90 ≈ 1.1 passes over the data and the 10% threshold 100 / 30 ≈ 3.3. At 1 trillion tokens the same thresholds give about 11 and 33 passes, and even the unfiltered 300 billion would be seen about 3.3 times. The budget changes the trade completely: a strict filter costs nothing in repetition at 100 billion tokens and a great deal at 1 trillion.
+**Answer.** At 100 billion tokens, the 30% threshold gives 100 / 90 ≈ 1.1 passes over the data and the 10% threshold 100 / 30 ≈ 3.3. At 1 trillion tokens the same thresholds give about 11 and 33 passes, and even the unfiltered 300 billion would be seen about 3.3 times. At a fixed token budget, the smaller the retained corpus, the more often each kept document is repeated: the stricter filter means three times the repeated exposure at either budget, and at 1 trillion tokens that becomes 33 passes.
 
 What the pass count cannot tell you is which option trains the better model. That depends on two things you have to measure: how much better the kept documents are, and how quickly repeated data loses value on your data at your scale. One large study found that, for its models (up to 9 billion parameters) and data, up to about 4 passes changed the final loss negligibly compared with fresh data, and that the value of further repetition then fell off sharply ([Muennighoff et al., 2023](https://arxiv.org/abs/2305.16264), abstract and Fig. 1). That is a useful prior, not a limit: a much better filtered set can be worth repeating more, and a slightly better one may not be worth repeating at all. CS336's data lecture makes the same point from the other side: there is no single best filtering threshold; longer training wants more data, shorter training less but better data.
 
@@ -138,7 +138,7 @@ So for each stage, ask three questions:
 2. **What coverage did it remove?** Languages, domains, code, styles, topics: read samples of the removed documents.
 3. **How much data is left**, and how many times will the model have to repeat it?
 
-FineWeb answered the first question with 1.71-billion-parameter models trained on 28 to 350 billion tokens. That is strong evidence at that scale and for that benchmark suite, and a reason to re-check at yours.
+FineWeb answered the first question for its own setting: English Common Crawl, 1.71-billion-parameter models, its benchmark suite, and training budgets of 28 billion tokens for filter ablations and 350 billion for deduplication. Its filtering choices are evidence at those budgets, not at budgets where its filtered sets would be repeated many times, and a reason to re-check at yours.
 
 ## Benchmark contamination
 

@@ -1,6 +1,6 @@
 ---
 title: "Tokenization: what a tokenizer decides before training starts"
-date: 2026-11-11
+date: 2026-11-10
 category: deep-learning
 read_time: "16 min"
 series_order: 4
@@ -30,7 +30,7 @@ A tokenizer has two jobs: **encode** a string into a list of integers, and **dec
 
 Most of the choices that matter later hide in steps 1, 2 and 4, not in the merge algorithm.
 
-Two cases of step 3 deserve care. **Byte-level** tokenizers (GPT-2, Qwen2.5) start from the 256 possible bytes, so every string can be encoded and decoded exactly. **Byte fallback** gives a character-level or subword tokenizer a way out: a character missing from the vocabulary is spelled with byte tokens instead of an unknown token. LLaMA, for example, used SentencePiece BPE with byte fallback, and split all numbers into individual digits ([LLaMA](https://arxiv.org/abs/2302.13971), §2).
+Two cases of step 3 deserve care. **Byte-level** tokenizers (GPT-2, Qwen2.5) start from the 256 possible bytes, so every string can be encoded; decoding returns the original bytes exactly unless a normalization step changed the text first, as Qwen2.5's Unicode normalization does (see below). **Byte fallback** gives a character-level or subword tokenizer a way out: a character missing from the vocabulary is spelled with byte tokens instead of an unknown token. LLaMA, for example, used SentencePiece BPE with byte fallback, and split all numbers into individual digits ([LLaMA](https://arxiv.org/abs/2302.13971), §2).
 
 ## BPE and Unigram
 

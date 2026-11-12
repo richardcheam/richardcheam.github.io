@@ -6,7 +6,8 @@ const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replac
 
 // Atom feed of blog posts, newest first.
 export const GET: APIRoute = async () => {
-  const posts = (await publishedPosts()).sort((a, b) => b.data.date.getTime() - a.data.date.getTime());
+  // Newest first; posts published together keep their reading order, as on /blog/.
+  const posts = (await publishedPosts()).sort((a, b) => b.data.date.getTime() - a.data.date.getTime() || a.data.series_order - b.data.series_order);
   const updated = posts[0]?.data.date.toISOString() ?? new Date().toISOString();
   const entries = posts
     .map((p) => {

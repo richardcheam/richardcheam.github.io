@@ -1,6 +1,6 @@
 ---
 title: "Sharding and recomputation: making a model fit"
-date: 2026-11-11
+date: 2026-11-10
 category: deep-learning
 read_time: "14 min"
 series_order: 10
@@ -10,7 +10,7 @@ published: true
 excerpt: "Data parallelism gives every GPU a full copy of the training state, which stops working once that state outgrows a GPU. Learn how ZeRO and FSDP shard weights, gradients and optimizer state across data-parallel GPUs, what each stage saves and costs in communication, and how activation recomputation trades compute for memory."
 question: "How do ZeRO/FSDP and activation recomputation make a model fit, and what do they cost?"
 my_work: "A concept post; ZeRO stage 1 executed on CPU with PyTorch's ZeroRedundancyOptimizer against a single-process reference, recomputation checked with saved-tensor hooks; stage arithmetic from the ZeRO paper; FSDP described from the PyTorch 2.6 fully_shard documentation (not executed: it needs accelerator streams)."
-result: "Sharding optimizer state, gradients and parameters across 8 GPUs cuts a 7B model's per-GPU state from 112 to 38.5, 26.25 or 14 GB; stages 1 and 2 cost no more communication than data parallelism, stage 3 costs 1.5 times as much; full recomputation costs about a third more compute."
+result: "Sharding optimizer state, gradients and parameters across 8 GPUs cuts a 7B model's per-GPU state from 112 to 38.5, 26.25 or 14 GB; in ZeRO's idealized schedule with one forward and backward pass per update, stages 1 and 2 communicate as much as data parallelism and stage 3 1.5 times as much, but with gradient accumulation the stages that shard gradients or weights repeat transfers for every microbatch; full recomputation costs about a third more compute."
 evidence_limit: "Model-state arithmetic excludes activations, buffers and fragmentation; the executed checks are tiny CPU models."
 lesson: "Shard what is replicated, recompute what is cheap to recompute, and check how much communication each choice adds."
 ---
@@ -30,13 +30,27 @@ A 7-billion-parameter model needs about 112 GB for its weights, gradients and Ad
 
 The formulas are ZeRO's (§5.1–5.3). Stages 1 and 2 keep a floor that does not shrink with more GPUs: every GPU still holds full BF16 weights, and in stage 1 full gradients. Stage 3 removes the floor; with 64 GPUs it would be 1.75 GB each.
 
-How does a GPU update parameters it does not fully hold? In stage 1, after the backward pass, each GPU applies AdamW only to its own slice of the parameters, using its own slice of the moments, and an **all-gather** then gives every GPU the full updated weights. Running this on CPU with two processes and PyTorch's `ZeroRedundancyOptimizer` (its implementation of stage 1) shows each process holding exactly half of AdamW's moments, and after three steps the parameters match an unsharded single-process AdamW to within $10^{-6}$.
+How does a GPU update parameters it does not fully hold? In stage 1, after the backward pass, each GPU applies AdamW only to its own slice of the parameters, using its own slice of the moments, and an **all-gather** then gives every GPU the full updated weights. Running this on CPU with two processes and PyTorch's `ZeroRedundancyOptimizer` (its implementation of stage 1) shows each process holding exactly half of AdamW's moments, and after three steps the parameters match an unsharded single-process AdamW to within $10^{-6}$. That implementation shards only the optimizer state, and its communication differs from ZeRO's idealized schedule: DDP still all-reduces the full gradients, and afterwards each rank broadcasts its updated shard to the others, one broadcast per rank, in FP32 on CPU (PyTorch 2.6 source).
 
 ## What sharding costs in communication
 
-An all-reduce, the operation data parallelism uses, can be done as two halves: a **reduce-scatter**, after which each GPU holds the sum of one shard, followed by an **all-gather**, after which every GPU holds all the shards. Stages 1 and 2 use exactly those halves, reduce-scatter for gradients and all-gather for updated weights, so they move **the same amount of data as plain data parallelism** (ZeRO §7).
+An all-reduce, the operation data parallelism uses, can be done as two halves: a **reduce-scatter**, after which each GPU holds the sum of one shard, followed by an **all-gather**, after which every GPU holds all the shards. With ring collectives, each half moves about one model's worth of gradient or weight values per GPU, $\Psi$ for $\Psi$ parameters, so data parallelism moves about $2\Psi$ per update.
 
-Stage 3 has to do more. A GPU holds only its shard of each layer's weights, so before computing a layer it must all-gather the full weights, use them, and free them, in the forward pass and again in the backward pass. That raises communication to **1.5 times** data parallelism (ZeRO §7.2.2). Whether that is affordable depends on whether the gathers can overlap with computation.
+ZeRO's traffic ratios rest on three assumptions: ring-style collectives, gradients and weights communicated in 16-bit precision, and **one forward and backward pass per optimizer update** (ZeRO §7). Under them:
+
+- **Stages 1 and 2:** reduce-scatter the gradients ($\Psi$), update the local shard, all-gather the updated weights ($\Psi$): $2\Psi$, the same as data parallelism (§7.2.1).
+- **Stage 3:** a GPU holds only its shard of each layer's weights, so it must all-gather them before the forward pass and again before the backward pass, then reduce-scatter gradients: $3\Psi$, **1.5 times** data parallelism (§7.2.2).
+
+Gradient accumulation changes the count, because some transfers happen once per update and others once per microbatch. With two microbatches per update, and data parallelism skipping synchronization until the last microbatch:
+
+| | Per microbatch | Per update | Total |
+|---|---|---|---|
+| Data parallel | — | all-reduce $2\Psi$ | $2\Psi$ |
+| Stage 1 | — | reduce-scatter $\Psi$, all-gather $\Psi$ | $2\Psi$ |
+| Stage 2 | reduce-scatter gradients $\Psi$ | all-gather weights $\Psi$ | $3\Psi$ |
+| Stage 3 | gather $\Psi$ (forward), gather $\Psi$ (backward), reduce-scatter $\Psi$ | — | $6\Psi$ |
+
+Stage 1 keeps full gradients, so it can accumulate locally and communicate once. Stage 2 keeps only its gradient shard, so each microbatch's gradients must be reduced before the rest is discarded; stage 3 must regather weights for every forward and backward pass. Implementations differ in the details, for example whether a stage-2 system keeps full gradient buffers to avoid this, so read the communication schedule of the system you use. Whether the extra traffic is affordable depends on whether it overlaps with computation.
 
 **FSDP** (Fully Sharded Data Parallel) is PyTorch's implementation of stage 3. In the current API, `fully_shard` is applied to each Transformer block and then to the whole model. Each block's parameters are stored as shards, gathered by a hook just before the block runs and, by default (`reshard_after_forward=True`), freed after the forward pass and gathered again for the backward pass; after its gradients are computed they are reduce-scattered so each GPU keeps only its shard (PyTorch 2.6 documentation). Wrapping block by block matters: only one or two blocks' full weights exist at a time, and the next block's gather can be prefetched while the current block computes. Setting `reshard_after_forward=False` keeps gathered weights between forward and backward, trading memory for one fewer gather.
 
@@ -54,14 +68,14 @@ The cost is compute. Training costs about $6N$ FLOPs per token, and recomputing 
 
 **Try it: choose a stage.** You train a 13-billion-parameter model on 80 GB GPUs and need about 25 GB per GPU for activations and buffers. Which ZeRO stage fits on 8 GPUs? On 16?
 
-**Answer.** On 8 GPUs, stage 2 needs $2 \times 13 + 14 \times 13/8 \approx 48.8$ GB of state, plus 25 GB: about 74 GB, which fits with little margin. Stage 3 needs $16 \times 13/8 = 26$ GB, plus 25: 51 GB, comfortable. On 16 GPUs, stage 2 needs about 37.4 GB of state and fits easily, avoiding stage 3's extra 50% communication. The answer depends on the GPU count: more GPUs make the cheaper stage fit.
+**Answer.** On 8 GPUs, stage 2 needs $2 \times 13 + 14 \times 13/8 \approx 48.8$ GB of state, plus 25 GB: about 74 GB, which fits with little margin. Stage 3 needs $16 \times 13/8 = 26$ GB, plus 25: 51 GB, comfortable. On 16 GPUs, stage 2 needs about 37.4 GB of state and fits easily, avoiding stage 3's extra communication, 50% more without accumulation and more with it. The answer depends on the GPU count: more GPUs make the cheaper stage fit.
 
 
 ## What to remember
 
 - ZeRO shards the state that data parallelism replicates: stage 1 the optimizer state, stage 2 also gradients, stage 3 also parameters.
 - At 16 bytes per parameter, per-GPU state is $4N + 12N/n$, $2N + 14N/n$ and $16N/n$ for the three stages.
-- Stages 1 and 2 communicate as much as data parallelism (reduce-scatter plus all-gather); stage 3 communicates 1.5 times as much because weights are gathered for every forward and backward pass.
+- With one forward and backward pass per update, stages 1 and 2 communicate as much as data parallelism and stage 3 1.5 times as much. With gradient accumulation, stage 2's gradient reduction and stage 3's weight gathers repeat every microbatch, while stage 1 can still communicate once per update.
 - FSDP is PyTorch's fully sharded implementation; wrapping each block bounds how much unsharded weight exists at once.
 - Activation recomputation stores layer inputs and recomputes the rest: about a third more compute for full recomputation, much less if only the attention internals are recomputed.
 

@@ -18,6 +18,14 @@ const position = seriesPosts.findIndex((p) => p.id === post.id) + 1;
 const seriesTitle = allSeries.find((s) => s.key === post.data.series)?.title ?? "Blog series";
 const byline = date.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
 const pad = (n: number) => String(n).padStart(2, "0");
+const prev = position > 1 ? seriesPosts[position - 2] : undefined;
+const next = position > 0 && position < seriesPosts.length ? seriesPosts[position] : undefined;
+// Paper reviews that go deeper: those this post links to and those that link back to it, as optional reading.
+const postPath = `/blog/${post.id}/`;
+const linked = new Set([...(post.body ?? "").matchAll(/\/paper-reviews\/([a-z0-9-]+)\//g)].map((m) => m[1]));
+const reviews = post.data.series
+  ? (await getCollection("paper-reviews", ({ id, data }) => data.published && (linked.has(id) || data.links.some((l) => l.url === postPath)))).sort((a, b) => a.data.title.localeCompare(b.data.title))
+  : [];
 import SignatureMark from "../components/SignatureMark.astro";
 ---
 <Base title={title} description={excerpt} mainClass="site-main site-main--article" image={`/og/blog/${post.id}.png`}>
@@ -53,6 +61,20 @@ import SignatureMark from "../components/SignatureMark.astro";
   </header>
   <article class="note-article">
     <slot />
+    {reviews.length > 0 && (
+      <aside class="blog-optional-reading" aria-label="Optional reading">
+        <p class="blog-optional-reading__label">Optional reading: paper reviews</p>
+        <ul>
+          {reviews.map((r) => <li><a href={`/paper-reviews/${r.id}/`}>{r.data.title}</a></li>)}
+        </ul>
+      </aside>
+    )}
+    {(prev || next) && (
+      <nav class="blog-prev-next" aria-label="Series navigation">
+        {prev ? <a class="blog-prev-next__prev" href={`/blog/${prev.id}/`} rel="prev"><span>← Previous · Post {position - 1}</span>{prev.data.title}</a> : <span />}
+        {next && <a class="blog-prev-next__next" href={`/blog/${next.id}/`} rel="next"><span>Next · Post {position + 1} →</span>{next.data.title}</a>}
+      </nav>
+    )}
     <p class="post-seal"><SignatureMark class="post-seal__mark" label="Richard Cheam" painted /></p>
   </article>
   <nav class="blog-rail" aria-label="On this page" data-blog-rail data-rail-style={post.data.rail} data-series={post.data.series ?? ""} data-sky={post.data.sky ?? ""} hidden>

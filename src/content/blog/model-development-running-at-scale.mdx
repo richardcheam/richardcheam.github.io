@@ -1,6 +1,6 @@
 ---
 title: "Running at scale: throughput, failures and choosing a layout"
-date: 2026-11-11
+date: 2026-11-10
 category: deep-learning
 read_time: "14 min"
 series_order: 13
@@ -61,7 +61,7 @@ $$
 
 With failures every 3.1 hours and an illustrative 5-minute checkpoint, $\tau \approx \sqrt{2 \times 5 \times 186} \approx 43$ minutes. Each failure then loses about half an interval, 22 minutes, plus the time to restart. The same formula says what to improve: faster, asynchronous checkpoint writes lower the cost and allow shorter intervals, which is why Llama 3's team worked on reducing checkpointing and job start-up time (§3.3.4).
 
-A checkpoint must let the run continue exactly as if nothing happened: weights, optimizer state, schedule position and data-loader position, as the [small training run](/blog/model-development-small-training-run/#7-checkpoints-that-resume-exactly) verified on CPU. At scale it must also be written in shards from every rank in parallel, and be loadable onto a different number of GPUs when the cluster changes.
+A checkpoint must let the run continue exactly as if nothing happened: weights, optimizer state, schedule position and data-loader position, as the [small training run](/blog/model-development-small-training-run/#7-checkpoints-that-resume-exactly) verified on CPU by comparing unrounded losses and the final weights and optimizer state bit for bit. At scale it must also be written in shards from every rank in parallel, and be loadable onto a different number of GPUs when the cluster changes.
 
 ## Choosing a layout
 
