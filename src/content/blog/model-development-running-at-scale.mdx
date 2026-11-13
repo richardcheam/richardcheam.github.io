@@ -8,14 +8,18 @@ series: model-development
 featured: false
 published: true
 excerpt: "A large run is a machine that fails. Learn to measure whether it is running well (MFU), find where time goes with a profiler, plan checkpoints around how often thousands of GPUs break, and choose a parallel layout by working through memory first and communication second, with Llama 3's real configuration as the example."
-question: "How do you measure throughput, find bottlenecks, recover from failures and choose a parallel layout?"
+question: "A large run is slower than expected and keeps getting interrupted: what do you measure, and what do you change?"
 my_work: "A concept post; MFU and layout arithmetic checked against Llama 3's Table 4; failure rates from its §3.3.4; a checkpoint interval from Young's approximation; a CPU profile of one training step in PyTorch 2.6."
 result: "Llama 3 405B ran at 38–43% MFU on up to 16,384 GPUs and saw 419 unexpected interruptions in 54 days, one every 3.1 hours; profiling a small CPU step showed an unintended default dropout taking 30% of the time."
 evidence_limit: "Llama 3 numbers are one organization's report for its hardware; the checkpoint cost and the CPU profile are illustrative."
 lesson: "Measure MFU, read a profile before optimizing, checkpoint at an interval set by failure rate and save cost, and choose a layout by fitting memory first and placing communication on the fastest links."
 ---
 
-The previous posts in this track each solved one problem: [data parallelism](/blog/model-development-data-parallelism/) for throughput, [sharding](/blog/model-development-sharding-recomputation/) and [model parallelism](/blog/model-development-model-parallelism/) for memory, [efficient kernels](/blog/model-development-efficient-execution/) for speed. A real run combines them on thousands of GPUs for weeks, and two new questions take over: is it running as fast as it should, and what happens when, not if, something breaks?
+**Question: a large run is slower than expected and keeps getting interrupted. What do you measure, and what do you change?**
+
+Measure **model FLOPs utilization** (MFU), the share of the GPUs' peak that goes into the model's own arithmetic, then read a profile before changing anything: large matrix multiplications should dominate, communication should overlap computation, and every rank should be equally fast. Treat failures as routine and set the checkpoint interval from the failure rate and the cost of saving; Llama 3 405B ran at 38–43% MFU and still saw an unexpected interruption every 3.1 hours. Only then revisit the layout, fitting memory first and putting the most frequent communication on the fastest links.
+
+The previous posts each solved one problem: [data parallelism](/blog/model-development-data-parallelism/) for throughput, [sharding](/blog/model-development-sharding-recomputation/) and [model parallelism](/blog/model-development-model-parallelism/) for memory, [efficient kernels](/blog/model-development-efficient-execution/) for speed. This post is about running them together for weeks.
 
 ## Is it running well? MFU
 
@@ -61,7 +65,7 @@ $$
 
 With failures every 3.1 hours and an illustrative 5-minute checkpoint, $\tau \approx \sqrt{2 \times 5 \times 186} \approx 43$ minutes. Each failure then loses about half an interval, 22 minutes, plus the time to restart. The same formula says what to improve: faster, asynchronous checkpoint writes lower the cost and allow shorter intervals, which is why Llama 3's team worked on reducing checkpointing and job start-up time (§3.3.4).
 
-A checkpoint must let the run continue exactly as if nothing happened: weights, optimizer state, schedule position and data-loader position, as the [small training run](/blog/model-development-small-training-run/#7-checkpoints-that-resume-exactly) verified on CPU by comparing unrounded losses and the final weights and optimizer state bit for bit. At scale it must also be written in shards from every rank in parallel, and be loadable onto a different number of GPUs when the cluster changes.
+A checkpoint must let the run continue exactly as if nothing happened: weights, optimizer state, schedule position and data-loader position, as the [small training run](/blog/model-development-small-training-run/#5-checkpoints-what-the-test-compares) verified on CPU by comparing unrounded losses and the final weights and optimizer state bit for bit. At scale it must also be written in shards from every rank in parallel, and be loadable onto a different number of GPUs when the cluster changes.
 
 ## Choosing a layout
 
@@ -76,14 +80,6 @@ The previous posts give a procedure. Work through memory first, then communicati
 **Try it: lay out a 70B model.** You have 256 GPUs, 8 per server, 80 GB each, and a 70-billion-parameter model at 16 bytes per parameter. Propose a layout.
 
 **Answer.** The state is $16 \times 70 = 1{,}120$ GB. Tensor parallelism of 8 within a server leaves 140 GB per GPU, too much. Adding 4 pipeline stages across servers divides the model over 32 GPUs: 35 GB of state per GPU, leaving room for activations, with data parallelism of $256 / 32 = 8$. Sharding the optimizer state over those 8 data-parallel ranks (ZeRO-1) brings it to about $4 \times 70/32 + 12 \times 70/(32 \times 8) \approx 12$ GB, freeing memory for larger microbatches, more of them, and a smaller pipeline bubble. An alternative, FSDP over more GPUs with less pipelining, avoids the bubble but moves more data across servers; which is faster on a given network is what step 5 decides.
-
-
-## What to remember
-
-- MFU = $6N$ × tokens per second ÷ peak FLOP/s. Large runs typically reach 35–50%; Llama 3 405B ran at 38–43%.
-- Read a profile before optimizing: big matrix multiplications should dominate, communication should overlap computation, and ranks should be equally fast.
-- Failures are routine at scale: Llama 3 saw one unexpected interruption every 3.1 hours. Checkpoint at roughly $\sqrt{2 \times \text{cost} \times \text{MTBF}}$, and make checkpoints fast and exact.
-- Choose a layout by fitting state, then activations, then placing communication on the fastest links, then checking the batch, then measuring.
 
 
 ## Sources

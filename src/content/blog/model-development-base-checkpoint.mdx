@@ -1,0 +1,76 @@
+---
+title: "Is this base checkpoint ready for post-training?"
+title_key: "base checkpoint"
+date: 2026-11-13
+category: deep-learning
+read_time: "9 min"
+series_order: 14
+series: model-development
+featured: false
+published: true
+excerpt: "Aggregate validation loss went down. Is the base model ready for fine-tuning? Break the loss down by domain, use log-likelihood tasks before generation tasks, keep a held-out evaluation for the final call, and choose between continuing, a targeted mix and moving on to SFT."
+question: "How do you know a base checkpoint is ready for post-training?"
+my_work: "A concept post; the checkpoint comparison uses illustrative numbers computed in scripts/course/p13b_checkpoint.py; Olmo 3's microanneal and integration-test procedure read from its technical report (§3.3, §3.5.1)."
+result: "Aggregate loss can improve (2.315 to 2.282) while a 5% slice gets worse by 0.20 nats; log-likelihood tasks give signal before generation accuracy; a targeted data change should be tested against a same-size baseline and checked after a quick SFT."
+evidence_limit: "The checkpoint numbers are invented to show the mechanism; the Olmo 3 procedure is one team's practice at its scale."
+lesson: "Read the loss by slice, test targeted data against a matched baseline, and decide on a held-out evaluation, including a quick SFT, before committing to post-training."
+---
+
+**Question: how do you know a base checkpoint is ready for post-training?**
+
+Not from the aggregate validation loss. Break the loss down by the domains and languages the product needs, track log-likelihood tasks that respond before generation accuracy does, and make the final call on a held-out evaluation you did not use for development decisions. If the aggregate improves while a slice you need is flat or worse, test a targeted data change against a same-size baseline before moving on; if every slice you need is improving or adequate, a quick SFT of the checkpoint is the cheapest way to confirm the gains survive post-training.
+
+This post sits between [running at scale](/blog/model-development-running-at-scale/), which keeps a run going, and [supervised fine-tuning](/blog/model-development-supervised-fine-tuning/), which teaches a base model to answer. It is deliberately narrow: one comparison and one decision.
+
+## The aggregate can hide the slice you need
+
+Suppose you have two checkpoints of a base model meant, eventually, to serve Khmer users, and a validation set that is 80% web text, 15% code and 5% Khmer. The numbers are **illustrative**, computed in `scripts/course/p13b_checkpoint.py`:
+
+| Domain | Share | A | B | Change |
+|---|---|---|---|---|
+| Web | 80% | 2.40 | 2.35 | −0.05 |
+| Code | 15% | 1.90 | 1.88 | −0.02 |
+| Khmer | 5% | 2.20 | 2.40 | **+0.20** |
+| **All** | 100% | 2.315 | 2.282 | **−0.033** |
+
+Share is the domain's fraction of validation tokens; A and B are the two checkpoints' losses in nats per token. The aggregate, the row marked All, is a token-weighted average, so each domain moves it by its share times its change: web contributes −0.040, code −0.003, and Khmer's large regression only +0.010. Checkpoint B looks better on the curve everyone watches and is worse on the slice the product depends on.
+
+So inspect **loss by domain** whenever the use case is narrower than the validation set: by language, by source, by content type. Two cautions when reading slices. Per-token losses are only comparable across slices measured with the same tokenizer; across tokenizers, or for languages a tokenizer handles very differently, normalize by text length, for example **bits per byte**, the summed negative log-likelihood in bits divided by the UTF-8 length (30 nats over 54 bytes is $30/(\ln 2 \times 54) \approx 0.80$ bits per byte). And small slices are noisy, so compare checkpoints on the same fixed examples, as the [small training run](/blog/model-development-small-training-run/) did with its fixed validation batches.
+
+## Which tasks give signal at this stage
+
+Loss tells you how well the model predicts text, not whether it can do a task. Base-model task evaluations come in two kinds:
+
+- **Log-likelihood tasks** score each candidate answer by its log-probability under the model and pick the most likely, or measure the likelihood of a gold answer. They need no generation and respond to small improvements. In the script's illustrative example, checkpoint A gives a distractor 0.5 nats more log-probability than the correct answer, and checkpoint B prefers the correct answer by 0.2: the kind of change that shows up in likelihood long before it shows up in generated accuracy.
+- **Completion tasks** generate an answer and check it: exact match, unit tests for code, a verified final number for math. They measure what users will see, but at small scale or early in training they sit near chance and are noisy.
+
+Olmo 3's team organized its base-model evaluation this way. For small-scale decisions it used a suite measuring bits per byte of gold answers, because continuous likelihood metrics show signal before task accuracy leaves the noise floor; for decisions on the final run it used generation-based task suites; and it kept a **held-out set** of four benchmarks out of development decisions entirely, to avoid overfitting the development suite ([Olmo 3 report](https://arxiv.org/abs/2512.13961), §3.3.2 and §3.3.4). The held-out set is what you consult for the final call, because every metric you tuned against is, by then, partly a measure of your tuning.
+
+## Testing a targeted change
+
+If a slice you need is lagging, the candidate fixes are a different mix for the rest of pre-training, or a short **continued pre-training** or annealing phase that upweights the target data while the learning rate decays (the [mixtures post](/blog/model-development-data-mixtures/#changing-the-mixture-over-time) describes Llama 3's version). Each is cheap to try but easy to misread, because any additional training improves loss a little. The comparison must be against a baseline that trains **the same number of tokens** without the change.
+
+Olmo 3 made that baseline explicit. Its **microanneal** takes 5 billion tokens of a candidate dataset, mixes them with 5 billion web tokens, anneals on the 10 billion, and compares the result with a microanneal on 10 billion web-only tokens, isolating the effect of the dataset "over and above the impact of continued training on web data alone". Promising sources then went into full 100-billion-token annealing runs, and checkpoints from those runs were quickly instruction-tuned and evaluated to verify that gains in the base model carried into post-training (§3.5.1, p. 22).
+
+Applied to the example: anneal checkpoint B on a mix with more Khmer, anneal it on the same number of tokens of the current mix, and compare Khmer loss, Khmer log-likelihood tasks and the aggregate, all on fixed examples.
+
+## The decision
+
+| What you see | What to do |
+|---|---|
+| The aggregate and every slice you need are still improving, and you have budget | **Continue** on the current mix |
+| The aggregate improves but a needed slice is flat or worse | **Test a targeted mix or continued pre-training** against a same-size baseline; check the aggregate does not regress |
+| Slices you need are adequate and flattening; log-likelihood tasks have stopped improving | **Move to SFT**, after one quick SFT run on the checkpoint and a look at the held-out evaluation |
+
+In the example the answer is the middle row: B should not go to SFT yet, because the slice the product needs got worse. The quick SFT check in the last row is worth its cost in every case. A base model's likelihood gains matter only if post-training can turn them into behaviour, and the [SFT post](/blog/model-development-supervised-fine-tuning/) that comes next shows how much the base model shapes the result.
+
+**Try it.** Same validation split, two new checkpoints: web 2.30 → 2.28, code 1.85 → 1.86, Khmer 2.10 → 2.05. What is the aggregate change, and which row of the table applies?
+
+**Answer.** $0.80 \times (-0.02) + 0.15 \times 0.01 + 0.05 \times (-0.05) = -0.0170$ nats. Every slice except code improved, and code moved by 0.01, within the noise you would expect on a small slice. If held-out and log-likelihood tasks agree and the improvements are flattening, run the quick SFT check and move on; if they are still falling steeply and budget remains, continue.
+
+
+## Sources
+
+- Team OLMo, Ai2 (2025). "Olmo 3." arXiv:2512.13961. §3.3.2 (bits-per-byte proxy suite), §3.3.4 (held-out benchmarks), §3.5.1 (microanneals and integration tests, p. 22).
+- Llama Team, AI @ Meta (2024). "The Llama 3 Herd of Models." arXiv:2407.21783. §3.1.3 on annealing to test data value.
+- L. Gao et al. (2020). "The Pile: An 800GB Dataset of Diverse Text for Language Modeling." arXiv:2101.00027. Bits per byte as a tokenizer-independent measure.

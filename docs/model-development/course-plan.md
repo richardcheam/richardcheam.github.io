@@ -36,41 +36,45 @@ Post-training needs the model, probability and optimization foundations (B1 and 
 
 Topics are questions, not post slots: a substantial question may be split across posts, and overlapping explanations combined into one. Each published post answers one clear question. `series_order` follows the track order below; each post states its real prerequisites in its opening, so readers can enter the Adapt or Use track without the Scale track.
 
-| Order | Slug (`/blog/…/`) | Question | Abilities | Needs | Review | Status |
-|---|---|---|---|---|---|---|
-| **Build** | | | | | | |
-| 1 | `model-development-one-update` | What happens between a batch of token IDs and a changed weight? | A1, A6 | Foundations: backprop, losses, optimisers, language models | — | Published |
-| 2 | `model-development-pretraining-corpus` | How does each processing stage change the training distribution, and is it worth what it removes? | A2, A6 | 1 | FineWeb | PR #6 |
-| 3 | `model-development-data-mixtures` | How do sampling weights decide how often each source is seen, and when is repetition acceptable? | A2, A6 | 2 | — | Planned |
-| 4 | `model-development-tokenization` | How does text become token IDs, and what does the tokenizer cost in compute, context and multilingual coverage? | A1, A2 | Foundations: language models | — | Planned |
-| 5 | `model-development-decoder-architecture` | Which choices in a modern decoder matter, and what does each cost or buy? | A2 | Foundations: attention, Transformer, normalisation | — | Planned |
-| 6 | `model-development-small-training-run` | What does a complete small training run involve, and how do you know it is working? | A1, A2, A6 | 1, 4, 5 | — | Planned |
-| 7 | `model-development-scaling-laws` | How should parameters and tokens share a compute budget, and what can small experiments predict? | A2, A6 | 6 | Chinchilla | Planned |
-| **Scale** | | | | | | |
-| 8 | `model-development-gpu-memory-compute` | What does a GPU store and compute during training, and where are the bottlenecks? | A3, A6 | 1, 5 | — | Planned |
-| 9 | `model-development-data-parallelism` | How is one update computed on many GPUs without changing its meaning? | A3 | 1, 8 | — | Planned |
-| 10 | `model-development-sharding-recomputation` | How do ZeRO/FSDP and activation recomputation make a model fit, and what do they cost? | A3, A6 | 8, 9 | ZeRO | Planned |
-| 11 | `model-development-model-parallelism` | How are layers and sequences split across GPUs (tensor, pipeline, sequence/context, expert parallelism)? | A3, A6 | 5, 9 | Megatron-LM | Planned |
-| 12 | `model-development-efficient-execution` | Why do IO-aware attention, mixed precision and FP8 speed training, and what do they assume? | A3, A6 | 5, 8 | FlashAttention | Planned |
-| 13 | `model-development-running-at-scale` | How do you measure throughput, overlap communication, recover from failures and choose a layout? | A3, A6 | 9–12 | — | Planned |
-| **Adapt** | | | | | | |
-| 14 | `model-development-supervised-fine-tuning` | How does a base model learn to follow instructions, and what do templates and loss masks decide? | A4 | 1 | — | Planned |
-| 15 | `model-development-post-training-data` | Where does post-training data come from: curated prompts, synthetic data, rejection sampling and distillation? | A4, A6 | 14 | Tülu 3 | Planned |
-| 16 | `model-development-preference-optimization` | How do pairwise preferences become a training signal, through a reward model or directly (DPO)? | A4 | 14 | DPO | Planned |
-| 17 | `model-development-reinforcement-learning` | How do policy gradients, KL regularization and verifiable rewards improve a model; how do PPO and GRPO differ? | A4 | 14, 16 | DeepSeekMath (GRPO) | Planned |
-| 18 | `model-development-post-training-failures` | How do reward hacking, length effects and distribution shift show up, and how is post-training evaluated? | A4, A6 | 16, 17 | — | Planned |
-| **Use** | | | | | | |
-| 19 | `model-development-choosing-a-model` | How do you choose a model and establish a baseline worth beating? | A5, A6 | Foundations: language models | — | Planned |
-| 20 | `model-development-prompting-context` | How do instructions, context and structured outputs control what a model does? | A5 | 19 | — | Planned |
-| 21 | `model-development-retrieval-tools` | How does a model use information and actions it was not trained on, and when is an agentic loop justified? | A5, A6 | 20 | — | Planned |
-| 22 | `model-development-adapt-or-prompt` | Prompting, retrieval or fine-tuning: which fits, and how does LoRA adapt a model cheaply? | A4, A5, A6 | 20, 21; 14 for fine-tuning | LoRA | Planned |
-| 23 | `model-development-inference-serving` | What determines latency, throughput and cost when serving, and what does quantization trade? | A5, A6 | 5 | — | Planned |
-| 24 | `model-development-evaluating-applications` | How do you know an application works, and keep knowing after release, safely? | A5, A6 | 19–21 | — | Planned |
-| **Connections** | | | | | | |
-| 25 | `model-development-how-it-fits` | How do data, training, post-training, inference and application requirements constrain one another? | A2, A5, A6 | any track | — | Planned |
-| 26 | `model-development-other-modalities` | What transfers to vision, speech and multimodal models, and what differs? | A2, A5 | 5, 6 | — | Planned |
+| Order | Slug (`/blog/…/`) | Question | Review |
+|---|---|---|---|
+| **Build** | | | |
+| 1 | `model-development-one-update` | Which conventions inside one training update change what the model learns, even though training still runs? | — |
+| 2 | `model-development-small-training-run` | How do you know a training run is working before you spend real compute on it? | — |
+| 3 | `model-development-pretraining-corpus` | How do you decide whether a stage of a pre-training data pipeline was worth what it removed? | FineWeb |
+| 4 | `model-development-data-mixtures` | How do sampling weights decide how often the model sees each source, and when is repeating a source acceptable? | — |
+| 5 | `model-development-tokenization` | What does a tokenizer cost you in compute, context and coverage, and how would you compare two of them? | — |
+| 6 | `model-development-decoder-architecture` | Which choices in a modern decoder matter, and what does each one cost or buy? | — |
+| 7 | `model-development-scaling-laws` | Given a compute budget, how big should the model be and how many tokens should it see? | Chinchilla |
+| **Scale** | | | |
+| 8 | `model-development-gpu-memory-compute` | Before you start a run, how do you tell whether it will fit in memory, and why does it run below the GPU's peak? | — |
+| 9 | `model-development-data-parallelism` | When you train with data parallelism, what must you do so the result is the same update one GPU would compute? | — |
+| 10 | `model-development-sharding-recomputation` | When does sharding the training state (ZeRO or FSDP) help, and what does it cost in communication? | ZeRO |
+| 11 | `model-development-model-parallelism` | When should you split the model itself across GPUs, and which split goes where? | Megatron-LM |
+| 12 | `model-development-efficient-execution` | How can an operation get faster without doing less arithmetic, and what keeps lower-precision training from losing updates? | FlashAttention |
+| 13 | `model-development-running-at-scale` | A large run is slower than expected and keeps getting interrupted: what do you measure, and what do you change? | — |
+| **Bridge** | | | |
+| 14 | `model-development-base-checkpoint` | How do you know a base checkpoint is ready for post-training? | — |
+| **Adapt** | | | |
+| 15 | `model-development-supervised-fine-tuning` | In supervised fine-tuning, which tokens should carry the loss, and why does that choice change the model? | — |
+| 16 | `model-development-post-training-data` | When you generate post-training data with models, what does each selection step favour, and how do you keep it from misleading you? | Tülu 3 |
+| 17 | `model-development-preference-optimization` | How does "response A is better than response B" become a gradient, and when would you use DPO instead of a reward model? | DPO |
+| 18 | `model-development-reinforcement-learning` | What does a policy-gradient update actually do to a language model, and how do PPO and GRPO estimate which responses to reinforce? | DeepSeekMath (GRPO) |
+| 19 | `model-development-post-training-failures` | Your post-trained model scores higher on your evaluations: how do you check that it actually got better? | — |
+| **Use** | | | |
+| 20 | `model-development-choosing-a-model` | How do you choose a model for an application, and how do you know the cheaper one is not a false economy? | — |
+| 21 | `model-development-prompting-context` | When outputs are wrong, inconsistent or unparseable, what can you fix with the prompt alone? | — |
+| 22 | `model-development-retrieval-tools` | When should an application retrieve, call a tool or run an agent loop, and what do you measure for each? | — |
+| 23 | `model-development-adapt-or-prompt` | The model fails on your task: should you change the prompt, add retrieval or fine-tune? | LoRA |
+| 24 | `model-development-inference-serving` | Your model is slow or expensive to serve: where is the bottleneck, and what would you change first? | — |
+| 25 | `model-development-evaluating-applications` | System B scores higher than system A on your evaluation set: is the difference real, and will it hold after release? | — |
+| **Connect** | | | |
+| 26 | `model-development-how-it-fits` | Why can't the stages of building a model be decided one at a time? | — |
+| 27 | `model-development-other-modalities` (optional follow-on) | Which parts of this series carry over to images, speech and multimodal models, and what changes? | — |
 
-Evaluation is taught where it is used: validation loss and its noise (6), what small experiments predict (7), throughput metrics (13), post-training evaluation (18), baselines (19) and application evaluation (24).
+All 27 posts are published except `model-development-base-checkpoint` (14), which is on `edit/md-interview-pass`. Its `date` must be set to the day it goes live.
+
+Evaluation is taught where it is used: labels and first loss (2), base-checkpoint readiness (14), post-training evaluation (19), baselines (20) and application evaluation (25).
 
 ## Optional further study
 
@@ -139,3 +143,11 @@ Working branch `feat/md-series`, stacked on `feat/p2-corpus` (PR #6). Merging an
 - Dates: every model-development post and its reviews set to 2026-11-10, the first successful Pages deploy containing them (b840da8 at 11:42 UTC for post 1; 367ad9c at 20:50 UTC for the rest, since d4d8f66's deploy was cancelled). No `updated` field exists, so none was added.
 - Series view reads in `series_order`, shows the shared date once and a start link; posts have previous/next and optional paper-review links.
 - Not rerun: FSDP2 (needs accelerator streams); no GPU measurement.
+
+### 2026-11-13 editorial pass (`edit/md-interview-pass`)
+
+- Every post opens with its question and a two-to-three-sentence answer; "What to remember" recaps and "Everyday picture" analogies removed.
+- New order: the small training run moved to 2; new bridge post 14 (`model-development-base-checkpoint`, Olmo 3 §3.3 and §3.5.1); "Beyond text" is 27, an optional follow-on after the capstone.
+- One-update shortened (backward pass, Trainer counting and weight-decay conventions moved to an optional section); corpus shortened (stage table, MinHash reduced); interleaving and FP8 details moved to optional sections; choosing-a-model's 6x token claim corrected and its error-bar detail moved to evaluating-applications.
+- `p6_train.py` has `--baseline-only`, a direct label check and a SHA-256-pinned input; `requirements-p6.txt` pins torch 2.6.0 and tokenizers 0.21.0. A clean-venv run reproduced the page's expected output.
+- Not done: no accelerator for DDP here, so there is no measured per-microbatch versus per-update synchronization comparison in running-at-scale.

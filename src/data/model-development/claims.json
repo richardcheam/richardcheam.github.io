@@ -341,7 +341,7 @@
       "pytorch-2.6-optim"
     ],
     "location": "/blog/model-development-small-training-run/",
-    "conditions": "Executed on Apple M1 CPU with PyTorch 2.6 and Tokenizers 0.21, seed 0; scripts/course/p6_train.py; curves in scripts/course/data/p6_runs.json. Resume test strengthened 2026-11-12: compares unrounded float losses with ==, and final model and optimizer tensors with torch.equal (previously losses rounded to 4 decimals only); rerun on the same CPU."
+    "conditions": "Executed on Apple M1 CPU with PyTorch 2.6 and Tokenizers 0.21, seed 0; scripts/course/p6_train.py; curves in scripts/course/data/p6_runs.json. Resume test strengthened 2026-11-12: compares unrounded float losses with ==, and final model and optimizer tensors with torch.equal (previously losses rounded to 4 decimals only); rerun on the same CPU. 2026-11-13: --baseline-only mode added (baseline, direct label check y[:, :-1] == x[:, 1:], checkpoint saved to disk and reloaded, same three equality checks); run from a clean venv with requirements-p6.txt and a fresh download of the SHA-256-pinned input: final val 4.126, resume identical, 2 min 42 s on Apple M1."
   },
   {
     "id": "P7-01",
@@ -617,7 +617,7 @@
   {
     "id": "U1-01",
     "status": "Derived",
-    "claim": "With illustrative prices ($3/$15 vs $0.15/$0.60 per million tokens), 1,500 input and 300 output tokens, accuracies 92% vs 85% and $0.50 per error, the larger model costs $49 vs $75 per 1,000 requests; a 95% interval at n = 100 is about ±5 points at 92%.",
+    "claim": "With illustrative prices ($3/$15 vs $0.15/$0.60 per million tokens), 1,500 input and 300 output tokens, accuracies 92% vs 85% and $0.50 per error, the larger model costs $49 vs $75 per 1,000 requests. A tokenizer needing 6x the tokens multiplies the input-token charge by 6 at the same price, not total cost or latency.",
     "sourceIds": [
       "chatbot-arena"
     ],
@@ -692,7 +692,7 @@
   {
     "id": "U6-01",
     "status": "Derived",
-    "claim": "Two systems at 85% and 80% on the same 200 items with 20 vs 10 disagreements give a two-sided exact sign-test p = 0.099; the same proportions over 90 disagreements give p = 0.002. LLM judges reach over 80% agreement with humans with position, verbosity and self-enhancement biases.",
+    "claim": "Two systems at 85% and 80% on the same 200 items with 20 vs 10 disagreements give a two-sided exact sign-test p = 0.099; the same proportions over 90 disagreements give p = 0.002. LLM judges reach over 80% agreement with humans with position, verbosity and self-enhancement biases. A single-accuracy 95% interval at n = 100 is about ±5 points at 92% and ±7 at 85%.",
     "sourceIds": [
       "mt-bench",
       "indirect-injection"
@@ -751,5 +751,25 @@
     ],
     "location": "/blog/model-development-efficient-execution/",
     "conditions": "torch.finfo(torch.bfloat16).tiny and a CPU cast, executed 2026-11-12."
+  },
+  {
+    "id": "B0-01",
+    "status": "Derived",
+    "claim": "Illustrative checkpoints: with validation shares 80% web, 15% code, 5% Khmer, per-token losses (2.40, 1.90, 2.20) -> (2.35, 1.88, 2.40) move the aggregate from 2.315 to 2.282 while the Khmer slice worsens by 0.20; the slice contributes only +0.010 to the aggregate change.",
+    "sourceIds": [
+      "olmo3"
+    ],
+    "location": "/blog/model-development-base-checkpoint/",
+    "conditions": "Invented numbers labelled illustrative; arithmetic in scripts/course/p13b_checkpoint.py."
+  },
+  {
+    "id": "B0-02",
+    "status": "Reported",
+    "claim": "Olmo 3 used a bits-per-byte suite for small-scale data decisions, generation-based suites for final-run decisions, and a held-out set of four benchmarks (MMLU Pro, DeepMind Math, LBPP, BBH) kept out of development; its microanneal compares 5B target + 5B web tokens against a 10B web-only microanneal, and integration-run checkpoints were quickly instruction-tuned to confirm gains carry into post-training.",
+    "sourceIds": [
+      "olmo3"
+    ],
+    "location": "/blog/model-development-base-checkpoint/",
+    "conditions": "Olmo 3 report §3.3.2, §3.3.4 (pp. 12-13), §3.5.1 (p. 22)."
   }
 ]

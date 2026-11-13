@@ -986,5 +986,18 @@
     "read": "Vision encoder + projection + LLM, GPT-4-generated instruction data",
     "status": "cited in post 26",
     "limits": "Abstract only."
+  },
+  {
+    "id": "olmo3",
+    "title": "Olmo 3",
+    "organization": "Allen Institute for AI (Ai2)",
+    "researchDate": "2025-12-15",
+    "reviewedVersion": "arXiv:2512.13961 (PDF read 2026-11-13)",
+    "url": "https://arxiv.org/abs/2512.13961",
+    "read": "§3.3.2 bits-per-byte proxy suite; §3.3.4 held-out benchmarks; §3.5.1 microanneals and integration tests (p. 22)",
+    "priority": 2,
+    "verifiedOn": "2026-11-13",
+    "status": "cited in the base-checkpoint post",
+    "limits": "One team's development practice at its scale; the post uses the procedure, not its numbers"
   }
 ]

@@ -8,16 +8,18 @@ series: model-development
 featured: false
 published: true
 excerpt: "Before splitting training across many GPUs, it helps to know exactly what one GPU holds and why it is slow. Count the bytes of weights, gradients, optimizer state and activations, estimate training time from FLOPs and utilization, and use arithmetic intensity to tell compute-bound work from memory-bound work."
-question: "What does a GPU store and compute during training, and where are the bottlenecks?"
+question: "Before you start a run, how do you tell whether it will fit in memory, and why does it run below the GPU's peak?"
 my_work: "A concept post with napkin arithmetic: bytes per parameter compared across two conventions, activation memory from Korthikanti et al. (2022), training time and arithmetic intensity with the H100 figures used in CS336 lecture 2."
 result: "Mixed-precision AdamW needs 12 to 16 bytes per parameter before activations; activations grow with batch and sequence and can dominate; matrix multiplications are compute-bound while matrix-vector products and elementwise operations are memory-bound."
 evidence_limit: "Napkin estimates; real memory includes temporary buffers, fragmentation and framework overhead, and the activation formula is for a GPT-style layer."
 lesson: "Account for memory as weights, gradients, optimizer state and activations, and for time as FLOPs over achieved throughput. Arithmetic intensity says which resource limits each operation."
 ---
 
-The [scaling-laws post](/blog/model-development-scaling-laws/) turned a training run into a number of FLOPs. This post turns that number into hardware: how much memory the run needs, how long it takes, and why a GPU that advertises nearly a thousand trillion operations per second often delivers far fewer. Everything in the rest of this track, data parallelism, sharding, model parallelism, efficient kernels, is an answer to one of the limits we meet here.
+**Question: before you start a run, how do you tell whether it will fit in memory, and why does it run below the GPU's peak?**
 
-We use the NVIDIA H100 as the running example, with the figures CS336's resource-accounting lecture uses: **989.5 trillion BF16 operations per second** without sparsity, **3.35 TB/s** of memory bandwidth and **80 GB** of memory ([CS336 lecture 2](https://cs336.stanford.edu/)).
+Add up four terms: weights, gradients and optimizer state scale with the parameter count (12 bytes per parameter for mixed-precision AdamW, 16 with an FP32 master copy), and activations scale with batch × sequence × width plus an attention term that grows with the square of the sequence. A 7-billion-parameter model needs about 112 GB of state before a single activation, more than one 80 GB GPU. Speed is limited by whichever runs out first, arithmetic or memory bandwidth: an operation that does fewer FLOPs per byte moved than the GPU's ratio (about 295 for an H100) waits for memory, which is why elementwise operations and one-token-at-a-time decoding run far below peak.
+
+The [scaling-laws post](/blog/model-development-scaling-laws/) turned a run into a number of FLOPs; this post turns it into hardware. Every later post in this track answers one of the limits met here. The running example is the NVIDIA H100 with the figures CS336's resource-accounting lecture uses: **989.5 trillion BF16 operations per second** without sparsity, **3.35 TB/s** of memory bandwidth and **80 GB** of memory ([CS336 lecture 2](https://cs336.stanford.edu/)).
 
 ## What training keeps in memory
 
@@ -25,12 +27,12 @@ Training memory has four parts:
 
 1. **Weights**, used in the forward and backward pass.
 2. **Gradients**, one per weight, produced by the backward pass.
-3. **Optimizer state**: for AdamW, the two moving averages $m$ and $v$ from the [first post](/blog/model-development-one-update/#one-adamw-step-on-one-number), one of each per weight.
+3. **Optimizer state**: for AdamW, the two moving averages $m$ and $v$ from the [first post](/blog/model-development-one-update/#one-adamw-step), one of each per weight.
 4. **Activations**: the intermediate values of the forward pass that the backward pass needs.
 
 The first three scale with the number of parameters $N$. In mixed-precision training, weights and gradients are usually kept in 16-bit BF16 (2 bytes each), and the optimizer moments in 32-bit FP32 (4 bytes each), because they accumulate many small updates. That makes **12 bytes per parameter**, the count CS336 uses.
 
-Many large-scale systems also keep an FP32 **master copy** of the weights, apply the update to it, and cast it down to BF16 for the next step. That adds 4 bytes, for **16 bytes per parameter**, the count used in the ZeRO paper ([ZeRO](https://arxiv.org/abs/1910.02054), §3.1). The reason for the master copy is that BF16 cannot hold small updates: it keeps only 8 significant bits, so near 1.0 the next representable number is 1.0078, and adding 0.001 to a BF16 weight of 1.0 leaves it at exactly 1.0. The [small training run](/blog/model-development-small-training-run/#5-precision) demonstrates this. Both conventions are in use; which one a framework follows is a configuration choice, and it changes the memory bill by a third.
+Many large-scale systems also keep an FP32 **master copy** of the weights, apply the update to it, and cast it down to BF16 for the next step. That adds 4 bytes, for **16 bytes per parameter**, the count used in the ZeRO paper ([ZeRO](https://arxiv.org/abs/1910.02054), §3.1). The reason for the master copy is that BF16 cannot hold small updates: it keeps only 8 significant bits, so near 1.0 the next representable number is 1.0078, and adding 0.001 to a BF16 weight of 1.0 leaves it at exactly 1.0. The [small training run](/blog/model-development-small-training-run/#6-precision) demonstrates this. Both conventions are in use; which one a framework follows is a configuration choice, and it changes the memory bill by a third.
 
 At 16 bytes per parameter, a 7-billion-parameter model needs **112 GB** for weights, gradients and optimizer state alone. It does not fit on one 80 GB GPU before a single activation is stored. That is the problem the [sharding post](/blog/model-development-sharding-recomputation/) solves.
 
@@ -69,7 +71,6 @@ Three examples in BF16, with $n = 1{,}024$ (CS336 lecture 2):
 
 Training spends most FLOPs in large matrix multiplications, so it can approach the compute limit. The elementwise operations around them (norms, activations, residual additions) are memory-bound, which is why fusing them into fewer kernels helps. Generating text one token at a time is mostly matrix-times-vector work, which is why inference is usually memory-bound; the [inference post](/blog/model-development-inference-serving/) builds on this.
 
-Everyday picture: a chef (the arithmetic units) and a single narrow pantry door (memory bandwidth). Making a big stew from a few bulk ingredients keeps the chef busy; plating hundreds of garnishes, each fetched separately, leaves the chef waiting at the door.
 
 **Try it: will it fit?** You want to fine-tune the 1.24-billion-parameter model from the [architecture post](/blog/model-development-decoder-architecture/#rules-of-thumb-and-what-they-are) (16 layers, width 2,048, 32 heads) with AdamW on a single 24 GB GPU, at sequence length 1,024 and batch size 1. Does it fit?
 
@@ -79,15 +80,6 @@ Everyday picture: a chef (the arithmetic units) and a single narrow pantry door 
 
 - **Out of memory.** Work out which term grew: state (more parameters, master weights), activations (longer sequences, bigger batches) or temporaries (logits over a large vocabulary). The remedy differs: sharding for state, recomputation or smaller microbatches for activations.
 - **Slow steps.** Measure achieved FLOP/s and compare with peak. Low MFU with large matrices points to communication or input stalls; low MFU dominated by small operations points to memory-bound kernels. A profiler shows which; the [running-at-scale post](/blog/model-development-running-at-scale/) covers how to read one.
-
-
-## What to remember
-
-- Training memory is weights, gradients, optimizer state and activations. Mixed-precision AdamW needs 12 bytes per parameter, or 16 with FP32 master weights.
-- Activations scale with batch × sequence × width, plus an attention term that grows with the square of the sequence; at long sequences that term dominates.
-- Training time is $6ND$ divided by GPUs × peak × MFU; 50% MFU is good.
-- Arithmetic intensity, FLOPs per byte moved, decides whether an operation is compute-bound or memory-bound; the H100's ridge is about 295.
-- Large matrix multiplications are compute-bound; matrix-vector products and elementwise operations are memory-bound.
 
 
 ## Sources

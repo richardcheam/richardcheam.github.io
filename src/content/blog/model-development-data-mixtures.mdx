@@ -3,21 +3,23 @@ title: "Data mixtures and repetition: deciding how often the model sees each sou
 date: 2026-11-10
 category: deep-learning
 read_time: "14 min"
-series_order: 3
+series_order: 4
 series: model-development
 featured: false
 published: true
 excerpt: "A training corpus is not one dataset but several, and the sampling weights decide how many times the model sees each one. Turn weights into token exposure, see how temperature sampling and epoch caps protect small sources, and learn what is and is not known about repeating data."
-question: "How do sampling weights decide how often each source is seen, and when is repeating data acceptable?"
+question: "How do sampling weights decide how often the model sees each source, and when is repeating a source acceptable?"
 my_work: "A concept post with small worked examples; temperature sampling and UniMax checked against the UniMax paper, repetition results against Muennighoff et al. (2023), annealing against Llama 3."
 result: "Exposure is weight times budget divided by source size; flattening the weights protects small sources but repeats them; how much repetition is acceptable is an empirical question with useful published priors."
 evidence_limit: "Worked examples use illustrative source sizes; published findings hold in their stated settings."
 lesson: "Sampling weights are part of the objective: they decide how many times each kind of text is trained on. Compute exposure before training, and measure, not assume, what repetition costs."
 ---
 
-The [previous post](/blog/model-development-pretraining-corpus/) built one corpus from the web. Real pre-training draws from several: filtered web text, code, books, papers, mathematics, and text in many languages. They differ enormously in size. There is far more web text than mathematics, and far more English than Khmer. So a second decision sits on top of corpus construction: **how often should the model see each source?**
+**Question: how do sampling weights decide how often the model sees each source, and when is repeating a source acceptable?**
 
-That decision is made with **sampling weights**, and it is easy to underestimate. The weights decide which kinds of text dominate the loss, and, because small sources run out, how many times some text is repeated. This post turns weights into exposure, shows the standard ways of setting them, and separates what is known about repetition from what has to be measured.
+A source's exposure is its weight times the training budget, and the number of passes over it is that exposure divided by its size, so asking a small source for a modest share of a large budget silently repeats it. Flattening the weights (temperature sampling) or capping passes (UniMax) trades coverage of small sources against repetition. How much repetition is acceptable has to be measured at your scale; one large study found up to about four passes nearly as good as fresh data for its models, which is a prior, not a limit.
+
+The [corpus post](/blog/model-development-pretraining-corpus/) built one corpus from the web. Real pre-training draws from several, such as filtered web text, code, books, mathematics and many languages, of very different sizes. This post turns weights into exposure, compares the standard ways to set them, and separates what is known about repetition from what has to be measured.
 
 ## From weights to exposure
 
@@ -70,7 +72,6 @@ With $\tau = 2$ the small language gets nine times more exposure than proportion
 
 **Capping repetition.** UniMax makes the cap explicit: give every source the same share of the budget, except that no source may be repeated more than $N$ times; whatever a capped source cannot use is shared among the rest (UniMax, §3, Algorithm 1). With $N = 4$ in the example, the low-resource language gets $4 \times 4 = 16$ billion tokens, exactly 4 passes, and the remaining 204 billion go to the high-resource language. In UniMax's experiments this beat temperature sampling across the model sizes it tested (UniMax, abstract).
 
-Everyday picture: a library reading list for a year. Proportional sampling has you read whatever the library holds most of; uniform sampling gives the one slim volume of poetry as much time as the entire history section, so you reread it dozens of times. A cap says: read the poetry at most four times and spend the rest of the year elsewhere.
 
 ## What repeating data costs
 
@@ -97,16 +98,9 @@ Llama 3 also used annealing as a cheap test of data value: take a half-trained m
 
 ## Choosing weights in practice
 
+For a base checkpoint you already have, the same annealing idea becomes a decision about what to train next; the [base-checkpoint post](/blog/model-development-base-checkpoint/) works through one.
+
 Most weights are set by a combination of judgement and small experiments: train small models on a few mixtures, compare them on the evaluations you care about, and pick the best. Two assumptions hide in that procedure, as CS336's data lecture points out: that the small-scale comparison picks the right mixture, and that the best mixture at small scale is still best at large scale. Scale-dependent effects like Llama 3's annealing result are a reason to check the second at least once near the real scale. Methods that optimize mixtures with proxy models or regression exist (see further reading); they automate the search but rest on the same assumptions.
-
-
-## What to remember
-
-- Exposure to a source is weight × budget ÷ source size. Compute it in passes for every source before training.
-- Proportional sampling sees everything equally often but gives small sources little weight; uniform sampling repeats small sources heavily; temperature sampling sits between, with $w_s \propto p_s^{1/\tau}$.
-- UniMax gives sources equal shares but caps how many times any source is repeated.
-- Repetition teaches less than fresh data. In one large study up to about 4 passes changed the loss negligibly and further passes added little; treat that as a prior for your setting, not a limit.
-- Mixtures can change during training: upsampling high-quality data at the end helped Llama 3's smaller model more than its largest.
 
 
 ## Try it yourself

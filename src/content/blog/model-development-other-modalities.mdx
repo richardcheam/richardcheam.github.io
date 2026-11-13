@@ -3,19 +3,23 @@ title: "Beyond text: what transfers to vision, speech and multimodal models"
 date: 2026-11-10
 category: deep-learning
 read_time: "12 min"
-series_order: 26
+series_order: 27
 series: model-development
 featured: false
 published: true
-excerpt: "Almost everything in this series was taught with language models. Much of it transfers directly to images, speech and multimodal systems; some of it does not. Learn which principles carry over, how images and sound become tokens, where objectives and architectures differ, and why counting audio tokens depends on layout: Mimi emits 100 codec symbols per second, while Moshi's main transformer processes 12.5 temporal positions per second."
-question: "Which principles carry over to vision, speech and multimodal models, and where do objectives and architectures differ?"
+excerpt: "An optional follow-on to the series. Almost everything in it was taught with language models. Much of it transfers directly to images, speech and multimodal systems; some of it does not. Learn which principles carry over, how images and sound become tokens, where objectives and architectures differ, and why counting audio tokens depends on layout: Mimi emits 100 codec symbols per second, while Moshi's main transformer processes 12.5 temporal positions per second."
+question: "Which parts of this series carry over to images, speech and multimodal models, and what changes?"
 my_work: "A concept post connecting this series to the site's speech and Foundations posts; token counts computed from ViT's patch size and Mimi's frame rate; method summaries from the ViT, CLIP and LLaVA papers."
 result: "A 224 × 224 image becomes 196 ViT patches; a second of speech becomes 100 Mimi codec symbols (12.5 frames × 8 codebooks), which Moshi models as 12.5 positions per second of its main transformer, with a smaller depth transformer handling the 8 codebooks within each frame; vision–language models connect a vision encoder to a language model through a learned projection."
 evidence_limit: "Token rates are for the specific tokenizers cited; the speaking rate is illustrative."
 lesson: "The training machinery transfers: tokens, next-token or denoising objectives, scaling, distributed training, post-training and evaluation discipline. What changes is how the signal is tokenized, how many tokens it costs, which objective fits it, and how quality is judged."
 ---
 
-This series used language models as its teaching vehicle because text is where the methods were developed and are easiest to see. But the same ideas now train image, speech and video models, and systems that handle several at once. This post maps what carries over and what does not, without trying to cover each modality in depth; the site's [speech posts](/blog/mimi-codec-explained/) and [Foundations series](/blog/foundations-diffusion-flow/) go further.
+**Question: which parts of this series carry over to images, speech and multimodal models, and what changes?**
+
+The training machinery carries over almost unchanged: the update, data curation, scaling arithmetic, distributed training, post-training and evaluation discipline. What changes is how the signal becomes tokens, which objective fits it, and how quality is judged. Tokenization is the first design question for a new modality, and its cost depends on layout as well as rate: a second of speech is 100 Mimi codec symbols (12.5 frames × 8 codebooks), but Moshi's main transformer processes 12.5 temporal positions per second because a smaller depth transformer handles each frame's codebooks.
+
+This is an optional follow-on to the [capstone](/blog/model-development-how-it-fits/): the series is complete without it. It maps what carries over and what does not, without covering each modality in depth; the site's [speech posts](/blog/mimi-codec-explained/) and [Foundations series](/blog/foundations-diffusion-flow/) go further.
 
 ## What carries over almost unchanged
 
@@ -59,17 +63,6 @@ A common way to build a vision–language model reuses components: a pre-trained
 
 Evaluation is where modalities differ most. Text has exact-match and judged quality; images are judged by human preference and by distributional measures; speech by intelligibility (word error rate of a transcription), similarity to a target speaker, and listening tests. The [speech evaluation post](/blog/speech-evaluation-metrics/) walks through those metrics. The discipline from the [application-evaluation post](/blog/model-development-evaluating-applications/) holds unchanged: real test sets, paired comparisons, error bars and suspicion of any single number.
 
-Everyday picture: a factory that once made only books retooling for photographs and records. The presses, the logistics, the accounting and the quality control are reused; what changes is how each product is cut into pieces, how big each order is, and how a customer decides whether it is good.
-
-
-## What to remember
-
-- Transformers, training mechanics, distributed training, data discipline, scaling laws and post-training transfer across modalities.
-- The first design question for a new modality is tokenization: patches for images (196 for a 224 × 224 image), codec frames for speech (Mimi: 12.5 frames per second, 100 codec symbols per second over 8 codebooks).
-- Sequence length depends on layout as well as on the codec: Moshi models 12.5 positions per second and generates each frame's 8 codebooks with a depth transformer, so symbol counts are not a direct compute or KV-cache multiplier.
-- Objectives follow the data: next-token prediction, contrastive alignment of pairs (CLIP), denoising (diffusion, flow) or transcription (Whisper).
-- Vision–language models often join a vision encoder to a language model through a learned projection, then instruction-tune.
-- Quality is judged differently per modality; the evaluation discipline is the same.
 
 
 ## Sources

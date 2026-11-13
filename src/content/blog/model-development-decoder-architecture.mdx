@@ -3,7 +3,7 @@ title: "The decoder architecture: the choices that matter and what they cost"
 date: 2026-11-10
 category: deep-learning
 read_time: "15 min"
-series_order: 5
+series_order: 6
 series: model-development
 featured: false
 published: true
@@ -15,9 +15,11 @@ evidence_limit: "Arithmetic from published configurations; design choices summar
 lesson: "Most architecture choices trade training stability, inference memory or compute against each other. Count parameters and KV-cache bytes before choosing."
 ---
 
-If you open the configuration of almost any open language model released in the last few years, you will find the same skeleton: a stack of decoder blocks, each with attention and a feed-forward network, wrapped in residual connections. The [Foundations post on the Transformer](/blog/foundations-transformer/) builds that skeleton and counts GPT-2's parameters by hand. What changed since GPT-2 is a short list of choices that make models train more stably, run more cheaply and handle longer text.
+**Question: which choices in a modern decoder matter, and what does each one cost or buy?**
 
-[Llama 3](https://arxiv.org/abs/2407.21783)'s report says it plainly: its architecture "does not deviate significantly" from earlier Llama models, and its gains come mainly from data and scale (§3.2). So this post is not a tour of novelties. It answers a practical question: for each choice, what does it buy and what does it cost? We use Llama 3 8B's published configuration as the running example: 32 layers, width 4,096, feed-forward width 14,336, 32 query heads, 8 key-value heads, a 128,000-token vocabulary, SwiGLU activations and rotary positions (Table 3).
+A handful: pre-normalization (RMSNorm) for stable training, SwiGLU feed-forward networks, rotary positions, grouped-query attention, and sometimes mixture-of-experts. Their effects are easiest to see as arithmetic. In Llama 3 8B, 81% of each layer's parameters sit in the feed-forward network, so that is where width decisions bite; grouped-query attention with 8 key-value heads instead of 32 cuts the KV cache from 512 to 128 KiB per token, which is what decides how many requests fit in memory at serving time; mixture-of-experts separates the parameters a model stores from those each token uses.
+
+The [Foundations post on the Transformer](/blog/foundations-transformer/) builds the basic block and counts GPT-2's parameters. [Llama 3](https://arxiv.org/abs/2407.21783)'s report says its architecture "does not deviate significantly" from earlier Llama models and that gains came mainly from data and scale (§3.2), so this post is not a tour of novelties: for each choice, it asks what it buys and what it costs. The running example is Llama 3 8B's published configuration (32 layers, width 4,096, feed-forward width 14,336, 32 query heads, 8 key-value heads, a 128,000-token vocabulary; Table 3). The model in the [small training run](/blog/model-development-small-training-run/) is the same design at toy size: 4 layers of width 128 and 1,066,112 parameters, a quarter of them in its 2,048-token embedding, because at that size the vocabulary dominates.
 
 ## The block
 
@@ -87,15 +89,6 @@ Defaults like these are reasonable starting points. What matters more is checkin
 **Try it: size a model.** A 1-billion-class configuration has 16 layers, width 2,048, feed-forward width 8,192 (SwiGLU), 32 query heads, 8 key-value heads and a 128,000-token vocabulary shared between input and output. Estimate its parameter count and its KV cache per token in BF16.
 
 **Answer.** Head dimension: 2,048 / 32 = 64. Per layer, attention is $2 \times 2{,}048^2$ for queries and outputs plus $2 \times 2{,}048 \times (8 \times 64)$ for keys and values, about 10.5 million; the feed-forward network is $3 \times 2{,}048 \times 8{,}192 \approx 50.3$ million. Sixteen layers: about 0.97 billion. The shared embedding adds $128{,}000 \times 2{,}048 \approx 262$ million, so the total is about **1.24 billion**. More than a fifth of this "1B" model is vocabulary, the effect seen in the [tokenization post](/blog/model-development-tokenization/#vocabulary-size). The KV cache is $2 \times 16 \times 8 \times 64 \times 2 = 32{,}768$ bytes, **32 KiB per token**: a quarter of Llama 3 8B's.
-
-
-## What to remember
-
-- Modern decoders are pre-norm Transformers with RMSNorm, SwiGLU, rotary positions and grouped-query attention; most gains since GPT-2 came from data and scale, not architecture.
-- Most parameters are in the feed-forward networks: 81% of each Llama 3 8B layer.
-- KV cache per token is $2 \times L \times h_{kv} \times d_{\text{head}} \times$ bytes; grouped-query attention cut Llama 3 8B's from 512 to 128 KiB.
-- The RoPE base sets how slowly the slowest positions rotate; raising it is one ingredient of long context, not the whole recipe.
-- Mixture-of-experts separates total parameters (memory, knowledge) from active parameters (compute per token), at the cost of memory, balancing and communication.
 
 
 ## Sources

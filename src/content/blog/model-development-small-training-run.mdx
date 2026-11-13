@@ -2,14 +2,14 @@
 title: "A complete small training run: from raw text to a checkpoint you can trust"
 date: 2026-11-10
 category: deep-learning
-read_time: "17 min"
-series_order: 6
+read_time: "15 min"
+series_order: 2
 series: model-development
 featured: false
 published: true
-excerpt: "Train a one-million-parameter language model on a laptop CPU, end to end: tokenizer, data splits, model, AdamW with warmup and cosine decay, gradient clipping, validation, checkpoints that resume bit for bit, and a precision check. Then break it on purpose and read the curves."
-question: "What does a complete small training run involve, and how do you know it is working?"
-my_work: "Five real training runs of a 1.07M-parameter decoder on Tiny Shakespeare on an Apple M1 CPU (about 75 seconds each), plus a stop-and-resume test and a BF16 evaluation check; every number on the page comes from scripts/course/p6_train.py."
+excerpt: "How do you know a training run is working before you spend real compute on it? Put the training update in a loop on a one-million-parameter model, reproduce it on a laptop CPU with three commands, and read five real runs that change only the learning-rate schedule and clipping."
+question: "How do you know a training run is working before you spend real compute on it?"
+my_work: "Five real training runs of a 1.07M-parameter decoder on Tiny Shakespeare on an Apple M1 CPU (about 75 seconds each), plus a stop-and-resume test and a BF16 evaluation check; every number on the page comes from scripts/course/p6_train.py, which also checks labels directly and has a baseline-only mode."
 result: "The initial loss matched ln V (7.65 against 7.62); the baseline reached 4.13 validation loss; skipping warmup cost 0.31 nats and a ten times larger learning rate 0.65; resuming from a checkpoint at step 300 reproduced the uninterrupted run bit for bit: every unrounded loss, the final weights and the AdamW state; BF16 evaluation matched FP32."
 evidence_limit: "One tiny model on 1 MB of text for about 3.5 passes; behaviour at scale (loss spikes, divergence) is described from the other posts, not reproduced here."
 lesson: "A trustworthy run checks itself: initial loss, a held-out curve, exact resumption and a precision check are cheap and catch most silent errors."
@@ -17,32 +17,54 @@ lesson: "A trustworthy run checks itself: initial loss, a held-out curve, exact 
 
 import LossCurves from "../../components/figures/LossCurves.astro";
 
-The posts so far took one piece of training at a time: [one update](/blog/model-development-one-update/), [the corpus](/blog/model-development-pretraining-corpus/), [mixtures](/blog/model-development-data-mixtures/), [the tokenizer](/blog/model-development-tokenization/) and [the architecture](/blog/model-development-decoder-architecture/). This post puts them together in a run small enough to do on a laptop CPU in about a minute and a quarter, so that every step can be checked. The model is tiny and the text is 1 MB of Shakespeare, but the steps, and the ways they go wrong, are the ones a large run has.
+**Question: how do you know a training run is working before you spend real compute on it?**
 
-We train the same model five ways, keep everything else fixed, and read the curves.
+Run checks that fail loudly on the cheap bugs before trusting the curves: the targets are the inputs shifted by one (check them directly), the first loss is close to $\ln V$ for a vocabulary of $V$ tokens (a smoke test for initialization), held-out loss on fixed batches falls, and a stop-and-resume reproduces the uninterrupted run. Then change one thing at a time and compare validation curves. In the run below, on a one-million-parameter model, skipping warmup cost 0.31 nats and a learning rate ten times too high cost 0.65, and neither failure looked like a crash.
 
-## 1. Prepare the data
+This post puts the [training update](/blog/model-development-one-update/) from the previous post into a loop, small enough to run on a laptop CPU in about 75 seconds per run. It uses a tokenizer, a corpus split and a model architecture without explaining them; the next posts do, in order: [the corpus](/blog/model-development-pretraining-corpus/), [mixtures and repetition](/blog/model-development-data-mixtures/), [the tokenizer](/blog/model-development-tokenization/) and [the architecture](/blog/model-development-decoder-architecture/). You can come back here after them and every choice will have a reason.
 
-The corpus is Tiny Shakespeare: 1,115,394 characters of plays. Four decisions come before any training:
+## Reproduce it
 
-- **Split before anything else.** The last 10% of the text is held out for validation. The split is contiguous rather than random: neighbouring lines of a play are nearly the same text, so a random split would put near-copies of validation text into training.
-- **Train the tokenizer on the training split only.** A byte-level BPE tokenizer with 2,048 entries, trained as in the [tokenization post](/blog/model-development-tokenization/), gives 2.89 characters per token. Training it on validation text too would leak information about that text into the vocabulary.
-- **Count tokens:** 346,827 for training and 43,559 for validation.
-- **Count passes.** Each step trains on 16 sequences of 128 tokens, 2,048 tokens; 600 steps make 1.23 million tokens, about **3.5 passes** over the training data. The [mixtures post](/blog/model-development-data-mixtures/#what-repeating-data-costs) explains why that number matters.
+Everything on this page comes from one script, `scripts/course/p6_train.py`, with pinned dependencies and a pinned input file. From a clone of the [site repository](https://github.com/richardcheam/richardcheam.github.io), with Python 3.10 to 3.12:
 
-## 2. Build the model and check its starting point
+```bash
+python3 -m venv .venv && . .venv/bin/activate
+pip install -r scripts/course/requirements-p6.txt     # torch 2.6.0, tokenizers 0.21.0
+curl -sLo input.txt https://raw.githubusercontent.com/karpathy/char-rnn/6f9487a6fe5b420b7ca9afb0d7c078e37c1d1b4e/data/tinyshakespeare/input.txt
+python scripts/course/p6_train.py input.txt --baseline-only
+```
 
-The model is the modern block from the [architecture post](/blog/model-development-decoder-architecture/) at toy size: 4 layers, width 128, 4 heads, a SwiGLU feed-forward network of width 352, rotary positions, RMSNorm before each sub-layer, and input and output embeddings tied. That is **1,066,112 parameters**, a quarter of them in the 2,048 × 128 embedding.
+The last command trains the baseline, runs the label check and the stop-and-resume test, and writes nothing (about 3 minutes on an Apple M1). Its output should include:
 
-Before training, check the loss. A freshly initialized model with small random weights predicts close to uniformly over the vocabulary, so its loss should be about $\ln V$.
+```text
+vocab 2048, train 346,827 tokens (2.89 chars/token), val 43,559
+parameters 1,066,112; loss at initialization 7.650 vs ln V = 7.625
+label check: targets equal inputs shifted by one; ...
+baseline: final val 4.126, ...
+resume at 300: unrounded losses, final weights and optimizer state identical: True
+```
 
-**Try it: predict the first loss.** What loss should the untrained model have on a vocabulary of 2,048 tokens?
+Dropping `--baseline-only` reproduces everything below: the five runs, the resume and precision checks, and the data behind Figure 1 (about 10 minutes). The script refuses any `input.txt` whose SHA-256 differs from the pinned file. Exact losses can differ in the last digits on other CPUs or PyTorch builds; the comparisons between runs should not.
 
-**Answer.** About $\ln 2{,}048 \approx 7.62$ nats per token, the loss of a uniform guess. The measured value was **7.65**. A first loss far above $\ln V$, say 30, would mean the initialization makes some logits huge, so the model starts out confidently wrong; one far below would mean the targets leak into the inputs. Both are bugs, and this check catches them for free.
+## 1. Data: split first, then count passes
 
-## 3. The training loop
+The corpus is Tiny Shakespeare, 1,115,394 characters of plays.
 
-The loop is the update from the first post, repeated:
+- **Split before anything else**, and contiguously: the last 10% is validation. Neighbouring lines of a play are nearly the same text, so a random split would put near-copies of validation text into training.
+- **Train the tokenizer on the training split only.** A byte-level BPE with 2,048 entries gives 2.89 characters per token: 346,827 training tokens and 43,559 validation tokens.
+- **Count passes.** Each step trains on 16 sequences of 128 tokens, 2,048 tokens; 600 steps are 1.23 million tokens, about **3.5 passes** over the training data. The [mixtures post](/blog/model-development-data-mixtures/#what-repeating-data-costs) explains why that number matters.
+
+## 2. Model and the first two checks
+
+The model is a small modern decoder: 4 layers, width 128, 4 heads, a SwiGLU feed-forward network of width 352, rotary positions, RMSNorm before each sub-layer, and tied input and output embeddings, **1,066,112 parameters** in all (the [architecture post](/blog/model-development-decoder-architecture/) explains each choice).
+
+**Labels.** The script asserts that the targets equal the inputs shifted by one and prints a row of each. This is the check that catches a double shift or a missing one; nothing else on this page does so directly.
+
+**First loss.** A freshly initialized model predicts close to uniformly, so its loss should be about $\ln V = \ln 2{,}048 \approx 7.62$ nats. The measured value was **7.65**. Treat this as a smoke test: a first loss of 30 means some logits start huge, and one far below $\ln V$ suggests targets leaking into inputs, but a correct first loss says nothing about whether the labels are right.
+
+## 3. The loop
+
+The loop is the update from the previous post, repeated:
 
 ```python
 for step in range(600):
@@ -59,29 +81,42 @@ for step in range(600):
         log(step, loss, evaluate(model), norm)   # held-out loss on fixed batches
 ```
 
-The optimizer is AdamW with betas (0.9, 0.95) and weight decay 0.1 on the weight matrices only (norm weights are not decayed), as in many open recipes. Gradients are clipped to a global norm of 1.
+AdamW uses betas (0.9, 0.95) and weight decay 0.1 on weight matrices only; gradients are clipped to a global norm of 1. The learning rate rises linearly over 50 steps of **warmup**, then follows a cosine down to 10% of the peak. Warmup exists because Adam's first steps move every parameter by about the full learning rate ([previous post](/blog/model-development-one-update/#one-adamw-step)), which can push random weights somewhere they never recover from; the decay lets the loss settle at the end, so the schedule should match the run's real length (the [Chinchilla review](/paper-reviews/chinchilla/) shows how a mismatched schedule distorts comparisons).
 
-## 4. The learning-rate schedule
+Every 25 steps the model is evaluated on the **same** 20 validation batches. Random batches would add sampling noise to every point and hide small differences between runs.
 
-The learning rate rises linearly from almost zero to its peak over the first 50 steps, the **warmup**, then follows a cosine curve down to 10% of the peak at the end. Both halves have reasons.
+## 4. Read the curves
 
-**Warmup.** In the first steps Adam's moment estimates are based on a handful of gradients, and as the [first post](/blog/model-development-one-update/#one-adamw-step-on-one-number) showed, its first update moves every parameter by about the full learning rate, whatever its gradient. With random weights and a large learning rate, those early steps can push the model somewhere it never recovers from. Starting small gives the moment estimates time to settle.
+<figure class="blog-figure blog-figure--wide">
+  <LossCurves alt="Validation loss against training step for five runs. The baseline falls from 7.64 to 4.13; without warmup it ends at 4.44; with a ten times higher peak learning rate at 4.77; with a peak of 0.1 at 5.40, and 5.46 without clipping. A dashed line shows the baseline's smoothed training loss below its validation loss. A small panel shows gradient norms mostly near 0.5 for the baseline and spiking up to 15 without clipping." />
+  <figcaption><strong>Figure 1. Five real runs of the same model.</strong> Only the learning-rate schedule and clipping change. Without warmup the model is ahead for a few dozen steps and then falls behind for good; with too high a learning rate it stalls far above the baseline. The dotted line marks the loss of a uniform guess, where every run starts.</figcaption>
+</figure>
 
-**Decay.** Late in training, a high learning rate keeps the weights bouncing around a good region instead of settling into it. Decaying it lets the loss fall further at the end, which is also why a schedule should be set for the length the run will actually have: the [Chinchilla review](/paper-reviews/chinchilla/) shows how a mismatched schedule distorts comparisons.
+The **baseline** (peak learning rate 0.003, 50 warmup steps) reaches a validation loss of **4.13**, a perplexity of $e^{4.13} \approx 62$. Its smoothed training loss ends near 3.88, about 0.25 below validation: partly the model fitting text it has seen three or four times, partly that the last tenth of the file is a different stretch of the plays. Watching that gap is how you would notice memorization starting.
 
-## 5. Precision
+Each other run changes one thing, and in this run:
 
-Large runs compute in BF16 to halve memory traffic and use fast matrix units, while keeping optimizer state, and often a master copy of the weights, in FP32. The reason is visible in one line: in BF16 the next number above 1.0 is 1.0078, so **1.0 + 0.001 is exactly 1.0**. A small weight update applied directly to BF16 weights can vanish; applied to an FP32 copy it survives. (The [efficient-execution post](/blog/model-development-efficient-execution/#lower-precision) covers FP16, which also needs loss scaling, and FP8.)
+- **No warmup** ends at **4.44**, 0.31 nats worse. It is *ahead* for the first 50 steps (6.01 against 6.18 at step 25) and behind from about step 100 on. Early speed is not a good trajectory, so judge a schedule over hundreds of steps, not dozens.
+- **Peak 0.03**, ten times higher, ends at **4.77**: fast at first, then flat.
+- **Peak 0.1** plateaus at **5.40**, and **5.46 without clipping**. In the baseline the gradient norm has a median of 0.57 after warmup and exceeds 1 in under 1% of steps; without clipping at peak 0.1 it exceeds 1 in 7% of steps and spikes to 15.
 
-This run trains in FP32 on CPU, but checks the other direction: evaluating the trained model with BF16 autocast gives a validation loss of **4.1263**, identical to FP32 to four decimals. For a model this size, computing the forward pass in BF16 costs nothing measurable; the risk is in accumulating updates, not in computing activations.
+No run diverged to infinity or NaN. A small model with tied embeddings and pre-norm is hard to blow up, so too high a learning rate showed up here as a stall. Large models fail more dramatically, with loss spikes that may not recover, which is why large runs watch gradient norms, keep clipping on and keep checkpoints to roll back to. These comparisons are single runs of one seed on one small model: they show what each change did here, not a general ranking.
 
-## 6. Evaluate as you go
+**Try it: diagnose a curve.** A colleague's run starts at 7.6, falls to 6 in 50 steps, then sits at 6 while gradient norms jump between 0.5 and 10. What would you change first?
 
-Every 25 steps the model is evaluated on the same 20 validation batches. Using fixed batches matters: random batches would add sampling noise to every point and hide small differences between runs. The baseline's validation loss falls from 7.64 to **4.13**, a perplexity of $e^{4.13} \approx 62$: the model is as uncertain, on average, as if choosing among 62 equally likely tokens.
+**Answer.** The starting loss is right and early learning works, so data and model are probably fine. A plateau with spiking gradient norms is the signature of a learning rate too high for the later phase, as in the peak-0.1 runs. Lower the peak (or check the decay is actually applied), keep clipping on, and compare validation curves over a few hundred steps before committing to a long run.
 
-The training loss, smoothed over 25 steps, ends near 3.88, about 0.25 below validation. Some of that gap is the model fitting text it has seen three or four times, which is the cost of repetition from the mixtures post; some is that the last tenth of the file is a different stretch of the plays. Watching the gap during training is how you would notice the model starting to memorize.
+## 5. Checkpoints: what the test compares
 
-Loss is not the only evaluation. A sample from the trained model, prompted with "ROMEO:", reads:
+A checkpoint must hold everything that decides what happens next: weights, the optimizer's moments and step counts, the schedule position, and the data sampler's random state. Leave out the optimizer state and Adam restarts from zero moments, a sudden warmup-free jump; leave out the sampler state and the run re-reads data it has seen.
+
+The script stops the baseline at step 300, saves the checkpoint to disk, reloads it into a fresh model and optimizer, continues to 600, and compares with the uninterrupted run. It checks three things for exact equality: the unrounded training loss at all 600 steps, every weight tensor at the end, and every AdamW state tensor at the end. All three were **identical**. Rounded losses would not be enough, since two runs can agree to four decimals while their states drift apart. Bitwise equality is the right test here because this is one CPU process with fixed seeds; on GPUs, nondeterministic kernels usually make the comparison approximate, and you would compare curves within noise instead.
+
+## 6. Precision
+
+Large runs compute in BF16 but keep optimizer state, and often a master copy of the weights, in FP32, because in BF16 the next number above 1.0 is 1.0078: **1.0 + 0.001 is exactly 1.0**, so a small update applied to BF16 weights can vanish. This run trains in FP32; evaluating the trained model with BF16 autocast gave a validation loss of **4.1263**, equal to FP32 to four decimals. For this model, computing activations in BF16 changed nothing measurable; the risk is in accumulating updates. The [efficient-execution post](/blog/model-development-efficient-execution/#lower-precision) covers FP16 and FP8.
+
+A sample prompted with "ROMEO:" shows what 4.13 nats buys: the layout of a play, plausible line lengths and words, no meaning.
 
 ```text
 ROMEO:
@@ -90,48 +125,8 @@ To over one poor behe's steeps, if you yet
 Benvouned in the field, adrimling thousand
 ```
 
-It has learned the layout of a play, line lengths, punctuation and a vocabulary of real and plausible words, but not meaning. Larger models are evaluated with benchmarks; the [post-training](/blog/model-development-post-training-failures/) and [application](/blog/model-development-evaluating-applications/) posts return to evaluation in detail.
-
-## 7. Checkpoints that resume exactly
-
-A checkpoint must contain everything that determines what happens next: the model weights, the optimizer's moments and step count, the position in the learning-rate schedule, and the state of the data sampler and random number generators. Leave out the optimizer state and the run restarts Adam from zero moments, which behaves like a sudden warmup-free jump; leave out the data state and it re-reads data it has already seen.
-
-The test is simple and worth automating: stop a run halfway, save, rebuild everything from the checkpoint and continue, then compare with a run that never stopped. Stopping this run at step 300 and resuming reproduced the uninterrupted run **bit for bit**: the unrounded training loss at every one of the remaining 300 steps, every weight tensor at the end, and AdamW's moment estimates and step counts. Comparing rounded losses would not be enough, because two runs can agree to four decimals while their states drift apart; comparing the final model and optimizer state is what shows nothing was lost. On CPU, with one process and fixed seeds, the computation is deterministic, so bitwise equality is the right test. On GPUs, nondeterministic kernels make bitwise identity harder, but the curves should agree within noise.
-
-## 8. Read the curves
-
-<figure class="blog-figure blog-figure--wide">
-  <LossCurves alt="Validation loss against training step for five runs. The baseline falls from 7.64 to 4.13; without warmup it ends at 4.44; with a ten times higher peak learning rate at 4.77; with a peak of 0.1 at 5.40, and 5.46 without clipping. A dashed line shows the baseline's smoothed training loss below its validation loss. A small panel shows gradient norms mostly near 0.5 for the baseline and spiking up to 15 without clipping." />
-  <figcaption><strong>Figure 1. Five real runs of the same model.</strong> Only the learning-rate schedule and clipping change. Without warmup the model is ahead for a few dozen steps and then falls behind for good; with too high a learning rate it stalls far above the baseline. The dotted line marks the loss of a uniform guess, where every run starts.</figcaption>
-</figure>
-
-Four runs change one thing each:
-
-- **No warmup** (peak 0.003 from step 0): validation loss ends at **4.44**, 0.31 nats worse than the baseline. Interestingly, it is *ahead* for the first 50 steps (6.01 against 6.18 at step 25), because a full learning rate learns fast at first; it falls behind from about step 100 and never catches up. Early speed is not the same as a good trajectory.
-- **Peak 0.03**, ten times higher: **4.77**. The loss falls quickly at first and then flattens.
-- **Peak 0.1**: **5.40**, a plateau far above the baseline.
-- **Peak 0.1 without clipping**: **5.46**. In the baseline the gradient norm has a median of 0.57 after warmup and exceeds 1 in under 1% of steps; here it exceeds 1 in 7% of steps and spikes as high as 15.
-
-Notice what did *not* happen: no run diverged to infinity or NaN. A small model with tied embeddings and normalization before every sub-layer is hard to blow up; too high a learning rate shows up here as a stall. Large models fail more dramatically, with sudden loss spikes that may or may not recover, which is why large runs monitor gradient norms, keep clipping on, and save checkpoints they can roll back to.
-
-**Try it: diagnose a curve.** A colleague's run starts at a loss of 7.6, falls to 6 in 50 steps, and then sits at 6 for the rest of training while gradient norms jump between 0.5 and 10. What would you change first?
-
-**Answer.** The starting loss is right and early learning works, so the data and model are probably fine. A plateau with spiking gradient norms is the signature of a learning rate that is too high for the later phase, as in the peak-0.1 runs above. Lower the peak (or check that the decay schedule is actually being applied), keep clipping on, and compare validation curves over the first few hundred steps before committing to a long run.
-
-
-## What to remember
-
-- Split data before training anything, contiguously, and train the tokenizer on the training split only. Count tokens and passes.
-- Check the initial loss against $\ln V$; it catches initialization and data bugs immediately.
-- Warmup protects the first steps, when Adam's estimates are poor; cosine decay lets the loss settle at the end. In this run, skipping warmup cost 0.31 nats.
-- Keep updates in FP32 (BF16 cannot hold $1 + 0.001$); computing activations in BF16 changed nothing measurable here.
-- Evaluate on fixed held-out batches and watch the train–validation gap.
-- A checkpoint is weights, optimizer state, schedule position and data/RNG state; test that resuming reproduces the run.
-- Too high a learning rate may stall rather than diverge; gradient-norm spikes are the early warning.
-
-
 ## Sources
 
-- Tiny Shakespeare, from A. Karpathy's char-rnn repository (`data/tinyshakespeare/input.txt`, commit 6f9487a).
+- Tiny Shakespeare, from A. Karpathy's char-rnn repository (`data/tinyshakespeare/input.txt`, commit 6f9487a; SHA-256 `86c4e6aa…c565ed`).
 - PyTorch 2.6 and Hugging Face Tokenizers 0.21: `scaled_dot_product_attention`, `AdamW`, `clip_grad_norm_`, `autocast`, byte-level BPE.
 - Stanford CS336, [assignment 1, "Basics"](https://cs336.stanford.edu/): implementing the tokenizer, model, optimizer and training loop from scratch, the natural next step after this post.

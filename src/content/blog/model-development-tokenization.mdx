@@ -3,21 +3,23 @@ title: "Tokenization: what a tokenizer decides before training starts"
 date: 2026-11-10
 category: deep-learning
 read_time: "16 min"
-series_order: 4
+series_order: 5
 series: model-development
 featured: false
 published: true
 excerpt: "The tokenizer is trained before the model and fixed after it, and it quietly decides how much every sentence costs. Follow text through a real tokenizer, compare BPE with Unigram, measure what the same 1,012 sentences cost in English and Khmer under three tokenizers, and see what goes wrong when tokenizers and text disagree."
-question: "How does text become token IDs, and what does the tokenizer cost in compute, context and multilingual coverage?"
+question: "What does a tokenizer cost you in compute, context and coverage, and how would you compare two of them?"
 my_work: "A concept post that builds on the Foundations BPE walkthrough; token counts measured on FLORES-200 devtest with the GPT-2, XLM-R and Qwen2.5 tokenizers in Transformers 4.51.3; Unigram checked against Kudo (2018)."
 result: "On the same 1,012 sentences, Khmer costs 15.2 times as many tokens as English under GPT-2, 6.5 under Qwen2.5 and 1.6 under XLM-R; normalization can change the text itself; a large vocabulary costs parameters."
 evidence_limit: "Token counts are for one parallel corpus and three tokenizers; premiums vary with domain and tokenizer version."
 lesson: "A tokenizer fixes the price of every language and every kind of text. Measure tokens per unit of content in the languages you care about before choosing or training one."
 ---
 
-Before a single weight is trained, a decision has already been made about every piece of text the model will ever see: how it is cut into tokens. The [Foundations post on language models](/blog/foundations-language-models/#cutting-text-into-tokens) shows how byte-pair encoding learns its pieces, merge by merge. This post picks up from there and asks what that decision costs.
+**Question: what does a tokenizer cost you, and how would you compare two of them?**
 
-The answer matters more than it first appears. The model computes per token, its context window is measured in tokens, the training budget from the [previous post](/blog/model-development-data-mixtures/) is counted in tokens, and API prices are charged per token. A tokenizer that needs three times as many tokens for one language as another makes that language three times as expensive in every one of those ways.
+Measure **tokens per unit of content** on text you care about, ideally the same sentences in every language you need. The model computes per token, its context window and training budget are counted in tokens, and APIs charge per token, so a tokenizer that needs three times as many tokens for a language makes it three times as expensive in all of those ways. On the same 1,012 FLORES-200 sentences, Khmer costs 15.2 times as many tokens as English under GPT-2's tokenizer, 6.5 times under Qwen2.5's and 1.6 times under XLM-R's. The tokenizer is trained before the model and fixed after it, so this is a decision you make once.
+
+The [Foundations post on language models](/blog/foundations-language-models/#cutting-text-into-tokens) shows how byte-pair encoding learns its pieces. This post covers what else a tokenizer decides, measures the cost, and shows what goes wrong when tokenizer and text disagree.
 
 ## What a tokenizer does
 
@@ -94,17 +96,6 @@ Other consequential failures:
 - **Token counts in the wrong tokenizer.** Budgets, mixture sizes and context limits are in the model's own tokens; counts from another tokenizer can be off by a large factor, especially outside English.
 - **New special tokens.** Adding tokens, for example for a chat template, adds embedding rows that start untrained. The [fine-tuning post](/blog/model-development-supervised-fine-tuning/) shows how templates use them.
 
-Everyday picture: a tokenizer is like a postage scale with different rates per alphabet. The letter says the same thing in every language, but some senders pay several times more to post it, and the box it has to fit into, the context window, is the same size for everyone.
-
-
-## What to remember
-
-- A tokenizer normalizes, pre-tokenizes, applies BPE or Unigram, and adds special tokens; most consequential choices are in normalization, pre-tokenization and special tokens.
-- BPE grows a vocabulary by merging frequent pairs; Unigram prunes a large one by likelihood and encodes with the most probable segmentation.
-- Measure cost on parallel text: on FLORES-200, Khmer needs 15.2 times as many tokens as English under GPT-2, 6.5 under Qwen2.5 and 1.6 under XLM-R.
-- Every token costs compute, context and training budget, so a tokenizer premium is a price paid three times.
-- A bigger vocabulary shortens sequences but costs $V \times d$ parameters per matrix: 28% of Qwen2.5-0.5B.
-- Normalization can change the text itself; check that encode and decode round-trip on your data.
 
 
 ## Try it yourself

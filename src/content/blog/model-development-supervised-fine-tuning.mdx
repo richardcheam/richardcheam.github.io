@@ -3,21 +3,23 @@ title: "Supervised fine-tuning: teaching a base model to answer"
 date: 2026-11-10
 category: deep-learning
 read_time: "13 min"
-series_order: 14
+series_order: 15
 series: model-development
 featured: false
 published: true
 excerpt: "A pre-trained model continues text; it does not answer. Supervised fine-tuning teaches it to, with the same next-token loss on example conversations. See what a chat template really is, which tokens the loss is computed on and why, how averaging choices reweight examples, and what the open Tülu 3 recipe found about data."
-question: "How does a base model learn to follow instructions, and what do chat templates and loss masks decide?"
+question: "In supervised fine-tuning, which tokens should carry the loss, and why does that choice change the model?"
 my_work: "A concept post; the Tülu 3 chat template rendered and assistant-only labels built with its released tokenizer in Transformers 4.51.3; masking checked in open-instruct's code; data ablations and the loss-aggregation finding read from the Tülu 3 report."
 result: "Fine-tuning is next-token prediction on rendered conversations; with assistant-only labels, 8 of a short conversation's 25 tokens are trained, including the end-of-text token; per-sequence averaging can weight a short reply's tokens 5.5 times more; in Tülu 3, removing math data cut GSM8K from 76.2 to 64.1."
 evidence_limit: "Ablation results are Tülu 3's, for Llama 3.1 8B and its evaluation suite; the masking code is open-instruct's current version, not necessarily the 2024 training code."
 lesson: "Supervised fine-tuning teaches format and behaviour through the same loss as pre-training. The template, the mask, the averaging and the data decide what is learned."
 ---
 
-A pre-trained model has read trillions of tokens, and it has learned to continue text. Give it "What is the capital of France?" and it may answer, or it may continue with "What is the capital of Germany?", because lists of questions are common on the web. Nothing in pre-training told it that a question is a request.
+**Question: in supervised fine-tuning, which tokens should carry the loss, and why does that choice change the model?**
 
-**Supervised fine-tuning** (SFT) teaches the missing behaviour with examples: conversations in which a user asks and an assistant answers well. The surprising part is how little changes mechanically. It is the same next-token loss as the [first post](/blog/model-development-one-update/), on a different kind of text, with a few decisions about which tokens count. Those decisions are what this post is about. You need only the first post to follow it; nothing from the distributed-training posts is required.
+SFT is the same next-token loss as pre-training, applied to conversations rendered through a **chat template**; what is new is which tokens are trained. Training only on the assistant's tokens, including the end-of-text token, teaches the model to answer and to stop, rather than to imitate users; in a short example conversation that is 8 of 25 tokens. How those per-token losses are averaged matters too: averaging per sequence can give a short reply's tokens 5.5 times the weight of a long reply's. The rendered template must match exactly at training and inference time, and the data mix decides which skills appear: in Tülu 3, removing math data cut GSM8K from 76.2 to 64.1.
+
+A base model has learned to continue text, not to treat a question as a request; asked "What is the capital of France?", it may continue with another question. SFT teaches the missing behaviour from examples. You need only the [first post](/blog/model-development-one-update/) and the [base-checkpoint post](/blog/model-development-base-checkpoint/) to follow this one.
 
 ## A conversation becomes text: the chat template
 
@@ -56,7 +58,7 @@ Conversations have very different reply lengths, so averaging matters as much he
 - **Per token:** $(100 \times 1.0 + 10 \times 2.0)/110 \approx 1.09$; every trained token weighs $1/110$.
 - **Per sequence**, averaging each conversation first: $(1.0 + 2.0)/2 = 1.5$; each token of the short reply weighs $1/20$, **5.5 times** as much.
 
-The Tülu 3 team ran into exactly this. Their models trained on GPUs underperformed others, and the cause was loss aggregation in Hugging Face Transformers: with gradient accumulation each sample was averaged separately, so samples, not tokens, were weighted equally, and changing the accumulation steps changed the weighting. They switched to a summed loss, which weights every token equally, retuned the learning rate, and found it generally better (§4.3.2). It is the same trap as mean-then-divide accumulation in the [first post](/blog/model-development-one-update/#gradient-accumulation-must-keep-the-same-objective) and per-rank averaging in the [data-parallelism post](/blog/model-development-data-parallelism/#the-normalization-trap).
+The Tülu 3 team ran into exactly this. Their models trained on GPUs underperformed others, and the cause was loss aggregation in Hugging Face Transformers: with gradient accumulation each sample was averaged separately, so samples, not tokens, were weighted equally, and changing the accumulation steps changed the weighting. They switched to a summed loss, which weights every token equally, retuned the learning rate, and found it generally better (§4.3.2). It is the same trap as mean-then-divide accumulation in the [first post](/blog/model-development-one-update/#gradient-accumulation-must-keep-the-token-mean) and per-rank averaging in the [data-parallelism post](/blog/model-development-data-parallelism/#the-normalization-trap).
 
 ## What the data teaches
 
@@ -79,7 +81,6 @@ Fine-tuning is short and sensitive. Tülu 3's 8B model trained for 2 epochs at a
 
 The base model matters a great deal. The same SFT mix gave 31.5 on MATH from Llama 3.1 8B but 56.4 from Qwen 2.5 Math 7B, a model whose pre-training emphasized mathematics (Table 12). In Tülu 3's setting, a short SFT run mostly drew out and formatted what pre-training had learned; that is not a hard ceiling, since larger or longer fine-tuning, distillation from a stronger model and later RL can all add capability, but it is why choosing the base model is usually the biggest decision.
 
-Everyday picture: SFT is an apprenticeship by example. The apprentice already knows a great deal; watching how answers are given teaches them the shop's format and manners, not the trade itself.
 
 ## What can go wrong
 
@@ -87,15 +88,6 @@ Everyday picture: SFT is an apprenticeship by example. The apprentice already kn
 - **Stop token not trained,** for example because it was masked or truncated: the model runs on past its answer.
 - **Weighting by sequence by accident:** results change when gradient accumulation or the number of GPUs changes. Sum the loss and divide by the global token count.
 - **Contaminated chat data:** real chat logs contain benchmark questions. Tülu 3 found public datasets such as ShareGPT, WildChat and LMSys Chat likely to overlap with test sets and decontaminated its mix (§3.2; App. B.2), at a small cost in measured scores.
-
-
-## What to remember
-
-- SFT is next-token prediction on rendered conversations; the chat template is part of the model and must match at inference.
-- Assistant-only masking trains the replies and their stop tokens; masked prompts still shape the gradient through attention. Training on prompts can also help in some settings.
-- Average per token across the whole batch, not per conversation; otherwise short replies are overweighted and results depend on accumulation and GPU count.
-- Data decides skills: in Tülu 3, removing math data cost 12 points of GSM8K. Seed noise is a few tenths of a point.
-- The base model largely determines what a short SFT run can reach; SFT mostly teaches format and behaviour, though more data, distillation and RL can add capability.
 
 
 ## Sources

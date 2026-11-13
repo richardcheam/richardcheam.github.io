@@ -3,19 +3,23 @@ title: "Prompting, context and structured outputs: controlling what a model does
 date: 2026-11-10
 category: deep-learning
 read_time: "13 min"
-series_order: 20
+series_order: 21
 series: model-development
 featured: false
 published: true
 excerpt: "A prompt is the cheapest way to change a model's behaviour, and the easiest to get subtly wrong. Learn what instructions, examples and reasoning steps actually do, how to budget and order a context window, why sampling several answers and voting helps, and how constrained decoding guarantees valid structured output."
-question: "How do instructions, context and structured outputs control what a model does?"
+question: "When outputs are wrong, inconsistent or unparseable, what can you fix with the prompt alone?"
 my_work: "A concept post; constrained decoding and majority voting implemented on toy examples; findings from the chain-of-thought, self-consistency, lost-in-the-middle and Outlines papers."
 result: "Masking disallowed tokens made all 1,000 toy generations valid JSON, against none without; majority voting over 5 samples raised a 50%-accurate answer to 67% when wrong answers are spread out; models use information at the start and end of long contexts better than in the middle."
 evidence_limit: "Toy examples illustrate mechanisms; paper results are for their models and benchmarks, and prompting effects vary between models."
 lesson: "Treat a prompt as part of the program: state the task and format explicitly, put important information where the model uses it, constrain the output when it must be parsed, and evaluate every change on your evaluation set."
 ---
 
-Once a model is chosen ([previous post](/blog/model-development-choosing-a-model/)), the first and cheapest tool is the **prompt**: everything the model reads before it answers. A prompt cannot teach a model knowledge it lacks, but it decides which of its behaviours you get. This post covers what each part of a prompt does, how to use the context window, and how to make outputs reliably machine-readable.
+**Question: when outputs are wrong, inconsistent or unparseable, what can you fix with the prompt alone?**
+
+The prompt decides which of a model's existing behaviours you get, not what it knows. Fix wrong behaviour with clear instructions and a few examples; fix inconsistency by sampling several answers and voting, which helps when wrong answers are spread out (in a toy with a 50%-accurate answer and three scattered wrong ones, voting over 5 samples reached 67%); fix unparseable output with **constrained decoding**, which masks tokens that would break a schema (all 1,000 toy generations were valid JSON, against none without the mask). Put critical information at the start or end of a long context, because models use the middle less reliably. If the model lacks the information, the fix is retrieval, in the next post.
+
+Once a model is [chosen](/blog/model-development-choosing-a-model/), the prompt, everything the model reads before it answers, is the first and cheapest tool.
 
 ## What a prompt is made of
 
@@ -54,16 +58,6 @@ A toy shows the guarantee. A "model" that likes to begin with "Sure!" and otherw
 
 Two cautions. The constraint guarantees **syntax**, not truth: a valid JSON object can contain a wrong age. And forcing a format the model would not naturally produce can lower quality, because the model may be pushed into tokens it considers unlikely; let it reason in free text first and constrain only the final answer when that matters.
 
-Everyday picture: a form with labelled boxes and dropdown menus. People still write wrong answers, but nobody writes a paragraph in the date field.
-
-
-## What to remember
-
-- Instructions specify; examples demonstrate format and tone (and bias); context supplies information; reasoning space lets the model work before answering.
-- Sampling several answers and voting (self-consistency) helps when wrong answers scatter; it costs one generation per sample.
-- Budget the context in the model's own tokens, keep it relevant, and put the important parts at the start or end.
-- Constrained decoding guarantees valid structure by masking disallowed tokens; it does not guarantee correct content.
-- Evaluate every prompt change on your evaluation set; prompting effects vary between models.
 
 
 ## Sources

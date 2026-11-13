@@ -62,9 +62,13 @@ const cited = new Set([...modules.flatMap(m => m.sourceIds), ...claims.flatMap(c
 for (const s of sources) if (!cited.has(s.id)) errors.push(`${s.id}: source is not cited by any module or claim`);
 const lesson = await html('/blog/model-development-one-update/');
 if (!lesson.includes('class="katex')) errors.push('Lesson P1: math was not rendered');
-for (const n of ['the count is 10 although only 8', '100-fold', '1.5 against 2']) if (!lesson.includes(n)) errors.push(`Lesson P1: worked example missing (${n})`);
+for (const n of ['count 10 targets although 8 are predicted', 'With 1,000 and 10 tokens the factor is 100', 'weights their mean losses 20% and 80%']) if (!lesson.includes(n)) errors.push(`Lesson P1: worked example missing (${n})`);
 const corpus = await html('/blog/model-development-pretraining-corpus/');
 if (!corpus.includes('class="katex')) errors.push('Lesson P2: math was not rendered');
-for (const n of ['short_line_ratio', 'share 91 of 101', 'learning it is the point of pre-training', 'Try it: predict token exposure']) if (!corpus.includes(n)) errors.push(`Lesson P2: worked example missing (${n})`);
+for (const n of ['short_line_ratio', 'leaving 91 of 101 shared', 'It is not learning facts a benchmark also tests', 'Try it: predict token exposure']) if (!corpus.includes(n)) errors.push(`Lesson P2: worked example missing (${n})`);
+const smallRun = await html('/blog/model-development-small-training-run/');
+for (const n of ['--baseline-only', 'requirements-p6.txt', 'resume at 300: unrounded losses, final weights and optimizer state identical: True']) if (!smallRun.includes(n)) errors.push(`Small run: reproduction step missing (${n})`);
+const bridge = await html('/blog/model-development-base-checkpoint/');
+for (const n of ['<strong>illustrative</strong>', 'microanneal', '2.315', '2.282']) if (!bridge.includes(n)) errors.push(`Base checkpoint: worked example missing (${n})`);
 if (errors.length) { console.error(errors.join('\n')); process.exitCode = 1; }
 else console.log(`Checked ${routes.length} pages, ${checkedLinks} internal links/anchors, ${modules.length} modules, ${sources.length} sources and ${claims.length} claims; math, feed, sitemap and OG images present.`);

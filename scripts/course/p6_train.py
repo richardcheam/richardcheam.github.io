@@ -1,17 +1,22 @@
 """A complete small training run on CPU, behind src/content/blog/model-development-small-training-run.mdx.
 
-Run: python3 scripts/course/p6_train.py /path/to/tinyshakespeare/input.txt
-(input.txt from github.com/karpathy/char-rnn at commit 6f9487a, 1,115,394 bytes)
+Run:  python3 scripts/course/p6_train.py input.txt                  # all five runs, resume and precision checks
+      python3 scripts/course/p6_train.py input.txt --baseline-only  # baseline, label check and resume test only
+(input.txt from github.com/karpathy/char-rnn at commit 6f9487a, 1,115,394 bytes;
+dependencies pinned in scripts/course/requirements-p6.txt)
 
 Trains a byte-level BPE tokenizer (2,048 entries) on the first 90% of the text,
 then a 4-layer decoder (pre-norm RMSNorm, SwiGLU, RoPE, tied embeddings) for
 600 steps of 16 x 128 tokens, several ways, and writes the curves to
-scripts/course/data/p6_runs.json. About 10 minutes on an Apple M1 CPU.
+scripts/course/data/p6_runs.json. About 10 minutes on an Apple M1 CPU; --baseline-only
+takes about 3 minutes and writes nothing.
 """
+import hashlib
 import json
 import math
 import os
 import sys
+import tempfile
 import time
 
 import torch
@@ -26,7 +31,12 @@ V, D, L, H, FF, CTX = 2048, 128, 4, 4, 352, 128
 BATCH, STEPS, EVAL_EVERY, EVAL_BATCHES = 16, 600, 25, 20
 
 # -- 1. Data: tokenizer trained on the training split only, then contiguous splits ----------
-text = open(sys.argv[1], encoding="utf-8").read()
+args = [a for a in sys.argv[1:] if not a.startswith("--")]
+BASELINE_ONLY = "--baseline-only" in sys.argv
+raw = open(args[0], "rb").read()
+INPUT_SHA256 = "86c4e6aa9db7c042ec79f339dcb96d42b0075e16b8fc2e86bf0ca57e2dc565ed"
+assert hashlib.sha256(raw).hexdigest() == INPUT_SHA256, "input.txt is not the pinned Tiny Shakespeare file"
+text = raw.decode("utf-8")
 cut = int(0.9 * len(text))
 train_text, val_text = text[:cut], text[cut:]
 tok = Tokenizer(models.BPE())
@@ -152,6 +162,23 @@ if __name__ == "__main__":
         x, y = batch(val_ids, torch.Generator().manual_seed(0))
         init_loss = F.cross_entropy(model(x).reshape(-1, V), y.reshape(-1)).item()
     print(f"parameters {n_params:,}; loss at initialization {init_loss:.3f} vs ln V = {math.log(V):.3f}")
+    # A loss near ln V only says the model starts uniform; check the targets directly.
+    assert torch.equal(y[:, :-1], x[:, 1:]), "targets must be the inputs shifted by one"
+    print(f"label check: targets equal inputs shifted by one; row 0 starts {tok.decode(x[0, :6].tolist())!r} -> {tok.decode(y[0, :6].tolist())!r}")
+    if BASELINE_ONLY:
+        t0 = time.time()
+        _, base_curve, base_ckpt = train(3e-3, 50)
+        print(f"baseline: final val {base_curve['val'][-1][1]:.3f}, {time.time() - t0:.0f}s")
+        _, first_half, ckpt = train(3e-3, 50, stop=300, log=False)
+        path = os.path.join(tempfile.mkdtemp(), "p6_ckpt.pt")
+        torch.save(ckpt, path); ckpt = torch.load(path, weights_only=False); os.remove(path)
+        _, second_half, end_ckpt = train(3e-3, 50, start=ckpt, log=False)
+        same = (first_half["train_raw"] + second_half["train_raw"] == base_curve["train_raw"]
+                and all(torch.equal(a, b) for a, b in zip(end_ckpt["model"].values(), base_ckpt["model"].values()))
+                and all(torch.equal(end_ckpt["opt"]["state"][k][n], base_ckpt["opt"]["state"][k][n]) for k in base_ckpt["opt"]["state"] for n in base_ckpt["opt"]["state"][k]))
+        print(f"resume at 300: unrounded losses, final weights and optimizer state identical: {same}")
+        assert same
+        sys.exit(0)
     runs = {"meta": {"params": n_params, "vocab": V, "train_tokens": len(train_ids), "val_tokens": len(val_ids),
                      "tokens_per_step": BATCH * CTX, "steps": STEPS, "init_loss": round(init_loss, 3), "ln_V": round(math.log(V), 3)}}
     for name, peak, warmup, clip in (("baseline", 3e-3, 50, True), ("no_warmup", 3e-3, 0, True), ("lr_high", 3e-2, 50, True), ("lr_very_high", 1e-1, 50, True), ("lr_very_high_no_clip", 1e-1, 50, False)):
