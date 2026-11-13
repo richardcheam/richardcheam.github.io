@@ -11,7 +11,7 @@ excerpt: "How do you know a training run is working before you spend real comput
 question: "How do you know a training run is working before you spend real compute on it?"
 my_work: "Five real training runs of a 1.07M-parameter decoder on Tiny Shakespeare on an Apple M1 CPU (about 75 seconds each), plus a stop-and-resume test and a BF16 evaluation check; every number on the page comes from scripts/course/p6_train.py, which also checks labels directly and has a baseline-only mode."
 result: "The initial loss matched ln V (7.65 against 7.62); the baseline reached 4.13 validation loss; skipping warmup cost 0.31 nats and a ten times larger learning rate 0.65; resuming from a checkpoint at step 300 reproduced the uninterrupted run bit for bit: every unrounded loss, the final weights and the AdamW state; BF16 evaluation matched FP32."
-evidence_limit: "One tiny model on 1 MB of text for about 3.5 passes; behaviour at scale (loss spikes, divergence) is described from the other posts, not reproduced here."
+evidence_limit: "One tiny model on 1 MB of text, with token exposure equivalent to about 3.5 passes; behaviour at scale (loss spikes, divergence) is described from the other posts, not reproduced here."
 lesson: "A trustworthy run checks itself: initial loss, a held-out curve, exact resumption and a precision check are cheap and catch most silent errors."
 ---
 
@@ -52,7 +52,7 @@ The corpus is Tiny Shakespeare, 1,115,394 characters of plays.
 
 - **Split before anything else**, and contiguously: the last 10% is validation. Neighbouring lines of a play are nearly the same text, so a random split would put near-copies of validation text into training.
 - **Train the tokenizer on the training split only.** A byte-level BPE with 2,048 entries gives 2.89 characters per token: 346,827 training tokens and 43,559 validation tokens.
-- **Count passes.** Each step trains on 16 sequences of 128 tokens, 2,048 tokens; 600 steps are 1.23 million tokens, about **3.5 passes** over the training data. The [mixtures post](/blog/model-development-data-mixtures/#what-repeating-data-costs) explains why that number matters.
+- **Count passes.** Each step trains on 16 sequences of 128 tokens, 2,048 tokens; 600 steps are 1.23 million tokens, the token exposure of about **3.5 passes** over the training data. The script samples random 128-token windows rather than reading the data in order, so this is equivalent exposure: some windows are seen more often than others. The [mixtures post](/blog/model-development-data-mixtures/#what-repeating-data-costs) explains why that number matters.
 
 ## 2. Model and the first two checks
 

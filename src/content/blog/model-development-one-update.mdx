@@ -20,7 +20,9 @@ import BatchToTargets from "../../components/figures/BatchToTargets.astro";
 
 **Question: which parts of one training update change what a language model learns?**
 
-Four conventions do, and getting any of them wrong leaves training running while it optimizes something else: which positions are **targets** (the inputs shifted by one, minus padding and document boundaries), what each position may **attend to** (causal, and within its own document when rows are packed), how per-token losses are **averaged** (pre-training intends the mean over all target tokens, which gradient accumulation must preserve), and how the optimizer turns gradients into a **step** (clipping once per step; AdamW normalizing each parameter's step). Everything later in this series, from corpus building to distributed training, has to feed this update or run it faster without changing its meaning.
+Four conventions: which positions are **targets**, what each position may **attend to**, how per-token losses are **averaged**, and how the optimizer turns gradients into a **step**. Get any of them wrong and training still runs; it just optimizes something else.
+
+The worked batch below carries the details. Everything later in this series, from corpus building to distributed training, has to feed this update or run it faster without changing its meaning.
 
 We follow one small batch through all four. If backpropagation, cross-entropy or Adam are new, the Foundations posts on [backpropagation](/blog/foundations-neurons-backprop/), [softmax and cross-entropy](/blog/foundations-loss-gradient-descent/), [optimisers](/blog/foundations-optimisers/) and [language models](/blog/foundations-language-models/) cover them. The [small training run](/blog/model-development-small-training-run/) that follows puts exactly this update into a loop.
 
