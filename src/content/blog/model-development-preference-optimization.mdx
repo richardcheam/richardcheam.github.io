@@ -3,19 +3,23 @@ title: "Learning from preferences: reward models and DPO"
 date: 2026-11-10
 category: deep-learning
 read_time: "15 min"
-series_order: 16
+series_order: 17
 series: model-development
 featured: false
 published: true
 excerpt: "People find it easier to say which of two answers is better than to write the perfect one. Learn how pairwise preferences become a training signal: the Bradley–Terry model behind reward models, the KL-regularized objective that keeps a policy close to where it started, and how DPO optimizes that objective without a separate reward model."
-question: "How do pairwise preferences become a training signal, through a reward model or directly?"
+question: "How does \"response A is better than response B\" become a gradient, and when would you use DPO instead of a reward model?"
 my_work: "A concept post; Bradley–Terry, the KL-regularized optimum and DPO worked on toy numbers and checked with PyTorch autograd; DPO's derivation followed from the DPO paper; practice from InstructGPT, Llama 3 and Tülu 3."
 result: "With a reference policy (0.5, 0.3, 0.2), rewards (0, 1, 2) and β = 1, the KL-regularized optimum is (0.18, 0.29, 0.53); DPO's gradient pushes up the preferred response and down the rejected one in proportion to how wrongly the implicit reward orders them; Tülu 3 found length-normalized DPO the only variant that beat its starting checkpoint."
 evidence_limit: "Toy examples illustrate the mathematics; reported findings are the papers' own, on their data and evaluations."
 lesson: "Preference learning fits a reward to comparisons and then moves the policy towards higher reward while a KL term keeps it near the reference. DPO does both in one supervised-looking loss."
 ---
 
-After [supervised fine-tuning](/blog/model-development-supervised-fine-tuning/), a model answers in the right format, but it only imitates its examples. Many qualities we want, helpfulness, tone, honesty about uncertainty, are hard to demonstrate and easy to judge: given two answers, people can usually say which is better. **Preference learning** turns those judgements into a training signal. This post needs only the SFT post and basic probability.
+**Question: how does "response A is better than response B" become a gradient, and when would you use DPO instead of a reward model?**
+
+A **reward model** fits a score to each response so that the probability of preferring A over B is a sigmoid of their score difference (the Bradley–Terry model); the policy is then trained to raise that score while a KL penalty keeps it close to a reference model. **DPO** skips the separate reward model: the same KL-regularized objective has a closed-form optimum, so the policy can be trained directly on preference pairs, raising the preferred response's probability relative to the reference and lowering the rejected one's, most strongly when the implicit reward orders the pair wrongly. Use DPO when you have a fixed set of pairs and want a simple, stable offline method; use a reward model when you need to score new samples, as online RL does.
+
+After [SFT](/blog/model-development-supervised-fine-tuning/) a model answers in the right format, but it only imitates. Many qualities we want, such as helpfulness, tone and honesty about uncertainty, are hard to demonstrate and easy to judge. This post needs only the SFT post and basic probability.
 
 ## From comparisons to a reward
 
@@ -88,16 +92,6 @@ The gradient shows what DPO does. On the three-response toy with $\beta = 0.1$, 
 - **Formatting tokens can distort the loss.** Llama 3 masked special formatting tokens out of the DPO loss, because tokens shared by both responses are pushed up and down at once, and added a negative-log-likelihood term with coefficient 0.2 on the chosen response to keep its probability from falling (§4.1.4).
 - **DPO or reinforcement learning?** Llama 3 explored PPO but found DPO needed less compute at large scale and performed better on instruction following (§4.1.4). Tülu 3 used DPO for preferences and added reinforcement learning only where answers can be verified. The next post covers when online RL earns its cost.
 
-Everyday picture: a wine tasting where judges only say which of two glasses they prefer. A reward model learns a score for each wine from those choices; DPO skips the score and adjusts the cellar directly, buying more of what won and less of what lost, but never straying too far from the cellar it started with.
-
-
-## What to remember
-
-- Bradley–Terry: $P(y_w \succ y_l) = \sigma(r_w - r_l)$. A reward model is trained as logistic regression on reward differences; labels are noisy (InstructGPT's labelers agreed 73% of the time), which blurs training and evaluation, though agreement between labelers is not a ceiling on a model's agreement with each of them.
-- The KL-regularized objective trades reward against distance from a reference; its optimum is $\pi^* \propto \pi_{\text{ref}}\exp(r/\beta)$.
-- DPO substitutes the policy's log-ratio for the reward; the normalizer cancels, leaving a logistic loss on the difference of log-ratios of chosen and rejected responses.
-- DPO only constrains the difference: both responses can become less likely. Monitor the chosen response's probability.
-- In practice: prefer on-policy pairs, control for length, and tune $\beta$ for the specific variant.
 
 
 ## Sources

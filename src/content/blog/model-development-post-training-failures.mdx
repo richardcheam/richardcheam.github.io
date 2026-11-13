@@ -3,21 +3,23 @@ title: "When post-training goes wrong: reward hacking, length, shift and how to 
 date: 2026-11-10
 category: deep-learning
 read_time: "13 min"
-series_order: 18
+series_order: 19
 series: model-development
 featured: false
 published: true
 excerpt: "Every post-training method optimizes a proxy: a reward model, a verifier, a benchmark. Learn how optimizing a proxy too hard makes the real thing worse, why longer answers win judgements they should not, how a recipe can overfit its own development benchmarks, and how to evaluate post-training so these failures show up before users find them."
-question: "How do reward hacking, length effects and distribution shift show up, and how should post-training be evaluated?"
+question: "Your post-trained model scores higher on your evaluations: how do you check that it actually got better?"
 my_work: "A concept post; reward-model overoptimization illustrated with a best-of-n simulation; findings read from Gao et al. (2022), Length-Controlled AlpacaEval, InstructGPT, DeepSeek-R1 and Tülu 3's unseen-evaluation analysis."
 result: "In a simulation where a judge rewards length more than quality, best-of-n raises the judge's score steadily while true quality peaks at n = 2 and then falls; Tülu 3's persona data raised IFEval from 53.6 to 72.8 but left an unseen instruction-following test flat (18.0 to 17.6); length control raised AlpacaEval's correlation with Chatbot Arena from 0.94 to 0.98."
 evidence_limit: "The simulation's constants are illustrative; reported findings are the papers' own, in their settings."
 lesson: "Post-training optimizes proxies. Watch what the optimization actually changes (length, refusals, KL), evaluate on held-out tasks you did not tune on, and treat any single benchmark gain with suspicion."
 ---
 
-The last three posts each optimized something: [SFT](/blog/model-development-supervised-fine-tuning/) imitated examples, [DPO](/blog/model-development-preference-optimization/) fitted preferences, [RL](/blog/model-development-reinforcement-learning/) maximized a reward. None of them optimizes what we actually want, a model that is helpful, honest and safe for real users, because that cannot be written as a loss. They optimize **proxies**. This post is about what happens when a proxy and the goal come apart, and how to evaluate post-training so that you notice.
+**Question: your post-trained model scores higher on your evaluations. How do you check that it actually got better?**
 
-The general principle is Goodhart's law: when a measure becomes a target, it ceases to be a good measure. In post-training it takes a few specific, recurring forms.
+Assume the gain may be the proxy rather than the goal, and look for the three usual gaps. **Reward hacking**: the judge or reward model rewards something correlated with quality, often length, so check outputs and control for length; in a simulation where a judge favours length, best-of-$n$ keeps raising the judge's score while true quality peaks at $n = 2$. **Benchmark overfitting**: anything you developed against flatters you, so keep evaluations you never tuned on; Tülu 3's persona data raised IFEval from 53.6 to 72.8 but left an unseen instruction-following test flat. **Side effects**: gains in one skill can cost another, so re-run a broad regression suite.
+
+SFT imitated examples, DPO fitted preferences and RL maximized a reward; none optimizes what we actually want, a model that is helpful, honest and safe for real users, because that cannot be written as a loss. This post is about what happens when a proxy and the goal come apart, and how to evaluate post-training so you notice.
 
 ## Reward hacking and overoptimization
 
@@ -75,16 +77,6 @@ Putting these together, a sound evaluation of a post-trained model:
 5. **Estimates noise.** Tülu 3's SFT runs with different seeds varied by a few tenths of a point on average; differences smaller than that are not results.
 6. **Reads samples.** Overoptimized outputs are often obvious to a person long before a metric moves.
 
-Everyday picture: a school that teaches to the test. Scores rise every term; whether the students learned the subject shows only on an exam they have never seen.
-
-
-## What to remember
-
-- Post-training optimizes proxies. Pushed far enough, a proxy's score keeps rising while the real objective falls (Gao et al.); verifiers can be gamed too.
-- KL penalties, early stopping, hidden tests and human checks limit overoptimization; none removes it.
-- Judges prefer length; length-controlled evaluation fixed much of AlpacaEval's bias (correlation with Chatbot Arena 0.94 to 0.98).
-- Development benchmarks get overfitted: Tülu 3's persona data added 19 points on IFEval and nothing on an unseen version. Keep a held-out suite.
-- Watch side effects: over-refusal, lost capabilities (the alignment tax), style drift. Evaluate what you did not target, estimate noise, and read samples.
 
 
 ## Sources

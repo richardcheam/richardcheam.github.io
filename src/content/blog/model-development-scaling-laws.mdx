@@ -8,16 +8,18 @@ series: model-development
 featured: false
 published: true
 excerpt: "Before a large run starts, someone has to decide how big the model should be and how many tokens it should see. Learn where the 6ND estimate of training compute comes from, what Chinchilla's experiments say about splitting a budget, why the answer changes once the model has to be served, and what small experiments can and cannot predict."
-question: "How should parameters and tokens share a compute budget, and what can small experiments predict?"
+question: "Given a compute budget, how big should the model be and how many tokens should it see?"
 my_work: "A concept post; compute arithmetic checked against Chinchilla's Table 3, the parametric law taken from its Appendix D.2 and the disagreement with a later replication explained; Llama 3's scaling-law method summarized from its §3.2.1."
 result: "Training costs about 6ND FLOPs; Chinchilla's experiments put the compute-optimal ratio near 20 tokens per parameter; serving cost pushes the best choice towards smaller models trained longer; loss is predictable from small runs, downstream accuracy needs a second step."
 evidence_limit: "Scaling-law fits hold for the data, architecture and range they were measured on; the parametric example uses published coefficients that a replication found biased."
 lesson: "Decide model size and token count together, from experiments on your own data, and include the cost of serving the model in the budget."
 ---
 
-The [previous post](/blog/model-development-small-training-run/) trained a model with about a million parameters in minutes. A frontier run costs months and millions of dollars, and it happens once. Before it starts, someone has to decide two numbers: how many parameters the model should have, and how many tokens it should be trained on. Get the split wrong and the same compute buys a worse model.
+**Question: given a compute budget, how big should the model be and how many tokens should it see?**
 
-**Scaling laws** are the tool for that decision: empirical formulas, fitted to many small training runs, that predict how loss changes with model size, data and compute. This post explains the compute arithmetic, what the best-known experiments found, how serving changes the answer, and what small experiments can and cannot tell you.
+Training costs about $6ND$ FLOPs for $N$ parameters and $D$ tokens, and Chinchilla's experiments found that parameters and tokens should grow together, near **20 tokens per parameter** for minimum training loss. That is the right answer only if training is the main cost: once a model is served heavily, a smaller model trained on more tokens is cheaper overall for almost the same loss, which is why deployed models are trained far beyond 20 tokens per parameter. Small runs predict loss well; predicting downstream accuracy takes a second step.
+
+For scale, the [small training run](/blog/model-development-small-training-run/) cost $6 \times 1.07\text{M} \times 1.23\text{M} \approx 7.9 \times 10^{12}$ FLOPs at about 1.2 tokens per parameter, far from 20: a laptop experiment chosen to finish in a minute, not a compute-optimal one. This post explains the compute arithmetic, what the experiments found, how serving changes the answer, and what small experiments can predict.
 
 ## Counting training compute
 
@@ -79,16 +81,6 @@ Scaling laws are only as good as the experiments behind them, and the decision t
 - **A law holds for its setting.** Exponents and the optimal ratio depend on the data, tokenizer, architecture and training recipe. Chinchilla reproduced its IsoFLOP conclusion on two other datasets, C4 and GitHub code (App. C), but a fit on one data mix is not a fit on another. Llama 3 fitted its own law on its own data, finding an exponent of 0.53 for the optimal number of tokens.
 - **Small runs must be done right.** Each point on a scaling curve should be a well-tuned run: learning rate and schedule matched to its length. Comparing an under-tuned small model with a tuned large one fits the tuning, not the scaling.
 
-Everyday picture: a scaling law is a tide table. Fitted to past tides at one harbour, it predicts the next high water remarkably well. It is a poor guide to a different harbour, and it says nothing about whether a particular boat will float.
-
-
-## What to remember
-
-- Training compute is about $6ND$ FLOPs; serving costs about $2N$ per generated token.
-- Chinchilla's experiments found parameters and tokens should scale together, with the compute-optimal ratio near 20 tokens per parameter; its published parametric fit disagrees, and a replication attributes that to fitting problems.
-- The loss curve is flat near the optimum, so a model size within a factor of a few of optimal costs little.
-- If the model will be served heavily, train a smaller model on more tokens than compute-optimal; data availability then becomes the limit.
-- Loss extrapolates well from small runs; downstream accuracy needs a second mapping, and every law holds only for the data and recipe it was fitted on.
 
 
 ## Try it yourself

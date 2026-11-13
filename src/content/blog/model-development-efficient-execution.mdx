@@ -8,14 +8,18 @@ series: model-development
 featured: false
 published: true
 excerpt: "Two ideas make modern training fast without changing what it computes: move less data, and use fewer bits. See how FlashAttention computes exact attention without ever storing the full score matrix, why BF16 replaced FP16, what loss scaling was for, and what FP8 training needs to work."
-question: "Why do IO-aware attention, mixed precision and FP8 speed training, and what do they assume?"
+question: "How can an operation get faster without doing less arithmetic, and what keeps lower-precision training from losing updates?"
 my_work: "A concept post; tiled attention with an online softmax implemented and checked against ordinary attention; number-format behaviour checked in PyTorch 2.6; FP8 scaling compared with one scale and per-block scales; results quoted from the FlashAttention, mixed-precision and DeepSeek-V3 papers."
 result: "Tiled attention matches ordinary attention to 5 × 10⁻⁷ without materializing the score matrix; FlashAttention does 13% more arithmetic but moves 9 times less memory and runs 5.7 times faster in its paper's benchmark; FP8 needs fine-grained scaling to survive outliers."
 evidence_limit: "Speed figures are the papers' own benchmarks on their hardware; the executed checks verify correctness on CPU, not speed."
 lesson: "Speed comes from reducing memory traffic and bits per number while keeping the computation exact or within training noise; each trick has an assumption to check."
 ---
 
-The [GPU post](/blog/model-development-gpu-memory-compute/#compute-bound-or-memory-bound) ended with a diagnosis: much of training is limited not by arithmetic but by moving data between memory and the compute units. This post covers the two most important responses. The first changes *how* an operation is scheduled so it moves less data, without changing its result; the second uses fewer bits per number. Both are now default in serious training, and both come with assumptions worth knowing.
+**Question: how can an operation get faster without doing less arithmetic, and what keeps lower-precision training from losing updates?**
+
+When an operation is memory-bound, moving less data speeds it up even if it does more arithmetic. FlashAttention computes exact attention in blocks that stay on chip and never writes the $N \times N$ score matrix to GPU memory; on GPT-2 medium's attention it did 13% more FLOPs, moved nine times less data and ran 5.7 times faster on an A100. Lower precision cuts memory and traffic too, but a 16-bit format cannot hold small updates (in BF16, $1 + 0.001$ is exactly 1), so matrix products accumulate in FP32 and the optimizer keeps FP32 state. FP16 also needs loss scaling to keep small gradients from flushing to zero; BF16 generally does not.
+
+The [GPU post](/blog/model-development-gpu-memory-compute/#compute-bound-or-memory-bound) showed that much of training waits on memory rather than arithmetic. This post covers the two standard responses: scheduling an operation to move less data, and using fewer bits per number. FP8, which needs per-block scales to work at all, is in an optional section at the end.
 
 ## Attention without the score matrix
 
@@ -51,15 +55,17 @@ Fewer bits per number means less memory, less traffic and faster matrix units. E
 | FP16 | 16 | 65,504 | 0.00098 |
 | BF16 | 16 | $3.4 \times 10^{38}$ | 0.0078 |
 | FP8 E4M3 | 8 | 448 | 0.125 |
-| FP8 E5M2 | 8 | 57,344 | 0.25 |
-
-The name E4M3 covers two variants, which is a common source of confusion: the OCP format (PyTorch's `float8_e4m3fn`) reaches 448, while the "fnuz" variant (`float8_e4m3fnuz`), which has no negative zero, reaches 240. Some course notes quote 240; check which variant your hardware and library use before computing scales.
 
 **FP16 and loss scaling.** FP16 has decent precision but a narrow range. Gradients are often tiny: in FP16 anything below about $2^{-24} \approx 6 \times 10^{-8}$ becomes zero. Micikevicius et al. found about 5% of weight-gradient values in that region for one speech model, and much of an object-detection network's activation-gradient histogram below FP16's range ([Micikevicius et al., 2018](https://arxiv.org/abs/1710.03740), §§3.1–3.2). Their fix was **loss scaling**: multiply the loss by a large factor before the backward pass, so gradients are shifted into FP16's range, and divide by the same factor before the update. A gradient of $2^{-25}$ is zero in FP16, but scaled by 1,024 it survives and is recovered exactly. They also kept an FP32 master copy of the weights, so small updates are not lost (§3.1).
 
-**BF16** has the same exponent range as FP32, with less precision. Gradients of the sizes that defeat FP16 fit comfortably, so loss scaling is generally unnecessary, and BF16 has largely replaced FP16 for training. Underflow is still possible below about $10^{-38}$, and small values lose precision long before that, so it is rare rather than impossible. Its coarse precision is why accumulation still happens in FP32: as the [small training run](/blog/model-development-small-training-run/#5-precision) showed, $1 + 0.001$ is exactly 1 in BF16. In practice, matrix multiplications take BF16 inputs and accumulate in FP32; optimizer state and often master weights stay in FP32.
+**BF16** has the same exponent range as FP32, with less precision. Gradients of the sizes that defeat FP16 fit comfortably, so loss scaling is generally unnecessary, and BF16 has largely replaced FP16 for training. Underflow is still possible below about $10^{-38}$, and small values lose precision long before that, so it is rare rather than impossible. Its coarse precision is why accumulation still happens in FP32: as the [small training run](/blog/model-development-small-training-run/#6-precision) showed, $1 + 0.001$ is exactly 1 in BF16. In practice, matrix multiplications take BF16 inputs and accumulate in FP32; optimizer state and often master weights stay in FP32.
 
-## FP8 and the outlier problem
+**Try it: will it underflow?** A gradient of $3 \times 10^{-9}$ is computed in FP16. Does it survive? With a loss scale of 4,096? In BF16?
+
+**Answer.** In FP16 it is below about $6 \times 10^{-8}$ and becomes **zero**. Scaled by 4,096 it becomes about $1.2 \times 10^{-5}$, which FP16 represents (as a subnormal, with reduced precision), so it **survives** and is divided back after the backward pass. In BF16, with FP32's exponent range, it **survives** without any scaling, though only to about two or three significant digits; BF16 would underflow only far below that, around $10^{-38}$.
+
+
+## Optional: FP8 formats and scaling
 
 FP8 halves memory and traffic again and doubles matrix throughput on hardware that supports it, but its range is tiny: E4M3, the more precise variant, tops out at 448. To use it, each tensor is divided by a **scale** chosen so its largest value fits, converted to FP8, and multiplied back after the matrix multiplication.
 
@@ -67,19 +73,11 @@ A single scale per tensor breaks when the tensor contains outliers, which activa
 
 That is the approach DeepSeek-V3 used to train in FP8: scales per $1 \times 128$ tile of activations and per $128 \times 128$ block of weights, E4M3 for all tensors, and higher-precision accumulation for the matrix products. Compared with BF16 training, its loss differed by less than 0.25% relative ([DeepSeek-V3](https://arxiv.org/abs/2412.19437), §3.3). The assumptions to check in any FP8 recipe are where the scales are computed, which operations stay in higher precision (accumulation, normalization, softmax, optimizer state), and whether the loss tracks a BF16 baseline over a long run, because small biases compound.
 
-Everyday picture: one ruler for a whole drawing that includes a skyscraper and an ant. Marked to fit the skyscraper, the ruler cannot measure the ant at all. Give each corner of the drawing its own ruler and both can be measured.
-
-**Try it: will it underflow?** A gradient of $3 \times 10^{-9}$ is computed in FP16. Does it survive? With a loss scale of 4,096? In BF16?
-
-**Answer.** In FP16 it is below about $6 \times 10^{-8}$ and becomes **zero**. Scaled by 4,096 it becomes about $1.2 \times 10^{-5}$, which FP16 represents (as a subnormal, with reduced precision), so it **survives** and is divided back after the backward pass. In BF16, with FP32's exponent range, it **survives** without any scaling, though only to about two or three significant digits; BF16 would underflow only far below that, around $10^{-38}$.
 
 
-## What to remember
+Two E4M3 variants exist, which is a common source of confusion: the OCP format (PyTorch's `float8_e4m3fn`) reaches 448, while the "fnuz" variant (`float8_e4m3fnuz`), which has no negative zero, reaches 240. Some course notes quote 240; check which variant your hardware and library use before computing scales.
 
-- Memory-bound operations get faster by moving less data. FlashAttention computes exact attention in blocks with an online softmax, never storing the $N \times N$ scores, and recomputes them in the backward pass.
-- Fusing steps into one kernel can beat an algorithm with fewer FLOPs but more memory traffic.
-- FP16 needs loss scaling because small gradients underflow; BF16 has FP32's range and does not, but its coarse precision means updates and accumulations stay in FP32.
-- FP8 has very little range; it works with fine-grained scaling (per tile or block) and higher-precision accumulation, and must be checked against a BF16 baseline.
+The other 8-bit format, E5M2, trades precision for range (largest value 57,344, spacing 0.25 above 1).
 
 
 ## Sources

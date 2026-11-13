@@ -3,19 +3,23 @@ title: "Retrieval, tools and agents: giving a model information and actions"
 date: 2026-11-10
 category: deep-learning
 read_time: "13 min"
-series_order: 21
+series_order: 22
 series: model-development
 featured: false
 published: true
 excerpt: "A model only knows what it was trained on and can only produce text. Retrieval brings in information it never saw; tool calls let its text trigger actions. Build a tiny retriever and watch it fail on synonyms, see how a tool call works, and work out why multi-step agents fail more often than their individual steps."
-question: "How does a model use information and actions it was not trained on, and when is an agentic loop justified?"
+question: "When should an application retrieve, call a tool or run an agent loop, and what do you measure for each?"
 my_work: "A concept post; BM25 retrieval implemented and evaluated with recall@k on a toy corpus; agent reliability computed; findings from the RAG and ReAct papers."
 result: "On four toy queries BM25 retrieved the right document for 2 without stemming and 3 with it, failing on a query that shares no words with its answer; eight steps that each succeed 95% of the time succeed together only 66% of the time, 98% with one verified retry per step."
 evidence_limit: "Toy corpus and independent-step arithmetic illustrate mechanisms; paper results are on their benchmarks."
 lesson: "Retrieval and tools extend what a model can do, but each adds a component that can fail. Evaluate retrieval on its own, prefer fixed workflows to open-ended loops, and add verification where steps compound."
 ---
 
-A model's knowledge stops at its training data, which is months old by release and never included your company's documents. And a model only produces text: it cannot look up today's order status or run a calculation exactly. Two techniques close these gaps without retraining. **Retrieval** puts relevant information into the context at question time. **Tool use** lets the model's output trigger programs whose results come back as text. Combined in a loop, they make an **agent**. This post explains each, with the [prompting post](/blog/model-development-prompting-context/) as background.
+**Question: when should an application retrieve, call a tool or run an agent loop, and what do you measure for each?**
+
+Retrieve when the model lacks information (private, recent or long documents), and measure **recall@k**, whether the right passage is in what you retrieved, before tuning anything downstream: answer quality cannot exceed it. On a four-question toy, lexical search found the right passage for 2 questions, 3 with crude stemming, and missed one that shares no words with its answer. Call a **tool** when the model needs exactness or an action, such as arithmetic or a database lookup. Run an **agent** loop only when the steps cannot be planned in advance, because failures compound: eight steps that each succeed 95% of the time succeed together 66% of the time, or 98% if each step is checked and retried once.
+
+A model's knowledge stops at its training data, and it can only produce text. Retrieval and tools close those gaps without retraining; the [prompting post](/blog/model-development-prompting-context/) is the background.
 
 ## Retrieval
 
@@ -65,16 +69,6 @@ The cost of a loop is compounding failure. If each step succeeds independently w
 
 When is an open-ended loop justified? When the steps cannot be known in advance, because each depends on what the previous one found, as in research or debugging. When they can be known, a **fixed workflow** (retrieve, then draft, then check, in code) is cheaper, faster, easier to test and fails less. Start with the simplest structure that solves the task: a single prompt, then retrieval, then a fixed workflow, and an agent only when the task demands it.
 
-Everyday picture: an assistant with a filing cabinet (retrieval) and a phone (tools). Sending them to fetch one file is reliable. Asking them to make ten calls, each depending on the last, to plan a trip, works only if they confirm each booking before making the next.
-
-
-## What to remember
-
-- RAG retrieves relevant passages at question time; it adds current and private knowledge and makes citations possible.
-- Retrieval quality caps answer quality: measure recall@k on real questions. Lexical search misses synonyms; dense or hybrid retrieval addresses that.
-- A tool call is structured text the application executes; constrained decoding makes it well-formed, not correct.
-- Agents interleave reasoning and tool calls; reliability compounds as $p^n$, so verification per step matters more than a slightly better model.
-- Prefer a single prompt, then retrieval, then a fixed workflow; use an open-ended agent only when steps cannot be planned in advance.
 
 
 ## Sources

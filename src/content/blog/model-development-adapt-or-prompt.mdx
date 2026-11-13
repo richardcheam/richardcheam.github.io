@@ -3,19 +3,23 @@ title: "Prompt, retrieve or fine-tune: choosing how to adapt a model, and how Lo
 date: 2026-11-10
 category: deep-learning
 read_time: "13 min"
-series_order: 22
+series_order: 23
 series: model-development
 featured: false
 published: true
 excerpt: "Prompting, retrieval and fine-tuning solve different problems: missing instructions, missing knowledge and missing behaviour. Learn to tell which one a task needs, then see how LoRA fine-tunes a large model by training a tiny low-rank update, why it starts from no change at all, and why it costs nothing extra at inference."
-question: "Which of prompting, retrieval and fine-tuning fits a use case, and how does LoRA adapt a model cheaply?"
+question: "The model fails on your task: should you change the prompt, add retrieval or fine-tune?"
 my_work: "A concept post; a decision procedure built from the earlier posts; LoRA's parameter counts, zero initialization, merging and rank recovery checked in PyTorch on a toy layer; results quoted from the LoRA and QLoRA papers."
 result: "Rank-8 LoRA on Llama 3 8B's query and value projections trains 3.4 million parameters, 0.04% of the model; a merged LoRA layer gives the same outputs as base plus adapter; fine-tuning needs a few hundred to a few thousand good examples of the target behaviour."
 evidence_limit: "The decision procedure is a guide built from mechanisms, not a measured result; LoRA results are the papers' own."
 lesson: "Prompt first, add retrieval for missing knowledge, and fine-tune for missing behaviour or format at scale. LoRA makes fine-tuning cheap by training a low-rank change to frozen weights."
 ---
 
-The last three posts gave three ways to make a model do what an application needs: [prompting](/blog/model-development-prompting-context/), [retrieval and tools](/blog/model-development-retrieval-tools/), and, from the post-training track, [fine-tuning](/blog/model-development-supervised-fine-tuning/). They are often presented as rungs of a ladder, but they fix different problems. This post shows how to diagnose which problem you have, and then explains LoRA, the method that made fine-tuning affordable.
+**Question: the model fails on your task. Should you change the prompt, add retrieval or fine-tune?**
+
+Diagnose the failure first. If the model does not know **what you want** (wrong format, tone or constraint), it is an instruction problem: prompt. If it lacks **information** (your documents, recent facts), it is a knowledge problem: retrieve, which keeps knowledge current and citable. If it has both but does not **do it reliably or cheaply enough**, it is a behaviour problem: fine-tune on a few hundred to a few thousand good examples of the behaviour. When you fine-tune, **LoRA** trains a low-rank update instead of the full weights: rank 8 on Llama 3 8B's query and value projections is 3.4 million trainable parameters, 0.04% of the model, and can be merged into the weights with no serving cost.
+
+The previous posts gave the three tools: [prompting](/blog/model-development-prompting-context/), [retrieval and tools](/blog/model-development-retrieval-tools/) and, from the post-training track, [fine-tuning](/blog/model-development-supervised-fine-tuning/). They are often presented as rungs of a ladder, but they fix different problems.
 
 ## Three problems, three tools
 
@@ -65,16 +69,6 @@ Why should a low-rank change be enough? The paper's hypothesis is that the chang
 
 LoRA's limits follow from its design: a low-rank update may be too small for large changes in knowledge or capability, the choice of which matrices to adapt and the rank matter, and LoRA results are usually reported against full fine-tuning on specific tasks, not in general. The [LoRA review](/paper-reviews/lora/) looks at that evidence.
 
-Everyday picture: instead of rewriting a textbook, you print a thin booklet of corrections that slots inside the cover. It is cheap to write and easy to swap, and you can bind it in permanently whenever you like.
-
-
-## What to remember
-
-- Diagnose the failure: missing instructions call for prompting, missing knowledge for retrieval, missing or unreliable behaviour for fine-tuning. They combine.
-- Fine-tuning adds behaviour, not reliably facts; it needs high-quality examples and an evaluation set that checks what should not change.
-- LoRA freezes $W_0$ and trains $\frac{\alpha}{r}BA$ with $B$ initialized to zero; rank 8 on Llama 3 8B's query and value projections trains 0.04% of the parameters.
-- Merging $BA$ into $W_0$ removes any inference cost; separate adapters let one base model serve many tasks.
-- QLoRA stores the frozen base model in 4 bits, fine-tuning 65B on one 48 GB GPU.
 
 
 ## Sources

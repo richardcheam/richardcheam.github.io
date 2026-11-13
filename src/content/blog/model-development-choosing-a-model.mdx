@@ -3,21 +3,23 @@ title: "Choosing a model: start from the task and build a baseline worth beating
 date: 2026-11-10
 category: deep-learning
 read_time: "11 min"
-series_order: 19
+series_order: 20
 series: model-development
 featured: false
 published: true
 excerpt: "Before prompting, retrieval or fine-tuning, an application needs two things: a way to measure success on its own task, and a baseline. Learn which constraints narrow the choice of model, why leaderboards are a starting point rather than an answer, and how error costs can make the expensive model the cheap one."
-question: "How do you choose a model for an application and establish a baseline worth beating?"
+question: "How do you choose a model for an application, and how do you know the cheaper one is not a false economy?"
 my_work: "A concept post; cost and uncertainty arithmetic on illustrative prices; evaluation framing from CS336 lecture 12; leaderboard method from the Chatbot Arena paper."
 result: "With error costs included, a model costing 22 times more per token was cheaper overall ($49 against $75 per 1,000 requests in the example); on 100 examples a 92% accuracy carries an uncertainty of about ±5 points."
 evidence_limit: "Prices and accuracies are illustrative; real costs depend on provider, region and usage."
 lesson: "Define the task's metric and a small evaluation set first, then compare a few candidate models on it, counting the cost of errors and the uncertainty of the measurement."
 ---
 
-The posts so far followed a model from raw text to a post-trained assistant. This track starts at the other end: you have a task, and existing models to build it with. You do not need the training posts to follow it; the [Foundations post on language models](/blog/foundations-language-models/) is enough.
+**Question: how do you choose a model for an application, and how do you know the cheaper one is not a false economy?**
 
-The first decision is which model to use, and the most common mistake is to make it before deciding how success will be measured. A model that tops a public leaderboard may be the wrong choice for summarizing your contracts in Khmer at a cost of a cent per request.
+Write down the constraints first (quality on your task, latency, cost, context, languages, deployment and licence), build 50 to 200 real examples with a scoring method, use leaderboards only to make a shortlist, and compare candidates against baselines on your own examples. Count the cost of errors as well as tokens: in the example below, a model that is 22 times more expensive per token is the cheaper system once each wrong answer costs $0.50 to fix ($49 against $75 per 1,000 requests). If errors cost nothing, the answer flips, so the decision depends on a number only you know.
+
+This track starts from a task and existing models. You do not need the training posts to follow it; the [Foundations post on language models](/blog/foundations-language-models/) is enough.
 
 ## Start from the task, not the leaderboard
 
@@ -27,7 +29,7 @@ Write down the constraints before looking at models:
 - **Latency:** how long a user can wait for the first token and for the whole answer.
 - **Cost** per request at your expected volume.
 - **Context:** how much input each request needs, measured in the model's tokens.
-- **Languages and domains:** a tokenizer that charges six times more tokens for your language, as the [tokenization post](/blog/model-development-tokenization/#what-the-same-text-costs) measured for Khmer, raises cost and latency six times and shrinks the usable context.
+- **Languages and domains:** a tokenizer that needs six times as many tokens for your language, as the [tokenization post](/blog/model-development-tokenization/#what-the-same-text-costs) measured for Khmer, multiplies the input-token charge by six at the same price per token and shrinks the usable context by the same factor. Total cost and latency rise too, but by less or more depending on output length, which is also counted in tokens, and on how the model is served.
 - **Deployment:** whether data may leave your systems, whether you need open weights you can host and fine-tune, and what the licence allows.
 
 These constraints often eliminate most candidates before any quality comparison.
@@ -58,21 +60,9 @@ Keep the prompt identical across models at this stage, so the comparison measure
 
 **Answer.** Tokens: L costs $1{,}500 \times 3 + 300 \times 15$ = 9,000 millionths of a dollar per request, **$9.00** per 1,000; S costs about **$0.40**, 22 times less. Errors: L makes 80 per 1,000, costing $40 to fix; S makes 150, costing $75. In total L costs **$49** and S **$75**. The model that is 22 times more expensive per token is the cheaper system. If errors cost nothing, as in a low-stakes autocomplete, the answer flips. Cost decisions depend on what errors cost, which only you know.
 
-## Measure with error bars
+## Is the gap real?
 
-On a small evaluation set, scores are uncertain. With $n$ examples and accuracy $p$, the standard error is $\sqrt{p(1-p)/n}$, so a 95% interval is about $\pm 2\sqrt{p(1-p)/n}$. At $n = 100$, 92% is uncertain by about **±5 points** and 85% by about **±7**: the two intervals overlap, and the measured gap could be noise. At $n = 1{,}000$ the intervals shrink to about ±2. Comparing both models on the *same* examples helps a lot, because what matters is how often they disagree, a point the [application-evaluation post](/blog/model-development-evaluating-applications/#how-sure-are-you) develops. Before switching models over a few points, check that the difference is larger than the noise.
-
-Everyday picture: hiring. A CV and a reputation (the leaderboard) decide who gets an interview; a work sample on your actual job (your evaluation set) decides who gets hired; and you budget for the cost of mistakes, not only the salary.
-
-
-## What to remember
-
-- List the constraints first: quality, latency, cost, context, languages, deployment and licence. They eliminate most candidates.
-- Build 50–200 real examples with a scoring method before comparing models.
-- Leaderboards (Chatbot Arena, static benchmarks) make a shortlist, not a decision.
-- Run three baselines: a non-LLM solution, the strongest model with a plain prompt, and the cheapest plausible model.
-- Count the cost of errors as well as tokens, and measure with error bars: about ±5 points at 100 examples.
-
+On 50 to 200 examples, a gap of a few points can be noise. Before switching models over it, compare both on the *same* examples and check how often they disagree, as the [application-evaluation post](/blog/model-development-evaluating-applications/#how-sure-are-you) shows; the 92%-against-85% gap above, measured on 100 examples, is not yet decisive on its own.
 
 ## Sources
 

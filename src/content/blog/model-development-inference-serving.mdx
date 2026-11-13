@@ -3,19 +3,23 @@ title: "Inference and serving: latency, throughput, KV cache and quantization"
 date: 2026-11-10
 category: deep-learning
 read_time: "15 min"
-series_order: 23
+series_order: 24
 series: model-development
 featured: false
 published: true
-excerpt: "Serving a model is a different problem from training it: generation is sequential and limited by memory bandwidth, not arithmetic. Work out why one sequence cannot exceed about 200 tokens per second on an H100, how batching trades latency for throughput, why the KV cache sets how many users fit, and what quantization, paged memory and speculative decoding change."
-question: "What determines latency, throughput and cost when serving a model, and what does quantization trade?"
+excerpt: "Serving a model is a different problem from training it: generation is sequential and limited by memory bandwidth, not arithmetic. Work out why, counting memory traffic alone, one sequence is bounded at about 200 tokens per second on an H100, how batching trades latency for throughput, why the KV cache sets how many users fit, and what quantization, paged memory and speculative decoding change."
+question: "Your model is slow or expensive to serve: where is the bottleneck, and what would you change first?"
 my_work: "A concept post; bounds computed for Llama 3 8B with the H100 figures used in CS336 lecture 10; INT8 per-tensor and per-channel quantization compared on a toy matrix; results from the vLLM, speculative decoding, GPTQ and AWQ papers."
 result: "Counting memory traffic alone, reading 16 GB of BF16 weights per step bounds one sequence at about 209 tokens per second; in the same bandwidth-only model, batching 64 sequences raises the throughput bound about 30 times while the lower bound on step time rises from 4.9 to 9.9 ms; per-channel INT8 scales cut the smallest channel's error from 74% to under 1%."
 evidence_limit: "Bounds ignore overheads and assume perfect overlap; real systems reach a fraction of them. Paper results are on their models and hardware."
 lesson: "Prefill is compute-bound and sets time to first token; decode is memory-bound and sets time per token. Batching, KV-cache management, quantization and speculative decoding each attack the memory traffic of decode."
 ---
 
-A trained model has to be served: thousands of users send prompts and wait for answers. The [GPU post](/blog/model-development-gpu-memory-compute/#compute-bound-or-memory-bound) noted that generation is mostly matrix-times-vector work and therefore memory-bound. This post follows that observation through to latency, throughput, memory and cost, using Llama 3 8B on one H100 (989.5 TFLOP/s BF16, 3.35 TB/s, 80 GB) as the running example, as in CS336's inference lecture. It needs only the [architecture post](/blog/model-development-decoder-architecture/) for the KV cache.
+**Question: your model is slow or expensive to serve. Where is the bottleneck, and what would you change first?**
+
+Find which phase and which resource limits you. **Prefill** processes the prompt in parallel and is usually compute-bound; **decode** generates one token at a time and must read every weight for each step, so it is usually bound by memory bandwidth. Counting memory traffic alone, Llama 3 8B in BF16 on one H100 can decode at most about 209 tokens per second for a single sequence. Batching amortizes that read, raising the throughput bound about 30 times at 64 sequences while each step's lower bound rises from 4.9 to 9.9 ms, until the **KV cache** fills memory and caps the batch. So the first levers are batching, a smaller KV cache (grouped-query attention, shorter contexts) and quantization, which cuts the bytes read; each trades something you should measure.
+
+The [GPU post](/blog/model-development-gpu-memory-compute/#compute-bound-or-memory-bound) noted that generation is mostly memory-bound. This post follows that through to latency, throughput, memory and cost, using Llama 3 8B on one H100 (989.5 TFLOP/s BF16, 3.35 TB/s, 80 GB) as the running example, as in CS336's inference lecture. It needs only the [architecture post](/blog/model-development-decoder-architecture/) for the KV cache.
 
 ## Two phases: prefill and decode
 
@@ -55,7 +59,7 @@ Managing that memory is its own problem. Sequences grow unpredictably, and reser
 
 Since decode is limited by bytes read, storing weights in fewer bits speeds it up directly and frees memory for KV cache. **Weight-only quantization** stores weights as 8- or 4-bit integers with a scale, and converts them back to 16-bit on the fly for the arithmetic.
 
-The scale is chosen so the largest weight fits the integer range, which makes the choice of grouping critical. A toy matrix whose 64 output channels differ in size by a factor of 100: with one scale for the whole matrix, the smallest channel is rounded to a few integer levels and its relative error is **74%**; with one scale per output channel it is **0.8%**. Real quantizers use per-channel or per-group scales (often groups of 128 weights), the same principle as the [FP8 block scaling](/blog/model-development-efficient-execution/#fp8-and-the-outlier-problem) used in training.
+The scale is chosen so the largest weight fits the integer range, which makes the choice of grouping critical. A toy matrix whose 64 output channels differ in size by a factor of 100: with one scale for the whole matrix, the smallest channel is rounded to a few integer levels and its relative error is **74%**; with one scale per output channel it is **0.8%**. Real quantizers use per-channel or per-group scales (often groups of 128 weights), the same principle as the [FP8 block scaling](/blog/model-development-efficient-execution/#optional-fp8-formats-and-scaling) used in training.
 
 Beyond grouping, methods differ in how they decide what to protect:
 
@@ -78,17 +82,6 @@ tokens ([Leviathan et al., 2023](https://arxiv.org/abs/2211.17192), §3.3, Eq. 1
 
 **Answer.** Weights are $70 \times 2 = 140$ GB, so at least **2 GPUs**, before any KV cache. Reading 140 GB at 3.35 TB/s takes about 42 ms; split over two GPUs reading in parallel, about **21 ms per step** at best, plus communication between them: under 50 tokens per second per sequence. With 4-bit weights the model is 35 GB and fits on **one GPU** with room for KV cache, and each step reads a quarter as many bytes: about 10 ms, if the quantized model's quality is acceptable on your evaluation set.
 
-Everyday picture: a library with one narrow door. Each reader's next sentence needs the whole encyclopedia carried through the door. Carrying it once for a whole roomful of readers (batching), printing it in smaller type (quantization), or having an assistant guess the next few sentences for checking in one trip (speculative decoding) all attack the same bottleneck: the door.
-
-
-## What to remember
-
-- Prefill is compute-bound and sets time to first token; decode is memory-bound and sets time per token.
-- One sequence's decode speed is bounded by weight bytes ÷ bandwidth: about 209 tokens/s for Llama 3 8B in BF16 on an H100.
-- Batching amortizes the weight reads: much higher throughput, somewhat higher latency per user. Continuous batching keeps batches full.
-- The KV cache sets how many sequences fit; paged allocation (vLLM) removes most of the waste.
-- Weight quantization reads fewer bytes; per-channel or per-group scales are essential, and quality must be checked on your task.
-- Speculative decoding yields $(1-\alpha^{\gamma+1})/(1-\alpha)$ tokens per large-model step with an identical output distribution.
 
 
 ## Sources

@@ -3,19 +3,23 @@ title: "Evaluating an application: test sets, judges, error bars, feedback and s
 date: 2026-11-10
 category: deep-learning
 read_time: "14 min"
-series_order: 24
+series_order: 25
 series: model-development
 featured: false
 published: true
 excerpt: "An application built on a model is never finished: prompts change, models are swapped, users ask new things. Learn to build an evaluation that tracks what matters, use a model as a judge without inheriting its biases, tell a real improvement from noise, learn from production, and recognize the privacy and security risks that arrive with retrieval and tools."
-question: "How do you know an application works, and keep knowing after release, safely?"
+question: "System B scores higher than system A on your evaluation set: is the difference real, and will it hold after release?"
 my_work: "A concept post; a paired comparison analysed with a bootstrap and an exact sign test; judge reliability and biases from MT-Bench; evaluation framing from CS336 lecture 12; indirect prompt injection from Greshake et al."
 result: "On 200 shared items, an 85% system and an 80% system differ on 30 items, 20 to 10: two-sided p = 0.099, not yet convincing; the same proportions over 90 disagreements give p = 0.002. Strong LLM judges agree with humans about as often as humans agree with each other, but favour the first answer, longer answers and their own outputs."
 evidence_limit: "Statistics are on a constructed example; judge findings are for the models and tasks in the cited work."
 lesson: "Evaluate on real tasks with a fixed, versioned test set; compare systems on the same items with uncertainty; correct judge biases; feed production failures back into the test set; and treat retrieved and tool content as untrusted input."
 ---
 
-Every earlier post in this track relied on an evaluation set: to [choose a model](/blog/model-development-choosing-a-model/), to check a [prompt change](/blog/model-development-prompting-context/), to measure [retrieval](/blog/model-development-retrieval-tools/), to decide whether [fine-tuning](/blog/model-development-adapt-or-prompt/) helped. This post is about building that evaluation well and keeping it honest after the application is in users' hands. It parallels the [post-training evaluation post](/blog/model-development-post-training-failures/), seen from the application side.
+**Question: system B scores higher than system A on your evaluation set. Is the difference real, and will it hold after release?**
+
+Compare them on the same items and count only the items where they disagree: on 200 shared items, 85% against 80% is 20 disagreements one way and 10 the other, a two-sided p of 0.099, not yet convincing; the same proportions over 90 disagreements would give 0.002. If a model judges the outputs, check its biases (strong judges agree with people about as often as people agree with each other, but favour the first answer, longer answers and their own outputs). After release, keep the evaluation honest with production feedback and a fixed regression set, and treat any text the system reads, including retrieved documents, as a possible source of injected instructions.
+
+Every earlier post in this track relied on an evaluation set: to [choose a model](/blog/model-development-choosing-a-model/), check a [prompt change](/blog/model-development-prompting-context/), measure [retrieval](/blog/model-development-retrieval-tools/) or decide whether [fine-tuning](/blog/model-development-adapt-or-prompt/) helped. This post is about building that evaluation well, from the application side of the [post-training evaluation post](/blog/model-development-post-training-failures/).
 
 ## What to evaluate
 
@@ -50,7 +54,7 @@ A score on a test set is an estimate. Two systems should be compared **on the sa
 
 **Answer.** Only the 30 disagreements carry information about which is better. If the systems were equally good, each disagreement would favour A or B like a coin flip; getting 20 or more of 30 one way happens with probability about **0.099** (two-sided exact sign test). A bootstrap interval for the difference in accuracy runs from 0 to about +10.5 points. The evidence leans towards A but is not convincing; a 5-point gap on 200 items is within what chance produces. If the same 2-to-1 pattern held over 90 disagreements, the probability would fall to **0.002**. Collect more items, or examine the disagreements to see whether they share a cause.
 
-As a rule of thumb, a 95% interval for a single accuracy near 85% on $n$ items is about $\pm 2\sqrt{0.85 \times 0.15/n}$: ±5 points at 200 items, ±1.6 at 2,000. Paired comparisons are much more sensitive than comparing two separate intervals.
+As a rule of thumb, a 95% interval for a single accuracy $p$ on $n$ items is about $\pm 2\sqrt{p(1-p)/n}$: for 85%, ±5 points at 200 items and ±1.6 at 2,000. At 100 items, the two models in the [choosing-a-model example](/blog/model-development-choosing-a-model/#baselines) at 92% and 85% have intervals of about ±5 and ±7, which overlap, so separate intervals cannot tell them apart. Paired comparisons are much more sensitive, because they use only the items on which the two systems disagree.
 
 ## After release: production feedback
 
@@ -75,16 +79,6 @@ Retrieval and tools connect a model to content and actions outside the prompt, a
 
 **Privacy.** Logs, retrieved documents and fine-tuning data may contain personal or confidential information. Minimize what is logged, control who can retrieve what (retrieval should respect the same access rules as the documents themselves), keep personal data out of fine-tuning sets unless there is a clear basis for it, and remember that a model can repeat what was in its context or training data. Evaluation itself must be designed with this in mind: realistic test data is the most valuable, and the most sensitive.
 
-Everyday picture: a new employee on probation. You check their work on real cases, compare them fairly with the previous employee on the same cases, keep reviewing after probation ends, and never give them the keys to everything because a stranger's letter told them to ask for them.
-
-
-## What to remember
-
-- Evaluate on real inputs with clear standards; keep the test set fixed, versioned and out of development data; measure components as well as the whole.
-- Model judges agree with people about as well as people agree with each other, but favour first, longer and their own answers: swap orders, control length, use a different judge, and validate against human grades.
-- Compare systems on the same items and look at the disagreements: 20 to 10 out of 30 is p ≈ 0.1, not proof.
-- Production feeds evaluation: log carefully, use explicit and implicit signals, run regression tests on every change, and turn failures into test items.
-- Treat retrieved and tool content as untrusted; limit tool permissions; protect personal data in logs, retrieval and training.
 
 
 ## Sources

@@ -3,19 +3,23 @@ title: "Reinforcement learning for language models: policy gradients, PPO, GRPO 
 date: 2026-11-10
 category: deep-learning
 read_time: "17 min"
-series_order: 17
+series_order: 18
 series: model-development
 featured: false
 published: true
 excerpt: "Supervised fine-tuning and DPO learn from fixed examples. Reinforcement learning lets a model learn from its own attempts, scored by a reward. Derive the policy gradient on a four-answer toy, see why baselines matter, learn what PPO's clipping and value model do and what GRPO replaces them with, and why verifiable rewards changed reasoning training."
-question: "How do policy gradients, KL regularization and verifiable rewards improve a model, and how do PPO and GRPO differ?"
+question: "What does a policy-gradient update actually do to a language model, and how do PPO and GRPO estimate which responses to reinforce?"
 my_work: "A concept post; the policy gradient, baselines, GRPO advantages and PPO clipping computed and simulated on toy examples in PyTorch; methods and settings read from the PPO, InstructGPT, DeepSeekMath, Tülu 3 and DeepSeek-R1 papers."
 result: "A baseline of 0.2 cut the variance of a one-sample gradient from 0.10 to 0.057 without changing its mean; GRPO's group-normalized advantages are zero when all samples get the same reward, leaving only the KL term, so a group of 8 on a prompt solved 95% of the time carries a reward signal only 34% of the time; DeepSeek-R1-Zero's AIME 2024 accuracy rose from 15.6% to 77.9% with rule-based rewards."
 evidence_limit: "Toy examples illustrate the mechanics; large-scale results are the papers' own and depend on their base models and data."
 lesson: "Reinforcement learning raises the probability of the model's own high-reward outputs. Baselines, clipping and a KL penalty keep it stable; the reward decides what is actually learned."
 ---
 
-The [preference post](/blog/model-development-preference-optimization/) ended with an objective, maximize reward while staying close to a reference policy, and one way to approach it, DPO, which learns from fixed pairs. **Reinforcement learning** (RL) attacks the objective directly: the model generates responses, a reward scores them, and the model is updated to make high-reward responses more likely. Because it learns from its own current outputs, it can improve beyond the examples it was given. This post builds the method from one equation, with only the SFT and preference posts as background.
+**Question: what does a policy-gradient update actually do to a language model, and how do PPO and GRPO estimate which responses to reinforce?**
+
+It samples responses and weights the gradient of each sampled response's log-probability by its reward, or better by its **advantage**, the reward minus a baseline. A terminal reward is assigned once per response, the response's log-probability sums over its tokens, so every token's term is scaled by the same advantage. **PPO** estimates advantages with a learned value model and clips each step; **GRPO** uses the other samples for the same prompt as the baseline, normalizing rewards within the group, which removes the value model but gives zero reward advantage to any group whose samples all score the same, leaving only the KL term to act on them. That is why prompts the model sometimes solves carry most of the signal.
+
+The [preference post](/blog/model-development-preference-optimization/) ended with an objective, maximize reward while staying close to a reference policy, and an offline way to approach it. **Reinforcement learning** attacks it directly, learning from the model's own current outputs, which is how it can improve beyond the examples it was given.
 
 ## The policy gradient
 
@@ -66,7 +70,7 @@ On the four-answer toy, 60 GRPO steps with groups of 8 raise the probability of 
 
 **Try it: where is the signal?** You train with GRPO, groups of 8, on three kinds of prompt: ones the model never solves, ones it solves half the time, and ones it solves 95% of the time. What fraction of groups give any reward signal?
 
-**Answer.** A group gives a reward signal only if its rewards are mixed: $1 - p^8 - (1-p)^8$. Never solved: **0**, every group is all failures. Half the time: **0.99**. Solved 95% of the time: **0.34**, most groups are all successes. Learning concentrates on prompts at the edge of the model's ability. This is the RL counterpart of the [rejection-sampling bias](/blog/model-development-post-training-data/#rejection-sampling-choosing-among-the-models-own-answers) in the previous post, and it is why RL datasets are often filtered to prompts of intermediate difficulty.
+**Answer.** A group gives a reward signal only if its rewards are mixed: $1 - p^8 - (1-p)^8$. Never solved: **0**, every group is all failures. Half the time: **0.99**. Solved 95% of the time: **0.34**, most groups are all successes. Learning concentrates on prompts at the edge of the model's ability. This is the RL counterpart of the [rejection-sampling bias](/blog/model-development-post-training-data/#rejection-sampling-choosing-among-the-models-own-answers) in the post-training data post, and it is why RL datasets are often filtered to prompts of intermediate difficulty.
 
 ## Verifiable rewards
 
@@ -81,16 +85,6 @@ Verifiable rewards are only as good as the verifier. A checker that accepts a co
 
 Most of the time in an RL step is **generation**: producing $G$ responses per prompt, often long ones, before any gradient is computed. Training systems therefore pair the trainer with a fast inference engine and move updated weights between them, and the [inference post](/blog/model-development-inference-serving/) explains what makes generation fast. Because responses come from a slightly older policy than the one being trained, the probability ratio and clipping matter more as the gap grows.
 
-Everyday picture: a student doing practice problems. Supervised learning is copying worked solutions; RL is attempting problems and being told only "right" or "wrong", then doing more of whatever worked. The baseline is the student's average score: a correct answer on a problem everyone gets right teaches little, a correct answer on a hard one teaches a lot.
-
-
-## What to remember
-
-- The policy gradient is $\mathbb{E}[R\,\nabla \log \pi(y)]$: weight the gradient of the sampled response's log-probability by its reward or advantage (as a loss, $-R\log\pi(y)$). A terminal reward weights the summed log-probability of all the response's tokens.
-- Subtracting a baseline gives the advantage $A = R - b$ and reduces variance without bias.
-- PPO uses a learned value model for advantages, clips probability ratios at $1 \pm \varepsilon$, and adds a per-token KL penalty: four models in all.
-- GRPO uses the group of samples as the baseline, $(r - \text{mean})/\text{std}$; groups with identical rewards give zero advantage (only the KL term acts), so prompts of intermediate difficulty carry most of the reward signal.
-- Verifiable rewards (answer checks, constraint checks) avoid reward-model exploitation where correctness can be computed; the verifier then defines what is learned.
 
 
 ## Sources
