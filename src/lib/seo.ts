@@ -30,5 +30,5 @@ export const person = {
     { "@type": "CollegeOrUniversity", name: "Université Paris-Saclay" },
   ],
   knowsAbout: ["Machine learning", "Speech AI", "Large language models", "Deep learning"],
-  sameAs: ["https://github.com/richardcheam", "https://www.linkedin.com/in/richard-cheam"],
+  sameAs: ["https://github.com/richardcheam", "https://www.linkedin.com/in/richard-cheam", "https://huggingface.co/ric912"],
 };
