@@ -3,8 +3,8 @@ title: "Inference and serving: latency, throughput, KV cache and quantization"
 date: 2026-11-10
 category: deep-learning
 read_time: "15 min"
-series_order: 24
-series: model-development
+series_order: 5
+series: llm-applications
 featured: false
 published: true
 excerpt: "Serving a model is a different problem from training it: generation is sequential and limited by memory bandwidth, not arithmetic. Work out why, counting memory traffic alone, one sequence is bounded at about 200 tokens per second on an H100, how batching trades latency for throughput, why the KV cache sets how many users fit, and what quantization, paged memory and speculative decoding change."
