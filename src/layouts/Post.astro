@@ -20,6 +20,15 @@ const byline = date.toLocaleDateString("en-GB", { day: "2-digit", month: "short"
 const pad = (n: number) => String(n).padStart(2, "0");
 const prev = position > 1 ? seriesPosts[position - 2] : undefined;
 const next = position > 0 && position < seriesPosts.length ? seriesPosts[position] : undefined;
+// A series split into parts: the first post links back to the previous part's
+// last post and the last post links on to the next part's first.
+const thisSeries = allSeries.find((s) => s.key === post.data.series);
+const prevPart = allSeries.find((s) => s.next && s.next === post.data.series);
+const nextPart = thisSeries?.next ? allSeries.find((s) => s.key === thisSeries.next) : undefined;
+const partPosts = async (key: string) =>
+  (await getCollection("blog", ({ data }) => data.published && data.series === key)).sort((a, b) => a.data.series_order - b.data.series_order);
+const prevPartPost = position === 1 && prevPart ? (await partPosts(prevPart.key)).at(-1) : undefined;
+const nextPartPost = position > 0 && position === seriesPosts.length && nextPart ? (await partPosts(nextPart.key))[0] : undefined;
 // Paper reviews that go deeper: those this post links to and those that link back to it, as optional reading.
 const postPath = `/blog/${post.id}/`;
 const linked = new Set([...(post.body ?? "").matchAll(/\/paper-reviews\/([a-z0-9-]+)\//g)].map((m) => m[1]));
@@ -69,10 +78,12 @@ import SignatureMark from "../components/SignatureMark.astro";
         </ul>
       </aside>
     )}
-    {(prev || next) && (
+    {(prev || next || prevPartPost || nextPartPost) && (
       <nav class="blog-prev-next" aria-label="Series navigation">
-        {prev ? <a class="blog-prev-next__prev" href={`/blog/${prev.id}/`} rel="prev"><span>← Previous · Post {position - 1}</span>{prev.data.title}</a> : <span />}
-        {next && <a class="blog-prev-next__next" href={`/blog/${next.id}/`} rel="next"><span>Next · Post {position + 1} →</span>{next.data.title}</a>}
+        {prev ? <a class="blog-prev-next__prev" href={`/blog/${prev.id}/`} rel="prev"><span>← Previous · Post {position - 1}</span>{prev.data.title}</a>
+          : prevPartPost ? <a class="blog-prev-next__prev" href={`/blog/${prevPartPost.id}/`} rel="prev"><span>← Previous part · {prevPart!.topic}</span>{prevPartPost.data.title}</a> : <span />}
+        {next ? <a class="blog-prev-next__next" href={`/blog/${next.id}/`} rel="next"><span>Next · Post {position + 1} →</span>{next.data.title}</a>
+          : nextPartPost && <a class="blog-prev-next__next" href={`/blog/${nextPartPost.id}/`} rel="next"><span>Next part · {nextPart!.topic} →</span>{nextPartPost.data.title}</a>}
       </nav>
     )}
     <p class="post-seal"><SignatureMark class="post-seal__mark" label="Richard Cheam" painted /></p>

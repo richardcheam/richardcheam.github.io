@@ -3,8 +3,8 @@ title: "Data parallelism: one update computed on many GPUs"
 date: 2026-11-10
 category: deep-learning
 read_time: "13 min"
-series_order: 9
-series: model-development
+series_order: 2
+series: training-at-scale
 featured: false
 published: true
 excerpt: "The simplest way to use many GPUs is to give each a copy of the model and a different slice of the batch, then average the gradients. Learn what has to stay identical for that to compute the same update as one big GPU, why averaging per-GPU losses quietly changes the objective, and what the gradient all-reduce costs."

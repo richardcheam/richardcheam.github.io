@@ -47,7 +47,7 @@ for (const route of routes) {
 }
 // The old hub only forwards to the blog series; nothing links to it any more.
 const hub = await readFile('dist/model-development/index.html', 'utf8');
-if (!hub.includes('url=/blog/?series=model-development') || !hub.includes('noindex')) errors.push('/model-development/ must redirect to the blog series');
+if (!hub.includes('url=/blog/?series=pretraining') || !hub.includes('noindex')) errors.push('/model-development/ must redirect to the blog series');
 const sitemap = await readFile('dist/sitemap.xml', 'utf8');
 if (sitemap.includes(`${origin}/model-development/<`)) errors.push('/model-development/ redirect must stay out of the sitemap');
 for (const route of routes) if (!sitemap.includes(origin + route)) errors.push(`${route}: missing from sitemap`);

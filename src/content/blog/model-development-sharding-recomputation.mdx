@@ -3,8 +3,8 @@ title: "Sharding and recomputation: making a model fit"
 date: 2026-11-10
 category: deep-learning
 read_time: "14 min"
-series_order: 10
-series: model-development
+series_order: 3
+series: training-at-scale
 featured: false
 published: true
 excerpt: "Data parallelism gives every GPU a full copy of the training state, which stops working once that state outgrows a GPU. Learn how ZeRO and FSDP shard weights, gradients and optimizer state across data-parallel GPUs, what each stage saves and costs in communication, and how activation recomputation trades compute for memory."
